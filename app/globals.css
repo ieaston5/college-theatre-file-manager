@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f2f1ff;
+  --color-brand-100: #e6e4ff;
+  --color-brand-200: #cfcbff;
+  --color-brand-300: #ada5ff;
+  --color-brand-400: #8a7bfb;
+  --color-brand-500: #6d55f2;
+  --color-brand-600: #5b3de0;
+  --color-brand-700: #4c30bd;
+  --color-brand-800: #402b9a;
+  --color-brand-900: #36277b;
+
+  --color-gold-100: #fbf3e0;
+  --color-gold-300: #ecd39a;
+  --color-gold-500: #c8963e;
+  --color-gold-700: #9a6f24;
+
+  --color-ink-50: #f7f7f9;
+  --color-ink-100: #eeeef2;
+  --color-ink-200: #dedee6;
+  --color-ink-300: #c3c3d0;
+  --color-ink-400: #9494a6;
+  --color-ink-500: #6f6f82;
+  --color-ink-600: #545466;
+  --color-ink-700: #414150;
+  --color-ink-800: #2a2a36;
+  --color-ink-900: #1b1b24;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-ink-50);
+    color: var(--color-ink-900);
+    -webkit-font-smoothing: antialiased;
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+      sans-serif;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-200);
+  }
+
+  /* Consistent focus ring on everything interactive. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+}
+
+@utility card {
+  background-color: white;
+  border: 1px solid var(--color-ink-200);
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 2px rgb(27 27 36 / 0.04);
+}
+
+/* Thin scrollbars inside scrollable panels. */
+@utility scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-300) transparent;
+}

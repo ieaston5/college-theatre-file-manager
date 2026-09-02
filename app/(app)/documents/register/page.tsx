@@ -1,0 +1,61 @@
+import { requireRole } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { getSetupState } from "@/lib/config";
+import { env } from "@/lib/env";
+import { DocumentRegisterForm } from "@/components/forms/document-register-form";
+import { Banner, PageHeader } from "@/components/ui";
+
+export default async function RegisterDocumentPage() {
+  await requireRole("BOARD");
+  const setup = await getSetupState();
+
+  const [categories, productions] = await Promise.all([
+    prisma.category.findMany({
+      where: { archived: false },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    }),
+    prisma.production.findMany({
+      where: { status: { not: "ARCHIVED" } },
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    }),
+  ]);
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        eyebrow="Add existing"
+        title="Put something that already exists on the hub"
+        description="For the spreadsheets and docs that are already floating around Drive, plus anything that lives elsewhere — a website, a form, a Dropbox folder."
+      />
+
+      <Banner tone="sky" icon="info" title="What this does and does not do">
+        The hub records where the file lives and what it is for, so people can find it. It does not
+        take ownership of it. If you want it owned by the club long term, create a fresh document
+        here and copy the contents across.
+      </Banner>
+
+      <DocumentRegisterForm
+        categories={categories.map((category) => ({
+          id: category.id,
+          name: category.name,
+          scope: category.scope,
+          defaultDocType: category.defaultDocType,
+          defaultVisibility: category.defaultVisibility,
+          color: category.color,
+          icon: category.icon,
+          description: category.description,
+        }))}
+        productions={productions.map((production) => ({
+          id: production.id,
+          name: production.name,
+          season: production.season,
+          status: production.status,
+          abbreviation: production.abbreviation,
+        }))}
+        groupEmail={setup.config.groupEmail}
+        hubAccountEmail={setup.account?.email ?? null}
+        driveMode={env.driveMode}
+      />
+    </div>
+  );
+}

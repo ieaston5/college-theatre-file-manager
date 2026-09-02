@@ -1,0 +1,22 @@
+node_modules/
+.next/
+.next-dev/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets — never commit
+.env
+.env.local
+.env*.local
+
+# Local database
+prisma/*.db
+prisma/*.db-journal
+
+# Simulated Drive state (DRIVE_MODE=mock)
+.mock-drive/
+
+.DS_Store
+*.log

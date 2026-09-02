@@ -1,0 +1,210 @@
+/**
+ * Enum-ish vocabularies. Prisma cannot express enums on SQLite, so these are
+ * the single source of truth for the string columns in the schema.
+ */
+
+// --- Roles ------------------------------------------------------------------
+
+export const ROLES = ["ADMIN", "BOARD", "MEMBER"] as const;
+export type Role = (typeof ROLES)[number];
+
+export const ROLE_META: Record<Role, { label: string; rank: number; blurb: string }> = {
+  ADMIN: {
+    label: "Admin",
+    rank: 3,
+    blurb: "Everything a board member can do, plus members, categories, productions and the Google connection.",
+  },
+  BOARD: {
+    label: "Board",
+    rank: 2,
+    blurb: "Create and edit documents, see everything shared with the board.",
+  },
+  MEMBER: {
+    label: "Member",
+    rank: 1,
+    blurb: "Read-only access to documents shared with the board.",
+  },
+};
+
+export function atLeast(role: string | undefined | null, min: Role): boolean {
+  if (!role || !isRole(role)) return false;
+  return ROLE_META[role].rank >= ROLE_META[min].rank;
+}
+
+export function isRole(value: string): value is Role {
+  return (ROLES as readonly string[]).includes(value);
+}
+
+// --- User status ------------------------------------------------------------
+
+export const USER_STATUSES = ["INVITED", "ACTIVE", "DISABLED"] as const;
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+export const USER_STATUS_META: Record<UserStatus, { label: string; tone: Tone }> = {
+  INVITED: { label: "Invited", tone: "amber" },
+  ACTIVE: { label: "Active", tone: "green" },
+  DISABLED: { label: "Disabled", tone: "slate" },
+};
+
+// --- Document types ---------------------------------------------------------
+
+export const CREATABLE_DOC_TYPES = ["DOC", "SHEET", "SLIDES"] as const;
+export type CreatableDocType = (typeof CREATABLE_DOC_TYPES)[number];
+
+export const DOC_TYPES = [
+  "DOC",
+  "SHEET",
+  "SLIDES",
+  "FORM",
+  "PDF",
+  "FOLDER",
+  "LINK",
+  "OTHER",
+] as const;
+export type DocType = (typeof DOC_TYPES)[number];
+
+export const DOC_TYPE_META: Record<
+  DocType,
+  { label: string; mimeType: string | null; icon: string; color: string; short: string }
+> = {
+  DOC: {
+    label: "Google Doc",
+    mimeType: "application/vnd.google-apps.document",
+    icon: "doc",
+    color: "#3b82f6",
+    short: "Doc",
+  },
+  SHEET: {
+    label: "Google Sheet",
+    mimeType: "application/vnd.google-apps.spreadsheet",
+    icon: "sheet",
+    color: "#16a34a",
+    short: "Sheet",
+  },
+  SLIDES: {
+    label: "Google Slides",
+    mimeType: "application/vnd.google-apps.presentation",
+    icon: "slides",
+    color: "#f59e0b",
+    short: "Slides",
+  },
+  FORM: {
+    label: "Google Form",
+    mimeType: "application/vnd.google-apps.form",
+    icon: "form",
+    color: "#7c3aed",
+    short: "Form",
+  },
+  PDF: { label: "PDF", mimeType: "application/pdf", icon: "pdf", color: "#dc2626", short: "PDF" },
+  FOLDER: {
+    label: "Drive folder",
+    mimeType: "application/vnd.google-apps.folder",
+    icon: "folder",
+    color: "#64748b",
+    short: "Folder",
+  },
+  LINK: { label: "External link", mimeType: null, icon: "link", color: "#0ea5e9", short: "Link" },
+  OTHER: { label: "File", mimeType: null, icon: "file", color: "#64748b", short: "File" },
+};
+
+export function docTypeFromMime(mimeType: string | null | undefined): DocType {
+  if (!mimeType) return "OTHER";
+  const match = (Object.entries(DOC_TYPE_META) as [DocType, { mimeType: string | null }][]).find(
+    ([, meta]) => meta.mimeType === mimeType,
+  );
+  return match ? match[0] : "OTHER";
+}
+
+// --- Visibility -------------------------------------------------------------
+
+export const VISIBILITIES = ["PRIVATE", "BOARD"] as const;
+export type Visibility = (typeof VISIBILITIES)[number];
+
+export const VISIBILITY_META: Record<
+  Visibility,
+  { label: string; blurb: string; icon: string; tone: Tone }
+> = {
+  PRIVATE: {
+    label: "Private",
+    blurb: "Only you (and anyone you add by hand). Never listed on the dashboard for other members and never shared with the group in Google Drive.",
+    icon: "lock",
+    tone: "amber",
+  },
+  BOARD: {
+    label: "Board",
+    blurb: "Listed on the dashboard for everyone with hub access and shared with the board's Google Group in Drive. Not visible to anyone outside the group.",
+    icon: "users",
+    tone: "indigo",
+  },
+};
+
+// --- Document source & status ----------------------------------------------
+
+export const DOC_SOURCES = ["CREATED", "REGISTERED", "LINK"] as const;
+export type DocSource = (typeof DOC_SOURCES)[number];
+
+export const DOC_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
+export type DocStatus = (typeof DOC_STATUSES)[number];
+
+// --- Productions ------------------------------------------------------------
+
+export const PRODUCTION_STATUSES = ["PLANNING", "ACTIVE", "CLOSED", "ARCHIVED"] as const;
+export type ProductionStatus = (typeof PRODUCTION_STATUSES)[number];
+
+export const PRODUCTION_STATUS_META: Record<
+  ProductionStatus,
+  { label: string; tone: Tone; blurb: string }
+> = {
+  PLANNING: { label: "In planning", tone: "sky", blurb: "Announced, not yet in rehearsal." },
+  ACTIVE: { label: "In production", tone: "green", blurb: "Currently rehearsing or running." },
+  CLOSED: { label: "Closed", tone: "slate", blurb: "Finished; paperwork still being wrapped up." },
+  ARCHIVED: { label: "Archived", tone: "slate", blurb: "Hidden from the main dashboard." },
+};
+
+// --- Category scope ---------------------------------------------------------
+
+export const CATEGORY_SCOPES = ["PRODUCTION", "STANDING", "BOTH"] as const;
+export type CategoryScope = (typeof CATEGORY_SCOPES)[number];
+
+export const CATEGORY_SCOPE_META: Record<CategoryScope, { label: string; blurb: string }> = {
+  PRODUCTION: {
+    label: "Per production",
+    blurb: "Documents here must be attached to a show.",
+  },
+  STANDING: {
+    label: "Organisation-wide",
+    blurb: "Documents here are not tied to any one show.",
+  },
+  BOTH: { label: "Either", blurb: "A show is optional." },
+};
+
+// --- Access levels ----------------------------------------------------------
+
+export const ACCESS_LEVELS = ["READER", "WRITER"] as const;
+export type AccessLevel = (typeof ACCESS_LEVELS)[number];
+
+// --- Shared UI tones --------------------------------------------------------
+
+export type Tone = "indigo" | "green" | "amber" | "rose" | "sky" | "slate" | "violet";
+
+export const DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/documents",
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/presentations",
+];
+
+/** Placeholders replaced inside template copies. */
+export const TEMPLATE_TOKENS = [
+  "{{TITLE}}",
+  "{{PRODUCTION}}",
+  "{{CATEGORY}}",
+  "{{SEASON}}",
+  "{{OWNER}}",
+  "{{DATE}}",
+  "{{ORG}}",
+] as const;
+
+export const LOGIN_SCOPES = ["openid", "email", "profile"];
+
+export const STANDING_BUCKET = "Organisation-wide";

@@ -1,0 +1,257 @@
+// Penn Players Hub — data model
+//
+// Provider notes: SQLite is used for the private/local environment. Prisma does
+// not support enums or native JSON on SQLite, so every enum-ish column is a
+// String validated by zod in lib/constants.ts, and structured payloads are
+// stored as JSON text. That keeps the schema portable to Postgres (Pass 3)
+// without a rewrite.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// People & access
+// ---------------------------------------------------------------------------
+
+/// A person allowed to use the hub. A row must exist before someone can sign
+/// in — that is the access gate. `status` INVITED means "row created by an
+/// admin, has never signed in yet".
+model User {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String?
+  position    String? // board position, e.g. "Production Manager"
+  avatarUrl   String?
+  role        String    @default("MEMBER") // ADMIN | BOARD | MEMBER
+  status      String    @default("INVITED") // INVITED | ACTIVE | DISABLED
+  googleSub   String?   @unique
+  invitedById String?
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  documents      Document[]      @relation("DocumentCreator")
+  shares         DocumentShare[] @relation("ShareGrantee")
+  grantedShares  DocumentShare[] @relation("ShareGrantor")
+  auditLogs      AuditLog[]
+  connectedDrive DriveAccount[]
+
+  @@index([role])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Organisation of information
+// ---------------------------------------------------------------------------
+
+/// A show. Documents optionally hang off one of these.
+model Production {
+  id            String    @id @default(cuid())
+  name          String
+  slug          String    @unique
+  abbreviation  String? // used in Drive file names, e.g. "URINETOWN"
+  season        String? // e.g. "Fall 2026"
+  status        String    @default("PLANNING") // PLANNING | ACTIVE | CLOSED | ARCHIVED
+  venue         String?
+  synopsis      String?
+  opensOn       DateTime?
+  closesOn      DateTime?
+  color         String? // hex, for dashboard accents
+  driveFolderId String?
+  sortOrder     Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([status])
+}
+
+/// A kind of information — "Budgets", "Rehearsal Schedules", "Contact Sheets".
+/// This is the primary axis of the dashboard.
+model Category {
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  description       String?
+  icon              String   @default("folder") // key into components/icons.tsx
+  color             String   @default("#6366f1")
+  /// PRODUCTION = always tied to a show, STANDING = org-wide, BOTH = either.
+  scope             String   @default("BOTH")
+  defaultDocType    String? // DOC | SHEET | SLIDES
+  defaultVisibility String   @default("BOARD") // PRIVATE | BOARD
+  folderName        String? // Drive subfolder name; defaults to `name`
+  sortOrder         Int      @default(0)
+  archived          Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  documents Document[]
+  templates Template[]
+
+  @@index([archived])
+}
+
+/// A Google file that new documents can be copied from.
+model Template {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  docType      String // DOC | SHEET | SLIDES
+  googleFileId String
+  categoryId   String?
+  sortOrder    Int      @default(0)
+  archived     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  documents Document[]
+}
+
+// ---------------------------------------------------------------------------
+// Documents
+// ---------------------------------------------------------------------------
+
+model Document {
+  id          String  @id @default(cuid())
+  title       String
+  description String?
+
+  /// DOC | SHEET | SLIDES | FORM | PDF | FOLDER | OTHER | LINK
+  docType String
+  /// CREATED (born in the hub) | REGISTERED (pre-existing Drive file) | LINK (non-Drive URL)
+  source  String  @default("CREATED")
+  /// PRIVATE = creator only. BOARD = shared with the Google Group.
+  visibility  String  @default("BOARD")
+  status      String  @default("ACTIVE") // ACTIVE | ARCHIVED
+  pinned      Boolean @default(false)
+
+  googleFileId      String?   @unique
+  webViewLink       String?
+  driveFolderId     String?
+  driveOwnerEmail   String?
+  googleModifiedAt  DateTime?
+  lastSyncedAt      DateTime?
+  /// Free-form JSON text of extra fields captured at creation time.
+  metadata          String?
+
+  categoryId   String
+  productionId String?
+  creatorId    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category   Category        @relation(fields: [categoryId], references: [id])
+  production Production?     @relation(fields: [productionId], references: [id], onDelete: SetNull)
+  creator    User            @relation("DocumentCreator", fields: [creatorId], references: [id])
+  tags       Tag[]
+  shares     DocumentShare[]
+
+  @@index([categoryId])
+  @@index([productionId])
+  @@index([creatorId])
+  @@index([visibility])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+/// An individual grant on top of a document's visibility. Used to let a
+/// private document be shown to one or two specific people.
+model DocumentShare {
+  id           String   @id @default(cuid())
+  documentId   String
+  userId       String
+  grantedById  String?
+  accessLevel  String   @default("READER") // READER | WRITER
+  drivePermId  String?
+  createdAt    DateTime @default(now())
+
+  document  Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user      User     @relation("ShareGrantee", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User?    @relation("ShareGrantor", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@unique([documentId, userId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Google connection & configuration
+// ---------------------------------------------------------------------------
+
+/// OAuth credentials for the dedicated Google account that owns every document
+/// the hub creates. Refresh tokens are encrypted at rest (lib/crypto.ts).
+/// Exactly one row, id = "singleton".
+model DriveAccount {
+  id                 String    @id @default("singleton")
+  email              String
+  name               String?
+  accessToken        String? // encrypted
+  refreshToken       String? // encrypted
+  expiresAt          DateTime?
+  scope              String?
+  rootFolderId       String?
+  productionsFolderId String?
+  standingFolderId   String?
+  connectedByUserId  String?
+  connectedAt        DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  connectedBy User? @relation(fields: [connectedByUserId], references: [id], onDelete: SetNull)
+}
+
+/// Single-row app configuration, id = "singleton".
+model OrgConfig {
+  id             String   @id @default("singleton")
+  orgName        String   @default("Penn Players")
+  groupEmail     String? // the Google Group that "public" documents are shared with
+  groupCanEdit   Boolean  @default(true)
+  /// Tokens: {production} {category} {title} {date} {season}
+  namingTemplate String   @default("[{production}] {title} — {category}")
+  driveRootName  String   @default("Penn Players Hub")
+  currentSeason  String?
+  stampDocHeader Boolean  @default(true)
+  updatedAt      DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorEmail String?
+  action     String // e.g. "document.create"
+  targetType String? // "Document" | "User" | ...
+  targetId   String?
+  summary    String
+  metadata   String? // JSON text
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+/// Short-lived OAuth state, so the callback can verify the round trip.
+model OAuthState {
+  state     String   @id
+  purpose   String // "login" | "drive"
+  redirect  String?
+  createdAt DateTime @default(now())
+}
