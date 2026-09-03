@@ -41,31 +41,82 @@ async function tagIds(input: string | undefined): Promise<Array<{ id: string }>>
   return tags.map((tag) => ({ id: tag.id }));
 }
 
-async function sharingPlanFor(
-  doc: Pick<Document, "id" | "visibility" | "source" | "creatorId">,
-): Promise<SharingPlan> {
+/**
+ * Everyone on a production whose role covers this category. This is what turns
+ * "the company can see the script" into actual Drive permissions — company
+ * members are not in the board's Google Group, so they are shared with by
+ * name, as viewers.
+ */
+async function companyRecipients(doc: {
+  visibility: string;
+  categoryId: string;
+  productionId?: string | null;
+}): Promise<string[]> {
+  if (doc.visibility !== "COMPANY") return [];
+
+  const members = await prisma.productionMember.findMany({
+    where: {
+      status: "ACTIVE",
+      user: { status: { not: "DISABLED" } },
+      ...(doc.productionId ? { productionId: doc.productionId } : {}),
+      role: { archived: false, categories: { some: { id: doc.categoryId } } },
+    },
+    select: { user: { select: { email: true } } },
+  });
+  return [...new Set(members.map((member) => member.user.email))];
+}
+
+/**
+ * "Company" is only available where an admin has opened the category up to
+ * companies. Enforced here as well as in the form, so an old page or a hand
+ * made request cannot put a budget in front of the cast.
+ */
+function assertVisibilityAllowed(
+  category: { name: string; companyVisible: boolean },
+  visibility: string,
+) {
+  if (visibility === "COMPANY" && !category.companyVisible) {
+    throw new Error(
+      `${category.name} is not shared with production companies. Pick Board or Private — or ask an admin to open the category up to companies.`,
+    );
+  }
+}
+
+type SharableDocument = Pick<
+  Document,
+  "id" | "visibility" | "source" | "creatorId" | "categoryId" | "productionId"
+>;
+
+async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   const config = await getConfig();
-  const [creator, shares] = await Promise.all([
+  const [creator, shares, company] = await Promise.all([
     prisma.user.findUnique({ where: { id: doc.creatorId } }),
     prisma.documentShare.findMany({ where: { documentId: doc.id }, include: { user: true } }),
+    companyRecipients(doc),
   ]);
+
+  const extra = shares.map((share) => ({
+    email: share.user.email,
+    level: share.accessLevel as "READER" | "WRITER",
+  }));
+  for (const email of company) {
+    if (extra.some((entry) => entry.email.toLowerCase() === email.toLowerCase())) continue;
+    extra.push({ email, level: "READER" });
+  }
 
   return {
     visibility: doc.visibility as Visibility,
     creatorEmail: creator?.email ?? "",
     groupEmail: config.groupEmail,
     groupCanEdit: config.groupCanEdit,
-    extra: shares.map((share) => ({
-      email: share.user.email,
-      level: share.accessLevel as "READER" | "WRITER",
-    })),
+    extra,
     strategy: doc.source === "CREATED" ? "reconcile" : "additive",
   };
 }
 
 /** Push a document's visibility + share list into Drive. */
 export async function syncSharing(
-  doc: Pick<Document, "id" | "visibility" | "source" | "creatorId" | "googleFileId" | "docType">,
+  doc: SharableDocument & Pick<Document, "googleFileId" | "docType">,
 ): Promise<SharingResult> {
   if (!doc.googleFileId || doc.docType === "LINK") {
     return { granted: [], revoked: [], warnings: [] };
@@ -124,6 +175,7 @@ export async function createDocument(
     throw new Error(`${category.name} is an organisation-wide category — leave the production blank.`);
   }
   if (input.productionId && !production) throw new Error("That production no longer exists.");
+  assertVisibilityAllowed(category, input.visibility);
 
   const warnings: string[] = [];
 
@@ -230,6 +282,52 @@ export async function createDocument(
   }
 }
 
+/**
+ * Re-push sharing for everything a production's company can see. Called when
+ * somebody joins or leaves a production, or when a role's categories change —
+ * without this, a new cast member would be on the hub but locked out of the
+ * files in Drive.
+ *
+ * Organisation-wide company documents are included, because a first
+ * membership is what unlocks the handbooks.
+ */
+export async function resyncCompanySharing(options: {
+  productionId?: string;
+}): Promise<{ total: number; failures: number }> {
+  const documents = await prisma.document.findMany({
+    where: {
+      visibility: "COMPANY",
+      status: "ACTIVE",
+      googleFileId: { not: null },
+      ...(options.productionId
+        ? { OR: [{ productionId: options.productionId }, { productionId: null }] }
+        : {}),
+    },
+    select: {
+      id: true,
+      visibility: true,
+      source: true,
+      creatorId: true,
+      categoryId: true,
+      productionId: true,
+      googleFileId: true,
+      docType: true,
+    },
+    take: 500,
+  });
+
+  let failures = 0;
+  for (const document of documents) {
+    try {
+      await syncSharing(document);
+    } catch (error) {
+      failures += 1;
+      console.error("[sharing] could not resync", document.id, error);
+    }
+  }
+  return { total: documents.length, failures };
+}
+
 // ---------------------------------------------------------------------------
 // Uploads
 // ---------------------------------------------------------------------------
@@ -264,6 +362,7 @@ export async function recordUploadedDocument(
 ): Promise<DocumentServiceResult> {
   const category = await prisma.category.findUnique({ where: { id: input.categoryId } });
   if (!category) throw new Error("That category no longer exists.");
+  assertVisibilityAllowed(category, input.visibility);
   const production = input.productionId
     ? await prisma.production.findUnique({ where: { id: input.productionId } })
     : null;
@@ -392,6 +491,7 @@ export async function registerDocument(
   if (category.scope === "PRODUCTION" && !production) {
     throw new Error(`Documents in ${category.name} have to be attached to a production.`);
   }
+  assertVisibilityAllowed(category, input.visibility);
 
   const warnings: string[] = [];
   const provider = driveProvider();
@@ -515,6 +615,7 @@ export async function updateDocument(
   if (category.scope === "PRODUCTION" && !production) {
     throw new Error(`Documents in ${category.name} have to be attached to a production.`);
   }
+  assertVisibilityAllowed(category, input.visibility);
 
   const warnings: string[] = [];
   const movedShelf =

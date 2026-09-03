@@ -298,7 +298,7 @@ export class MockDriveProvider implements DriveProvider {
 
     const desired = new Map<string, "reader" | "writer">();
     desired.set(plan.creatorEmail.toLowerCase(), "writer");
-    if (plan.visibility === "BOARD" && plan.groupEmail) {
+    if (plan.visibility !== "PRIVATE" && plan.groupEmail) {
       desired.set(plan.groupEmail.toLowerCase(), plan.groupCanEdit ? "writer" : "reader");
     }
     for (const extra of plan.extra ?? []) {

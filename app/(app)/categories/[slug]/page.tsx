@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { canCreateDocuments, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getViewerContext, productionFilterFor, visibleCategoryIds } from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
 import { DocumentFilters } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -21,12 +22,18 @@ export default async function CategoryPage({
   const { slug } = await params;
   const query = await searchParams;
 
+  const viewer = await getViewerContext(user);
   const category = await prisma.category.findUnique({ where: { slug } });
   if (!category) notFound();
 
+  // Company members can only reach the categories their role covers.
+  const allowed = visibleCategoryIds(viewer);
+  if (allowed !== null && !allowed.includes(category.id)) notFound();
+
   const [{ documents, total }, productions] = await Promise.all([
-    queryDocuments(user, query, { extra: { categoryId: category.id }, take: 100 }),
+    queryDocuments(viewer, query, { extra: { categoryId: category.id }, take: 100 }),
     prisma.production.findMany({
+      where: productionFilterFor(viewer),
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
       select: { name: true, slug: true },
     }),

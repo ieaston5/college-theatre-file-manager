@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { canCreateDocuments, isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getSetupState } from "@/lib/config";
-import { visibleDocumentsWhere } from "@/lib/access";
+import { getConfig, getSetupState } from "@/lib/config";
+import { categoryFilterFor, getViewerContext, productionFilterFor, visibleDocumentsWhere } from "@/lib/access";
 import { env } from "@/lib/env";
+import { CompanyDashboard } from "@/components/company-dashboard";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
 import { Icon } from "@/components/icons";
 import { Badge, Banner, Card, EmptyState, PageHeader, SectionHeader, Stat, buttonClass } from "@/components/ui";
@@ -18,7 +19,18 @@ const LIST_INCLUDE = {
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const where = visibleDocumentsWhere(user);
+  const viewer = await getViewerContext(user);
+
+  // Prefer the name as entered; fall back to the local part of the email.
+  const rawName = user.name?.trim() || user.email.split("@")[0].replace(/[._-]+/g, " ");
+  const greeting = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+
+  if (!viewer.isBoard) {
+    const config = await getConfig();
+    return <CompanyDashboard viewer={viewer} orgName={config.orgName} greeting={greeting} />;
+  }
+
+  const where = visibleDocumentsWhere(viewer);
   const setup = await getSetupState();
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
@@ -35,11 +47,11 @@ export default async function DashboardPage() {
     sampleCount,
   ] = await Promise.all([
     prisma.category.findMany({
-      where: { archived: false },
+      where: categoryFilterFor(viewer),
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.production.findMany({
-      where: { status: { in: ["ACTIVE", "PLANNING"] } },
+      where: { ...productionFilterFor(viewer), status: { in: ["ACTIVE", "PLANNING"] } },
       orderBy: [{ status: "asc" }, { opensOn: "asc" }],
       take: 4,
     }),
@@ -83,10 +95,6 @@ export default async function DashboardPage() {
   const countByProduction = new Map(
     productionCounts.map((row) => [row.productionId ?? "", row._count._all]),
   );
-
-  // Prefer the name as entered; fall back to the local part of the email.
-  const rawName = user.name?.trim() || user.email.split("@")[0].replace(/[._-]+/g, " ");
-  const greeting = rawName.charAt(0).toUpperCase() + rawName.slice(1);
 
   return (
     <div className="space-y-8">

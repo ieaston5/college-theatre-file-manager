@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth";
-import { canViewDocument } from "@/lib/access";
+import { canViewDocument, getViewerContext } from "@/lib/access";
 import { readMockBlob } from "@/lib/google/mock";
 
 /**
@@ -28,7 +28,8 @@ export async function GET(
   });
   if (!document) return NextResponse.json({ error: "Unknown file." }, { status: 404 });
 
-  if (!canViewDocument(user, document)) {
+  const viewer = await getViewerContext(user);
+  if (!canViewDocument(viewer, document)) {
     return NextResponse.json({ error: "Unknown file." }, { status: 404 });
   }
 

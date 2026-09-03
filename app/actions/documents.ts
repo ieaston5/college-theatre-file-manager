@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { assertRole, getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { canDeleteDocument, canEditDocument, canManageShares, canViewDocument } from "@/lib/access";
+import {
+  canDeleteDocument,
+  canEditDocument,
+  canManageShares,
+  canViewDocument,
+  getViewerContext,
+} from "@/lib/access";
 import {
   createDocument,
   registerDocument,
@@ -36,10 +42,11 @@ async function editableDocument(id: string) {
     where: { id },
     include: { shares: { select: { userId: true } } },
   });
-  if (!document || !canViewDocument(user, document)) {
+  const viewer = await getViewerContext(user);
+  if (!document || !canViewDocument(viewer, document)) {
     throw new Error("That document is not available to you.");
   }
-  if (!canEditDocument(user, document)) {
+  if (!canEditDocument(viewer, document)) {
     throw new Error("Only the person who filed this document (or an admin) can change it.");
   }
   return { user, document };
@@ -166,7 +173,8 @@ export async function syncDocumentAction(form: FormData) {
     where: { id },
     include: { shares: { select: { userId: true } } },
   });
-  if (!document || !canViewDocument(user, document)) return;
+  const viewer = await getViewerContext(user);
+  if (!document || !canViewDocument(viewer, document)) return;
   await syncDocument(user, id);
   revalidatePath(`/documents/${id}`);
 }
@@ -180,7 +188,8 @@ export async function deleteDocumentAction(form: FormData) {
     where: { id },
     include: { shares: { select: { userId: true } } },
   });
-  if (!document || !canViewDocument(user, document) || !canDeleteDocument(user, document)) {
+  const viewer = await getViewerContext(user);
+  if (!document || !canViewDocument(viewer, document) || !canDeleteDocument(viewer, document)) {
     throw new Error("That document is not yours to remove.");
   }
   await removeDocument(user, id, trashInDrive);
@@ -208,7 +217,8 @@ export async function shareDocumentAction(
       where: { id: parsed.data.documentId },
       include: { shares: { select: { userId: true } } },
     });
-    if (!document || !canViewDocument(user, document) || !canManageShares(user, document)) {
+    const viewer = await getViewerContext(user);
+    if (!document || !canViewDocument(viewer, document) || !canManageShares(viewer, document)) {
       return { error: "You cannot change who sees that document." };
     }
 
@@ -229,7 +239,8 @@ export async function unshareDocumentAction(form: FormData) {
     where: { id: documentId },
     include: { shares: { select: { userId: true } } },
   });
-  if (!document || !canManageShares(user, document)) return;
+  const viewer = await getViewerContext(user);
+  if (!document || !canManageShares(viewer, document)) return;
   await unshareDocument(user, documentId, userId);
   revalidatePath(`/documents/${documentId}`);
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { canCreateDocuments, isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { categoryFilterFor, getViewerContext, visibleProductionIds } from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
 import { DocumentFilters } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -21,16 +22,33 @@ export default async function ProductionPage({
   const { slug } = await params;
   const query = await searchParams;
 
+  const viewer = await getViewerContext(user);
   const production = await prisma.production.findUnique({ where: { slug } });
   if (!production) notFound();
 
-  const [{ documents, total }, categories] = await Promise.all([
-    queryDocuments(user, query, { extra: { productionId: production.id }, take: 200 }),
+  // Company members only see the shows they are actually on.
+  const allowedProductions = visibleProductionIds(viewer);
+  if (allowedProductions !== null && !allowedProductions.includes(production.id)) notFound();
+
+  const [{ documents, total }, categories, companyCount, companyByRole] = await Promise.all([
+    queryDocuments(viewer, query, { extra: { productionId: production.id }, take: 200 }),
     prisma.category.findMany({
-      where: { archived: false, scope: { in: ["PRODUCTION", "BOTH"] } },
+      where: { ...categoryFilterFor(viewer), scope: { in: ["PRODUCTION", "BOTH"] } },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
+    prisma.productionMember.count({ where: { productionId: production.id, status: "ACTIVE" } }),
+    prisma.productionMember.groupBy({
+      by: ["roleId"],
+      where: { productionId: production.id, status: "ACTIVE" },
+      _count: { _all: true },
+    }),
   ]);
+
+  const roleNames = await prisma.productionRole.findMany({
+    where: { id: { in: companyByRole.map((row) => row.roleId).filter((id): id is string => Boolean(id)) } },
+    select: { id: true, name: true, sortOrder: true },
+    orderBy: { sortOrder: "asc" },
+  });
 
   const meta = PRODUCTION_STATUS_META[production.status as ProductionStatus];
   const byCategory = new Map<string, DocumentListItem[]>();
@@ -51,6 +69,13 @@ export default async function ProductionPage({
         description={production.synopsis ?? undefined}
         action={
           <>
+            <Link
+              href={`/productions/${production.slug}/company`}
+              className={buttonClass("secondary")}
+            >
+              <Icon name="users" className="size-4" />
+              Company{companyCount > 0 ? ` (${companyCount})` : ""}
+            </Link>
             {isAdmin(user) ? (
               <Link
                 href={`/admin/productions?edit=${production.id}`}
@@ -95,7 +120,7 @@ export default async function ProductionPage({
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Documents" value={total} icon="folder" />
         <Stat label="Categories used" value={byCategory.size} icon="grid" />
         <Stat
@@ -103,6 +128,24 @@ export default async function ProductionPage({
           value={missing.length}
           icon="alert"
           hint={missing.length > 0 ? "Categories with nothing filed" : "Everything has something"}
+        />
+        <Stat
+          label="Company"
+          value={companyCount}
+          icon="users"
+          href={`/productions/${production.slug}/company`}
+          hint={
+            roleNames.length > 0
+              ? roleNames
+                  .map(
+                    (role) =>
+                      `${
+                        companyByRole.find((row) => row.roleId === role.id)?._count._all ?? 0
+                      } ${role.name.toLowerCase()}`,
+                  )
+                  .join(" · ")
+              : "Nobody added yet"
+          }
         />
       </div>
 

@@ -21,29 +21,67 @@ while `ALLOW_DEV_LOGIN=true`). `ieaston@upenn.edu` is seeded as the admin.
 
 ## What it does
 
-**Creating.** A single form: name, type (Doc / Sheet / Slides), category,
-production, who can see it. From that the hub
+**Creating.** A single form: name, type (Doc / Sheet / Slides / **upload a
+file**), category, production, who can see it. From that the hub
 
 - names the file from a rule you control, e.g. `[URINETOWN] Running budget — Budgets & finance`
 - creates it in `Penn Players Hub / Productions / Urinetown / Budgets & finance`
 - optionally copies one of your templates and fills in `{{TITLE}}`, `{{PRODUCTION}}`, `{{CATEGORY}}`, `{{OWNER}}`, `{{DATE}}`
 - stamps a small header into new Docs so a file found in Drive still explains itself
-- shares it: **Board** → the board's Google Group; **Private** → nobody but the creator
+- shares it according to its visibility (see below)
+
+**Uploading.** Any file type, under exactly the same rules — a PDF script, a
+ticket-sales export from Penn Live Arts, a scan, a photo, a vocal score. Drop
+several at once and each takes its own filename as its title. The extension is
+preserved through the naming rule, so you get
+`[URINETOWN] Script — Scripts & scores.pdf`.
+
+Uploaded files also get **new versions**: upload an updated file over the old
+one and the Drive file id, link and sharing stay the same while Drive keeps the
+previous revision. That is the end of `Script_FINAL_v3.pdf`.
+
+Bytes go straight from the browser to Google through a resumable session the
+server opens, so large files are not limited by the host's request-body cap,
+and the file's name, folder and metadata are fixed server-side where the
+browser cannot change them.
 
 **Finding.** The dashboard is organised by *type of information* (the sidebar),
 crossed with *production*. Every category and show has its own page; there is
 one search box over titles, descriptions, tags, categories and shows; filters
 for type, visibility, "filed by me" and archived.
 
-**Access.** Nobody can see the hub unless an admin has added their email.
-Three roles: `ADMIN` (settings, members, categories, productions, Google),
-`BOARD` (create and edit), `MEMBER` (read board documents).
+**Access.** Nobody can see the hub unless they have been added. Board roles:
+`ADMIN` (settings, members, categories, productions, Google), `BOARD` (create
+and edit), `MEMBER` (read board documents). Plus a fourth population:
+
+**Company members.** Cast and crew are added *from a production*, not from the
+board list, and get a `COMPANY` account with no board access at all. What they
+see is computed, not hardcoded:
+
+```
+production membership  →  production role  →  categories the role covers
+```
+
+Production roles (Cast, Stage management, Design & tech, Costumes & props,
+Music by default) are admin-editable, as is which categories may be offered to
+a company at all. Budgets, casting, box office, governance, grants and venue
+are board-only out of the box, so they are never even offered as "Company" and
+never appear to a company member. Adding somebody to a show backfills their
+Drive access to everything already filed; removing them revokes it.
+
+Three visibility levels on every document:
+
+| | Who |
+|---|---|
+| **Private** | the creator, plus anyone they add by hand |
+| **Company** | the board, plus people on that production whose role covers this category |
+| **Board** | everyone with board access |
 
 **Privacy.** `PRIVATE` means private, including from admins. A private document
 is never listed for anyone but its creator and the people they add by hand, and
-is never shared with the group in Drive. Flipping a document from Board back to
-Private revokes the group's Drive access on the spot. The activity log
-deliberately omits the titles of private documents.
+is never shared with the group in Drive. Flipping a document down a level
+revokes the wider Drive access on the spot. The activity log deliberately omits
+the titles of private documents.
 
 **Institutional memory.** One dedicated Google account owns every document the
 hub creates, so nothing disappears when a board member graduates. Existing
@@ -73,17 +111,19 @@ app/
     page.tsx              dashboard
     documents/            list · new · register · detail · edit
     categories/           overview · per category
-    productions/          overview · per show
-    admin/                Google & settings · members · categories · productions · templates · activity
+    productions/          overview · per show · per show's company
+    admin/                Google & settings · members · production roles · categories · productions · templates · activity
   api/auth/               Google sign-in, local dev sign-in, sign-out
   api/google/             connecting the hub's document-owning account
+  api/uploads/            start · finish · proxy · mock · blob (upload plumbing)
   mock-drive/[id]/        the simulated Drive viewer
   actions/                server actions (every mutation)
 lib/
   access.ts               who can see and edit a document — the one place
   auth.ts                 session cookie, role gates
-  documents.ts            create / register / update / share, DB + Drive together
-  google/                 oauth.ts · real.ts (Drive API) · mock.ts · index.ts (folder tree)
+  documents.ts            create / upload / register / update / share, DB + Drive together
+  upload-client.ts        browser side of the upload flow
+  google/                 oauth.ts · real.ts (Drive API) · mock.ts · upload.ts · index.ts
   constants.ts            roles, doc types, visibilities — the enum vocabulary
 prisma/
   schema.prisma           SQLite now, portable to Postgres
@@ -104,7 +144,9 @@ prisma/
 ## Notes for whoever picks this up
 
 - Sample content is tagged `"sample": true` in `Document.metadata`. Admin →
-  Settings has a one-click **Remove sample data**.
+  Settings has a one-click **Remove sample data**. The seed also creates a
+  sample company for the active show so the access layer is visible; sign in as
+  one of them from the login screen.
 - The seeded board group is a placeholder
   (`pennplayers-board@googlegroups.com`). Change it in Admin → Settings before
   connecting a real Google account.

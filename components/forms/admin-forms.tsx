@@ -14,13 +14,13 @@ import { CATEGORY_ICON_KEYS, Icon } from "../icons";
 import { Card, Field, buttonClass, inputClass, selectClass } from "../ui";
 import { FormBanner, RadioCards, SubmitButton, Toggle } from "./form-bits";
 import {
+  BOARD_ROLES,
   CATEGORY_SCOPES,
   CATEGORY_SCOPE_META,
   CREATABLE_DOC_TYPES,
   DOC_TYPE_META,
   PRODUCTION_STATUSES,
   PRODUCTION_STATUS_META,
-  ROLES,
   ROLE_META,
   VISIBILITIES,
   VISIBILITY_META,
@@ -207,7 +207,7 @@ export function MemberForm({
             defaultValue={member?.role ?? "BOARD"}
             className={selectClass}
           >
-            {ROLES.map((role) => (
+            {BOARD_ROLES.map((role) => (
               <option key={role} value={role}>
                 {ROLE_META[role].label} — {ROLE_META[role].blurb}
               </option>
@@ -246,6 +246,7 @@ export function CategoryForm({
     defaultVisibility: string;
     folderName: string | null;
     sortOrder: number;
+    companyVisible: boolean;
   };
 }) {
   const [state, formAction] = useActionState(saveCategoryAction, emptyState);
@@ -296,6 +297,13 @@ export function CategoryForm({
           className={inputClass}
         />
       </Field>
+
+      <Toggle
+        name="companyVisible"
+        label="Production companies can see documents here"
+        hint="Turn this on for the things a cast or crew legitimately needs — schedules, scripts, contact sheets. Leave it off for budgets, casting and governance: those categories are then never offered as “Company” and never appear to company members."
+        defaultChecked={category?.companyVisible ?? false}
+      />
 
       <Field label="Scope" required>
         <RadioCards

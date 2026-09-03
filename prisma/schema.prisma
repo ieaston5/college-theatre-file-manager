@@ -28,7 +28,7 @@ model User {
   name        String?
   position    String? // board position, e.g. "Production Manager"
   avatarUrl   String?
-  role        String    @default("MEMBER") // ADMIN | BOARD | MEMBER
+  role        String    @default("MEMBER") // ADMIN | BOARD | MEMBER | COMPANY
   status      String    @default("INVITED") // INVITED | ACTIVE | DISABLED
   googleSub   String?   @unique
   invitedById String?
@@ -42,6 +42,8 @@ model User {
   auditLogs      AuditLog[]
   connectedDrive DriveAccount[]
   uploads        PendingUpload[]
+  memberships    ProductionMember[] @relation("MembershipUser")
+  addedMembers   ProductionMember[] @relation("MembershipAddedBy")
 
   @@index([role])
   @@index([status])
@@ -70,6 +72,7 @@ model Production {
   updatedAt     DateTime  @updatedAt
 
   documents Document[]
+  members   ProductionMember[]
 
   @@index([status])
 }
@@ -86,15 +89,20 @@ model Category {
   /// PRODUCTION = always tied to a show, STANDING = org-wide, BOTH = either.
   scope             String   @default("BOTH")
   defaultDocType    String? // DOC | SHEET | SLIDES
-  defaultVisibility String   @default("BOARD") // PRIVATE | BOARD
+  defaultVisibility String   @default("BOARD") // PRIVATE | BOARD | COMPANY
+  /// Whether documents here may be shared with a production's company at all.
+  /// Off means the category is board-only and never offered as "Company",
+  /// which is what keeps budgets and casting away from the cast.
+  companyVisible    Boolean  @default(false)
   folderName        String? // Drive subfolder name; defaults to `name`
   sortOrder         Int      @default(0)
   archived          Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  documents Document[]
-  templates Template[]
+  documents       Document[]
+  templates       Template[]
+  productionRoles ProductionRole[]
 
   @@index([archived])
 }
@@ -139,7 +147,10 @@ model Document {
   docType String
   /// CREATED (born in the hub) | REGISTERED (pre-existing Drive file) | LINK (non-Drive URL)
   source  String  @default("CREATED")
-  /// PRIVATE = creator only. BOARD = shared with the Google Group.
+  /// PRIVATE = creator only.
+  /// BOARD    = everyone with hub access (shared with the board group).
+  /// COMPANY  = the board plus the production's company, filtered by what
+  ///            each company member's production role is allowed to see.
   visibility  String  @default("BOARD")
   status      String  @default("ACTIVE") // ACTIVE | ARCHIVED
   pinned      Boolean @default(false)
@@ -197,6 +208,56 @@ model DocumentShare {
 
   @@unique([documentId, userId])
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Production companies
+// ---------------------------------------------------------------------------
+
+/// A job on a show — "Cast", "Lighting", "Stage management". The categories
+/// attached to it are exactly what someone with that role can see, so an actor
+/// gets the schedule and the script while a designer also gets design & tech.
+/// Admin-editable: the board decides what each role needs.
+model ProductionRole {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  /// Pre-selected when adding people, so the common case is one click.
+  isDefault   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  categories Category[]
+  members    ProductionMember[]
+
+  @@index([archived])
+}
+
+/// Somebody working on one show. Access comes from the role; `title` is just
+/// what they are called on the programme ("Ensemble", "Lighting Designer").
+model ProductionMember {
+  id           String   @id @default(cuid())
+  productionId String
+  userId       String
+  roleId       String?
+  title        String?
+  status       String   @default("ACTIVE") // ACTIVE | REMOVED
+  addedById    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  production Production      @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  user       User            @relation("MembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  role       ProductionRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  addedBy    User?           @relation("MembershipAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@unique([productionId, userId])
+  @@index([userId])
+  @@index([productionId])
+  @@index([status])
 }
 
 // ---------------------------------------------------------------------------

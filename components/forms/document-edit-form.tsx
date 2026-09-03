@@ -48,6 +48,7 @@ export function DocumentEditForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
+    if (visibility === "COMPANY" && !next.companyVisible) setVisibility("BOARD");
     if (next.scope === "STANDING") setProductionId("none");
     if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
   }
@@ -87,7 +88,12 @@ export function DocumentEditForm({
       </Card>
 
       <Card className="space-y-5">
-        <VisibilityPicker value={visibility} onChange={setVisibility} groupEmail={groupEmail} />
+        <VisibilityPicker
+          value={visibility}
+          onChange={setVisibility}
+          groupEmail={groupEmail}
+          category={category}
+        />
         <DescriptionField defaultValue={document.description ?? undefined} />
         <TagsField defaultValue={document.tags} />
         <Toggle

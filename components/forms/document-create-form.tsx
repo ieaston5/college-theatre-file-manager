@@ -128,7 +128,12 @@ export function DocumentCreateForm({
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
     if (next.defaultDocType && !isUpload) setMode(next.defaultDocType as CreationMode);
-    setVisibility(next.defaultVisibility);
+    // Never leave "Company" selected on a category that is board-only.
+    setVisibility(
+      next.defaultVisibility === "COMPANY" && !next.companyVisible
+        ? "BOARD"
+        : next.defaultVisibility,
+    );
     if (next.scope === "STANDING") setProductionId("none");
     if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
     setTemplateId("blank");
@@ -428,7 +433,12 @@ export function DocumentCreateForm({
       </Card>
 
       <Card className="space-y-5">
-        <VisibilityPicker value={visibility} onChange={setVisibility} groupEmail={groupEmail} />
+        <VisibilityPicker
+          value={visibility}
+          onChange={setVisibility}
+          groupEmail={groupEmail}
+          category={category}
+        />
         <DescriptionField />
         <TagsField />
       </Card>

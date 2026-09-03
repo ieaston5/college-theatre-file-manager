@@ -2,7 +2,12 @@ import Link from "next/link";
 import { requireUser, canCreateDocuments, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
-import { visibleDocumentsWhere } from "@/lib/access";
+import {
+  categoryFilterFor,
+  getViewerContext,
+  productionFilterFor,
+  visibleDocumentsWhere,
+} from "@/lib/access";
 import { env } from "@/lib/env";
 import { Sidebar } from "@/components/sidebar";
 import { SearchField } from "@/components/search-field";
@@ -12,15 +17,19 @@ import { buttonClass } from "@/components/ui";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const config = await getConfig();
-  const where = visibleDocumentsWhere(user);
+  const viewer = await getViewerContext(user);
+  const where = visibleDocumentsWhere(viewer);
 
   const [categories, productions, counts, productionCounts] = await Promise.all([
     prisma.category.findMany({
-      where: { archived: false },
+      where: categoryFilterFor(viewer),
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.production.findMany({
-      where: { status: { in: ["PLANNING", "ACTIVE", "CLOSED"] } },
+      where: {
+        ...productionFilterFor(viewer),
+        status: { in: ["PLANNING", "ACTIVE", "CLOSED"] },
+      },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       take: 8,
     }),

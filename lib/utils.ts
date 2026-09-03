@@ -195,6 +195,63 @@ export function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+export type ParsedPerson = { email: string; name?: string; title?: string };
+
+/**
+ * Turn whatever someone pastes into a list of people.
+ *
+ * The point is that a cast list already exists — in a contact sheet, an email
+ * thread, a sign-up form — so adding twenty-five people should be one paste,
+ * not twenty-five forms. Handles:
+ *
+ *   nadia@example.com
+ *   Nadia Brooks <nadia@example.com>
+ *   Nadia Brooks, nadia@example.com, Hope Cladwell
+ *   Nadia Brooks<TAB>nadia@example.com<TAB>Hope Cladwell     (spreadsheet paste)
+ *   a, b, c on one line                                       (comma-separated)
+ */
+export function parsePeopleInput(input: string): ParsedPerson[] {
+  const emailPattern = /[^\s<>(),;:"]+@[^\s<>(),;:"]+\.[A-Za-z]{2,}/;
+  const found = new Map<string, ParsedPerson>();
+
+  // A line with one email may carry a name and a title around it. A line with
+  // several is treated as a plain list of addresses.
+  for (const rawLine of input.split(/[\n\r]+/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const emails = line.match(new RegExp(emailPattern.source, "g")) ?? [];
+    if (emails.length === 0) continue;
+
+    if (emails.length > 1) {
+      for (const email of emails) {
+        const key = email.toLowerCase();
+        if (!found.has(key)) found.set(key, { email: key });
+      }
+      continue;
+    }
+
+    const email = emails[0]!;
+    const [before, after] = line.split(email);
+    const clean = (part: string | undefined) =>
+      (part ?? "")
+        .replace(/[<>()"]/g, " ")
+        .replace(/[,;\t|]+/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+    const key = email.toLowerCase();
+    if (found.has(key)) continue;
+    found.set(key, {
+      email: key,
+      name: clean(before) || undefined,
+      title: clean(after) || undefined,
+    });
+  }
+
+  return [...found.values()].slice(0, 200);
+}
+
 export function pluralize(count: number, singular: string, plural?: string): string {
   return count === 1 ? singular : (plural ?? `${singular}s`);
 }

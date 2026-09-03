@@ -31,11 +31,30 @@ export default async function LoginPage({
   const signedOut = params.signed_out === "1";
   const config = await getConfig();
 
+  // Board first, then a few company members, so the two very different points
+  // of view are both one click away while evaluating.
   const devUsers = env.allowDevLogin
     ? await prisma.user.findMany({
-        where: { status: { not: "DISABLED" } },
+        where: { status: { not: "DISABLED" }, role: { in: ["ADMIN", "BOARD", "MEMBER"] } },
         orderBy: [{ role: "asc" }, { name: "asc" }],
-        take: 10,
+        take: 6,
+      })
+    : [];
+  const devCompany = env.allowDevLogin
+    ? await prisma.user.findMany({
+        where: { status: { not: "DISABLED" }, memberships: { some: { status: "ACTIVE" } } },
+        orderBy: { name: "asc" },
+        include: {
+          memberships: {
+            where: { status: "ACTIVE" },
+            take: 1,
+            include: {
+              role: { select: { name: true } },
+              production: { select: { name: true } },
+            },
+          },
+        },
+        take: 5,
       })
     : [];
 
@@ -165,6 +184,45 @@ export default async function LoginPage({
                   </li>
                 ))}
               </ul>
+
+              {devCompany.length > 0 ? (
+                <>
+                  <p className="mb-2 mt-5 text-xs font-medium uppercase tracking-wider text-ink-400">
+                    Company members
+                  </p>
+                  <ul className="card divide-y divide-ink-100 overflow-hidden p-0">
+                    {devCompany.map((member) => {
+                      const membership = member.memberships[0];
+                      return (
+                        <li key={member.id}>
+                          <form action="/api/auth/dev" method="post">
+                            <input type="hidden" name="email" value={member.email} />
+                            <button
+                              type="submit"
+                              className="flex w-full items-center gap-3 p-3 text-left transition hover:bg-ink-50"
+                            >
+                              <Avatar name={member.name} email={member.email} />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-ink-900">
+                                  {member.name ?? member.email}
+                                </span>
+                                <span className="block truncate text-xs text-ink-500">
+                                  {membership?.title ?? membership?.production.name}
+                                </span>
+                              </span>
+                              <Badge tone="green">{membership?.role?.name ?? "Company"}</Badge>
+                            </button>
+                          </form>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="mt-2 text-xs leading-relaxed text-ink-500">
+                    Sign in as one of these to see the hub from a cast or crew point of view — the
+                    difference is the point of the access layer.
+                  </p>
+                </>
+              ) : null}
             </div>
           ) : null}
         </div>

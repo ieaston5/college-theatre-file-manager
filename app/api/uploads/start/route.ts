@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth";
-import { canEditDocument } from "@/lib/access";
+import { canEditDocument, getViewerContext } from "@/lib/access";
 import { getConfig } from "@/lib/config";
 import { resolveFolder } from "@/lib/google";
 import { openResumableCreate, openResumableUpdate } from "@/lib/google/upload";
@@ -62,7 +62,8 @@ export async function POST(request: NextRequest) {
         where: { id: input.documentId },
         include: { shares: { select: { userId: true } } },
       });
-      if (!document || !canEditDocument(user, document)) {
+      const viewer = await getViewerContext(user);
+      if (!document || !canEditDocument(viewer, document)) {
         return NextResponse.json(
           { error: "That document is not yours to change." },
           { status: 403 },

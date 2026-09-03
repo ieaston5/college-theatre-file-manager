@@ -384,7 +384,7 @@ export class GoogleDriveProvider implements DriveProvider {
 
     const desired = new Map<string, { level: "READER" | "WRITER"; type: "user" | "group" }>();
     desired.set(plan.creatorEmail.toLowerCase(), { level: "WRITER", type: "user" });
-    if (plan.visibility === "BOARD" && plan.groupEmail) {
+    if (plan.visibility !== "PRIVATE" && plan.groupEmail) {
       desired.set(plan.groupEmail.toLowerCase(), {
         level: plan.groupCanEdit ? "WRITER" : "READER",
         type: "group",
@@ -470,25 +470,33 @@ export class GoogleDriveProvider implements DriveProvider {
       }
     }
 
-    // 2. Grant what is missing.
-    for (const [email, spec] of desired) {
-      try {
-        const res = await drive.permissions.create({
-          fileId,
-          requestBody: {
-            type: spec.type,
-            role: spec.level === "WRITER" ? "writer" : "reader",
-            emailAddress: email,
-          },
-          sendNotificationEmail: false,
-          supportsAllDrives: true,
-          fields: "id",
-        });
-        granted.push({ email, level: spec.level, permissionId: res.data.id ?? null });
-      } catch (error) {
-        const message = (error as Error).message;
-        warnings.push(`Could not share with ${email}: ${message}`);
-      }
+    // 2. Grant what is missing. A company document can mean twenty-odd
+    //    individual grants, so these go out a few at a time rather than one
+    //    after another — sequential calls would make creating a document for a
+    //    full cast feel broken.
+    const pending = [...desired.entries()];
+    const CONCURRENCY = 5;
+    for (let start = 0; start < pending.length; start += CONCURRENCY) {
+      await Promise.all(
+        pending.slice(start, start + CONCURRENCY).map(async ([email, spec]) => {
+          try {
+            const res = await drive.permissions.create({
+              fileId,
+              requestBody: {
+                type: spec.type,
+                role: spec.level === "WRITER" ? "writer" : "reader",
+                emailAddress: email,
+              },
+              sendNotificationEmail: false,
+              supportsAllDrives: true,
+              fields: "id",
+            });
+            granted.push({ email, level: spec.level, permissionId: res.data.id ?? null });
+          } catch (error) {
+            warnings.push(`Could not share with ${email}: ${(error as Error).message}`);
+          }
+        }),
+      );
     }
 
     return { granted, revoked, warnings };

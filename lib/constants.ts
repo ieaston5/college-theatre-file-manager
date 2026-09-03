@@ -5,7 +5,7 @@
 
 // --- Roles ------------------------------------------------------------------
 
-export const ROLES = ["ADMIN", "BOARD", "MEMBER"] as const;
+export const ROLES = ["ADMIN", "BOARD", "MEMBER", "COMPANY"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_META: Record<Role, { label: string; rank: number; blurb: string }> = {
@@ -24,7 +24,21 @@ export const ROLE_META: Record<Role, { label: string; rank: number; blurb: strin
     rank: 1,
     blurb: "Read-only access to documents shared with the board.",
   },
+  COMPANY: {
+    label: "Company",
+    rank: 0,
+    blurb:
+      "No board access at all. Sees only what their production role allows, on the shows they are cast or crewed on.",
+  },
 };
+
+/** Board roles see board documents; company members never do. */
+export function isBoardRole(role: string | null | undefined): boolean {
+  return atLeast(role, "MEMBER");
+}
+
+/** Roles an admin can hand out on the board side of the Members screen. */
+export const BOARD_ROLES = ["ADMIN", "BOARD", "MEMBER"] as const;
 
 export function atLeast(role: string | undefined | null, min: Role): boolean {
   if (!role || !isRole(role)) return false;
@@ -162,7 +176,7 @@ export function docTypeFromMime(mimeType: string | null | undefined): DocType {
 
 // --- Visibility -------------------------------------------------------------
 
-export const VISIBILITIES = ["PRIVATE", "BOARD"] as const;
+export const VISIBILITIES = ["PRIVATE", "COMPANY", "BOARD"] as const;
 export type Visibility = (typeof VISIBILITIES)[number];
 
 export const VISIBILITY_META: Record<
@@ -175,6 +189,13 @@ export const VISIBILITY_META: Record<
     icon: "lock",
     tone: "amber",
   },
+  COMPANY: {
+    label: "Company",
+    blurb:
+      "The board, plus everyone working on this production whose role covers this category. Shared with each of them in Drive as a viewer.",
+    icon: "theater",
+    tone: "green",
+  },
   BOARD: {
     label: "Board",
     blurb: "Listed on the dashboard for everyone with hub access and shared with the board's Google Group in Drive. Not visible to anyone outside the group.",
@@ -182,6 +203,8 @@ export const VISIBILITY_META: Record<
     tone: "indigo",
   },
 };
+
+export const MEMBER_STATUSES = ["ACTIVE", "REMOVED"] as const;
 
 // --- Document source & status ----------------------------------------------
 

@@ -42,7 +42,11 @@ export function DocumentRegisterForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
-    setVisibility(next.defaultVisibility);
+    setVisibility(
+      next.defaultVisibility === "COMPANY" && !next.companyVisible
+        ? "BOARD"
+        : next.defaultVisibility,
+    );
     if (next.scope === "STANDING") setProductionId("none");
     if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
   }
@@ -130,7 +134,12 @@ export function DocumentRegisterForm({
       </Card>
 
       <Card className="space-y-5">
-        <VisibilityPicker value={visibility} onChange={setVisibility} groupEmail={groupEmail} />
+        <VisibilityPicker
+          value={visibility}
+          onChange={setVisibility}
+          groupEmail={groupEmail}
+          category={category}
+        />
         <DescriptionField />
         <TagsField />
 

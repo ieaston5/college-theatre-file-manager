@@ -14,6 +14,8 @@ export type FormCategory = {
   color: string;
   icon: string;
   description: string | null;
+  /** Whether this category may be shared with a production's company. */
+  companyVisible: boolean;
 };
 
 export type FormProduction = {
@@ -128,36 +130,66 @@ export function ProductionSelect({
   );
 }
 
+const VISIBILITY_TINT: Record<string, string> = {
+  PRIVATE: "#d97706",
+  COMPANY: "#16a34a",
+  BOARD: "#5b3de0",
+};
+
 export function VisibilityPicker({
   value,
   onChange,
   groupEmail,
+  category,
+  companyCount,
 }: {
   value: string;
   onChange: (value: string) => void;
   groupEmail: string | null;
+  /** Company is only offered where the category allows it. */
+  category?: FormCategory;
+  /** How many people would get access if Company is chosen. */
+  companyCount?: number | null;
 }) {
+  const options = VISIBILITIES.filter(
+    (visibility) => visibility !== "COMPANY" || category?.companyVisible,
+  );
+
   return (
     <Field
       label="Who should see it?"
       required
       hint={
-        groupEmail
-          ? `Board documents are shared with ${groupEmail} in Google Drive. Nobody outside that group gets access.`
-          : "No board Google Group is set yet, so board documents will show on the hub but will not be shared in Drive until an admin adds one."
+        <>
+          {groupEmail
+            ? `Board documents are shared with ${groupEmail} in Google Drive. Nobody outside that group gets access.`
+            : "No board Google Group is set yet, so board documents will show on the hub but will not be shared in Drive until an admin adds one."}
+          {category && !category.companyVisible ? (
+            <>
+              {" "}
+              {category.name} is board-only, so it is never offered to a production company. An
+              admin can change that per category.
+            </>
+          ) : null}
+        </>
       }
     >
       <RadioCards
         name="visibility"
-        columns={2}
+        columns={options.length > 2 ? 3 : 2}
         value={value}
         onChange={onChange}
-        options={VISIBILITIES.map((visibility) => ({
+        options={options.map((visibility) => ({
           value: visibility,
           label: VISIBILITY_META[visibility].label,
-          description: VISIBILITY_META[visibility].blurb,
+          description:
+            visibility === "COMPANY" && typeof companyCount === "number"
+              ? `${VISIBILITY_META[visibility].blurb} About ${companyCount} ${
+                  companyCount === 1 ? "person" : "people"
+                } right now.`
+              : VISIBILITY_META[visibility].blurb,
           icon: VISIBILITY_META[visibility].icon,
-          tint: visibility === "PRIVATE" ? "#d97706" : "#5b3de0",
+          tint: VISIBILITY_TINT[visibility],
         }))}
       />
     </Field>

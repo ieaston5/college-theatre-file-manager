@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { visibleDocumentsWhere } from "@/lib/access";
+import { categoryFilterFor, getViewerContext, visibleDocumentsWhere } from "@/lib/access";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyState, PageHeader, buttonClass } from "@/components/ui";
 import { CATEGORY_SCOPE_META, type CategoryScope } from "@/lib/constants";
@@ -9,11 +9,12 @@ import { pluralize, relativeTime } from "@/lib/utils";
 
 export default async function CategoriesPage() {
   const user = await requireUser();
-  const where = visibleDocumentsWhere(user);
+  const viewer = await getViewerContext(user);
+  const where = visibleDocumentsWhere(viewer);
 
   const [categories, counts, latest] = await Promise.all([
     prisma.category.findMany({
-      where: { archived: false },
+      where: categoryFilterFor(viewer),
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.document.groupBy({

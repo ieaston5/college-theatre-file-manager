@@ -147,6 +147,7 @@ export async function saveCategoryAction(
       defaultVisibility: text(form, "defaultVisibility") ?? "BOARD",
       folderName: text(form, "folderName"),
       sortOrder: text(form, "sortOrder") ?? "0",
+      companyVisible: bool(form, "companyVisible"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
     const data = parsed.data;
@@ -161,6 +162,7 @@ export async function saveCategoryAction(
       defaultVisibility: data.defaultVisibility,
       folderName: data.folderName ?? null,
       sortOrder: data.sortOrder,
+      companyVisible: data.companyVisible,
     };
 
     const category = data.id
@@ -464,7 +466,16 @@ export async function reapplySharingAction(): Promise<void> {
   const { syncSharing } = await import("@/lib/documents");
   const documents = await prisma.document.findMany({
     where: { googleFileId: { not: null }, status: "ACTIVE" },
-    select: { id: true, visibility: true, source: true, creatorId: true, googleFileId: true, docType: true },
+    select: {
+      id: true,
+      visibility: true,
+      source: true,
+      creatorId: true,
+      googleFileId: true,
+      docType: true,
+      categoryId: true,
+      productionId: true,
+    },
     take: 500,
   });
   let failures = 0;

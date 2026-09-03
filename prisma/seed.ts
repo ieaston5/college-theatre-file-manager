@@ -32,6 +32,11 @@ const prisma = new PrismaClient();
 
 const SAMPLE_DOMAIN = "pennplayers.example";
 
+/**
+ * The seven categories a production company can be given access to. Everything
+ * else (budgets, casting, box office, governance, grants, venue) stays
+ * board-only and is never offered as "Company".
+ */
 const CATEGORIES = [
   {
     name: "Budgets & finance",
@@ -44,6 +49,7 @@ const CATEGORIES = [
   },
   {
     name: "Schedules & calendars",
+    companyVisible: true,
     icon: "calendar",
     color: "#0ea5e9",
     scope: "BOTH",
@@ -53,6 +59,7 @@ const CATEGORIES = [
   },
   {
     name: "Rehearsal reports",
+    companyVisible: true,
     icon: "clipboard",
     color: "#6366f1",
     scope: "PRODUCTION",
@@ -62,6 +69,7 @@ const CATEGORIES = [
   },
   {
     name: "Contact sheets",
+    companyVisible: true,
     icon: "users",
     color: "#7c3aed",
     scope: "BOTH",
@@ -71,6 +79,7 @@ const CATEGORIES = [
   },
   {
     name: "Scripts & scores",
+    companyVisible: true,
     icon: "script",
     color: "#b45309",
     scope: "PRODUCTION",
@@ -90,6 +99,7 @@ const CATEGORIES = [
   },
   {
     name: "Design & tech",
+    companyVisible: true,
     icon: "palette",
     color: "#ea580c",
     scope: "PRODUCTION",
@@ -99,6 +109,7 @@ const CATEGORIES = [
   },
   {
     name: "Costumes & props",
+    companyVisible: true,
     icon: "costume",
     color: "#0d9488",
     scope: "PRODUCTION",
@@ -144,6 +155,7 @@ const CATEGORIES = [
   },
   {
     name: "Handbooks & onboarding",
+    companyVisible: true,
     icon: "script",
     color: "#4f46e5",
     scope: "STANDING",
@@ -434,6 +446,88 @@ const DOCUMENTS: DocSpec[] = [
   },
 ];
 
+/**
+ * Production roles decide which of the company-visible categories each person
+ * gets. Everyone gets the schedule, the contact sheet and the handbooks;
+ * design & tech and costumes & props go to the people who need them.
+ */
+const PRODUCTION_ROLES = [
+  {
+    name: "Cast",
+    description: "Performers. Schedule, script, contact sheet, rehearsal reports.",
+    isDefault: true,
+    sortOrder: 10,
+    categories: [
+      "Schedules & calendars",
+      "Rehearsal reports",
+      "Contact sheets",
+      "Scripts & scores",
+      "Handbooks & onboarding",
+    ],
+  },
+  {
+    name: "Stage management",
+    description: "Runs the room. Sees everything a company member can see.",
+    sortOrder: 20,
+    categories: [
+      "Schedules & calendars",
+      "Rehearsal reports",
+      "Contact sheets",
+      "Scripts & scores",
+      "Design & tech",
+      "Costumes & props",
+      "Handbooks & onboarding",
+    ],
+  },
+  {
+    name: "Design & tech",
+    description: "Designers, board operators, crew. Plots, riders and piece lists.",
+    sortOrder: 30,
+    categories: [
+      "Schedules & calendars",
+      "Rehearsal reports",
+      "Contact sheets",
+      "Design & tech",
+      "Costumes & props",
+      "Handbooks & onboarding",
+    ],
+  },
+  {
+    name: "Costumes & props",
+    description: "Wardrobe and props crew.",
+    sortOrder: 40,
+    categories: [
+      "Schedules & calendars",
+      "Contact sheets",
+      "Costumes & props",
+      "Handbooks & onboarding",
+    ],
+  },
+  {
+    name: "Music",
+    description: "Orchestra and music staff. Score, schedule, contacts.",
+    sortOrder: 50,
+    categories: [
+      "Schedules & calendars",
+      "Rehearsal reports",
+      "Contact sheets",
+      "Scripts & scores",
+      "Handbooks & onboarding",
+    ],
+  },
+];
+
+/** A sample company for the active show, so the access layer is visible. */
+const COMPANY = [
+  { name: "Nadia Brooks", email: "nadia.brooks@pennplayers.example", role: "Cast", title: "Hope Cladwell" },
+  { name: "Theo Marchetti", email: "theo.m@pennplayers.example", role: "Cast", title: "Bobby Strong" },
+  { name: "Ines Duarte", email: "ines.duarte@pennplayers.example", role: "Cast", title: "Ensemble" },
+  { name: "Wes Kaplan", email: "wes.kaplan@pennplayers.example", role: "Design & tech", title: "Lighting Designer" },
+  { name: "Amara Osei", email: "amara.osei@pennplayers.example", role: "Design & tech", title: "Sound Designer" },
+  { name: "Bea Lindqvist", email: "bea.l@pennplayers.example", role: "Costumes & props", title: "Wardrobe Supervisor" },
+  { name: "Curtis Yang", email: "curtis.yang@pennplayers.example", role: "Music", title: "Conductor" },
+];
+
 const TEMPLATES = [
   {
     name: "Rehearsal report",
@@ -518,6 +612,7 @@ async function main() {
         scope: category.scope,
         defaultDocType: category.defaultDocType,
         defaultVisibility: category.defaultVisibility ?? "BOARD",
+        companyVisible: category.companyVisible ?? false,
         sortOrder: category.sortOrder,
       },
       update: {
@@ -528,6 +623,7 @@ async function main() {
         scope: category.scope,
         defaultDocType: category.defaultDocType,
         defaultVisibility: category.defaultVisibility ?? "BOARD",
+        companyVisible: category.companyVisible ?? false,
         sortOrder: category.sortOrder,
       },
     });
@@ -544,6 +640,64 @@ async function main() {
       update: { ...production, slug },
     });
     productions.set(production.name, row);
+  }
+
+  console.log("→ production roles");
+  const roles = new Map<string, { id: string; name: string }>();
+  for (const role of PRODUCTION_ROLES) {
+    const slug = slugify(role.name);
+    const categoryIds = role.categories
+      .map((name) => categories.get(name)?.id)
+      .filter((id): id is string => Boolean(id))
+      .map((id) => ({ id }));
+    const row = await prisma.productionRole.upsert({
+      where: { slug },
+      create: {
+        slug,
+        name: role.name,
+        description: role.description,
+        isDefault: role.isDefault ?? false,
+        sortOrder: role.sortOrder,
+        categories: { connect: categoryIds },
+      },
+      update: {
+        name: role.name,
+        description: role.description,
+        isDefault: role.isDefault ?? false,
+        sortOrder: role.sortOrder,
+        categories: { set: categoryIds },
+      },
+    });
+    roles.set(role.name, row);
+  }
+
+  console.log("→ company for the active show");
+  const activeShow = productions.get("Urinetown");
+  if (activeShow) {
+    for (const person of COMPANY) {
+      const user = await prisma.user.upsert({
+        where: { email: person.email },
+        create: {
+          email: person.email,
+          name: person.name,
+          role: "COMPANY",
+          status: "ACTIVE",
+        },
+        update: { name: person.name },
+      });
+      const roleId = roles.get(person.role)?.id ?? null;
+      await prisma.productionMember.upsert({
+        where: { productionId_userId: { productionId: activeShow.id, userId: user.id } },
+        create: {
+          productionId: activeShow.id,
+          userId: user.id,
+          roleId,
+          title: person.title,
+          addedById: admin.id,
+        },
+        update: { roleId, title: person.title },
+      });
+    }
   }
 
   console.log("→ drive folders (simulated)");

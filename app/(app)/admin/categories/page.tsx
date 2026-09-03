@@ -49,6 +49,7 @@ export default async function AdminCategoriesPage({
                   defaultVisibility: editing.defaultVisibility,
                   folderName: editing.folderName,
                   sortOrder: editing.sortOrder,
+                  companyVisible: editing.companyVisible,
                 }
               : undefined
           }

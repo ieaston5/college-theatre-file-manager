@@ -130,6 +130,7 @@ export const categorySchema = z.object({
   defaultVisibility: z.enum(VISIBILITIES),
   folderName: optionalText(120),
   sortOrder: z.coerce.number().int().min(0).max(999).default(0),
+  companyVisible: z.coerce.boolean().optional().default(false),
 });
 
 export const templateSchema = z.object({
@@ -150,6 +151,29 @@ export const memberSchema = z.object({
   name: optionalText(120),
   position: optionalText(120),
   role: z.enum(ROLES),
+});
+
+// --- production companies ---------------------------------------------------
+
+export const addCompanyMembersSchema = z.object({
+  productionId: z.string().min(1, "Pick a production."),
+  roleId: z.string().min(1, "Pick what they are doing on the show."),
+  people: z.string().trim().min(3, "Paste at least one email address."),
+});
+
+export const membershipSchema = z.object({
+  id: z.string().min(1),
+  roleId: z.string().min(1),
+  title: optionalText(120),
+});
+
+export const productionRoleSchema = z.object({
+  id: z.string().optional(),
+  name: title,
+  description: optionalText(400),
+  sortOrder: z.coerce.number().int().min(0).max(999).default(0),
+  isDefault: z.coerce.boolean().optional().default(false),
+  categoryIds: z.array(z.string()).default([]),
 });
 
 export const configSchema = z.object({

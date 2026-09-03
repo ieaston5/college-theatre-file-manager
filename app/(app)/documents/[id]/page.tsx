@@ -4,7 +4,12 @@ import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { env } from "@/lib/env";
-import { canDeleteDocument, canEditDocument, canViewDocument } from "@/lib/access";
+import {
+  canDeleteDocument,
+  canEditDocument,
+  canViewDocument,
+  getViewerContext,
+} from "@/lib/access";
 import {
   deleteDocumentAction,
   setStatusAction,
@@ -50,15 +55,34 @@ export default async function DocumentPage({
     },
   });
 
-  if (!document || !canViewDocument(user, document)) notFound();
+  const viewer = await getViewerContext(user);
+  if (!document || !canViewDocument(viewer, document)) notFound();
 
   const config = await getConfig();
-  const canEdit = canEditDocument(user, document);
-  const canRemove = canDeleteDocument(user, document);
+  const canEdit = canEditDocument(viewer, document);
+  const canRemove = canDeleteDocument(viewer, document);
   const visibility = VISIBILITY_META[document.visibility as Visibility];
   const typeMeta = DOC_TYPE_META[(document.docType as DocType) ?? "OTHER"] ?? DOC_TYPE_META.OTHER;
   const isUploaded =
     Boolean(document.googleFileId) && UPLOADED_DOC_TYPES.includes(document.docType as DocType);
+
+  const companyAudience =
+    document.visibility === "COMPANY"
+      ? await prisma.productionMember.findMany({
+          where: {
+            status: "ACTIVE",
+            user: { status: { not: "DISABLED" } },
+            ...(document.productionId ? { productionId: document.productionId } : {}),
+            role: { archived: false, categories: { some: { id: document.categoryId } } },
+          },
+          include: {
+            user: { select: { name: true, email: true } },
+            role: { select: { name: true } },
+            production: { select: { name: true, slug: true } },
+          },
+          orderBy: [{ role: { sortOrder: "asc" } }, { createdAt: "asc" }],
+        })
+      : [];
 
   const [shareableMembers, activity] = await Promise.all([
     canEdit
@@ -276,7 +300,60 @@ export default async function DocumentPage({
             description={visibility?.label}
           />
 
-          {document.visibility === "BOARD" ? (
+          {document.visibility === "COMPANY" ? (
+            <div className="space-y-3 text-sm">
+              <p className="text-ink-600">
+                Everyone with hub access can see this, plus{" "}
+                <span className="font-medium text-ink-800">
+                  {companyAudience.length}{" "}
+                  {companyAudience.length === 1 ? "person" : "people"}
+                </span>{" "}
+                working on{" "}
+                {document.production ? (
+                  <Link
+                    href={`/productions/${document.production.slug}/company`}
+                    className="font-medium text-brand-700 hover:underline"
+                  >
+                    {document.production.name}
+                  </Link>
+                ) : (
+                  "a current production"
+                )}
+                .
+              </p>
+
+              {companyAudience.length > 0 ? (
+                <ul className="max-h-56 space-y-1.5 overflow-y-auto scroll-slim">
+                  {companyAudience.map((member) => (
+                    <li
+                      key={member.id}
+                      className="flex items-center gap-2 rounded-lg bg-ink-50 p-2 text-sm"
+                    >
+                      <Avatar name={member.user.name} email={member.user.email} size={24} />
+                      <span className="min-w-0 flex-1 truncate">
+                        {member.user.name ?? member.user.email}
+                        {member.title ? (
+                          <span className="text-ink-500"> · {member.title}</span>
+                        ) : null}
+                      </span>
+                      <Badge tone="green">{member.role?.name ?? "No role"}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+                  Nobody on the company has a role that covers {document.category.name} yet, so
+                  right now this is only visible to the board.
+                </p>
+              )}
+
+              <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
+                In Google Drive each of them is added individually as a viewer — company members are
+                not in the board group. Take someone off the show and their access disappears with
+                them.
+              </div>
+            </div>
+          ) : document.visibility === "BOARD" ? (
             <div className="space-y-3 text-sm">
               <p className="text-ink-600">
                 Everyone with hub access can see this document listed and open it.

@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
-import { canEditDocument, canViewDocument } from "@/lib/access";
+import { canEditDocument, canViewDocument, getViewerContext } from "@/lib/access";
 import { DocumentEditForm } from "@/components/forms/document-edit-form";
 import { PageHeader } from "@/components/ui";
 
@@ -14,8 +14,9 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
     where: { id },
     include: { tags: true, shares: { select: { userId: true } } },
   });
-  if (!document || !canViewDocument(user, document)) notFound();
-  if (!canEditDocument(user, document)) redirect(`/documents/${id}`);
+  const viewer = await getViewerContext(user);
+  if (!document || !canViewDocument(viewer, document)) notFound();
+  if (!canEditDocument(viewer, document)) redirect(`/documents/${id}`);
 
   const [config, categories, productions] = await Promise.all([
     getConfig(),
@@ -59,6 +60,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           color: category.color,
           icon: category.icon,
           description: category.description,
+          companyVisible: category.companyVisible,
         }))}
         productions={productions.map((production) => ({
           id: production.id,

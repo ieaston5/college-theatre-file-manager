@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/admin", label: "Google & settings", icon: "settings" },
   { href: "/admin/members", label: "Members", icon: "users" },
+  { href: "/admin/roles", label: "Production roles", icon: "user-cog" },
   { href: "/admin/categories", label: "Categories", icon: "grid" },
   { href: "/admin/productions", label: "Productions", icon: "theater" },
   { href: "/admin/templates", label: "Templates", icon: "copy" },

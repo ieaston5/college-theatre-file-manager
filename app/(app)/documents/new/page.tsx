@@ -78,6 +78,7 @@ export default async function NewDocumentPage({
             color: category.color,
             icon: category.icon,
             description: category.description,
+            companyVisible: category.companyVisible,
           }))}
           productions={productions.map((production) => ({
             id: production.id,

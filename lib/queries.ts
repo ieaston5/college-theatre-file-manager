@@ -1,6 +1,6 @@
-import type { Prisma, User } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
-import { visibleDocumentsWhere } from "./access";
+import { visibleDocumentsWhere, type Viewer } from "./access";
 
 export const DOCUMENT_LIST_INCLUDE = {
   category: { select: { name: true, slug: true, icon: true, color: true } },
@@ -37,11 +37,11 @@ function searchWhere(term: string): Prisma.DocumentWhereInput {
 }
 
 export function buildDocumentWhere(
-  user: Pick<User, "id">,
+  viewer: Viewer,
   params: SearchParams,
   extra?: Prisma.DocumentWhereInput,
 ): Prisma.DocumentWhereInput {
-  const clauses: Prisma.DocumentWhereInput[] = [visibleDocumentsWhere(user)];
+  const clauses: Prisma.DocumentWhereInput[] = [visibleDocumentsWhere(viewer)];
 
   const term = one(params, "q")?.trim();
   if (term) clauses.push(searchWhere(term));
@@ -59,7 +59,7 @@ export function buildDocumentWhere(
   const visibility = one(params, "visibility");
   if (visibility && visibility !== "all") clauses.push({ visibility });
 
-  if (one(params, "mine")) clauses.push({ creatorId: user.id });
+  if (one(params, "mine")) clauses.push({ creatorId: viewer.id });
 
   const status = one(params, "status");
   clauses.push({ status: status === "ARCHIVED" ? "ARCHIVED" : "ACTIVE" });
@@ -81,11 +81,11 @@ export function buildDocumentOrder(params: SearchParams): Prisma.DocumentOrderBy
 }
 
 export async function queryDocuments(
-  user: Pick<User, "id">,
+  viewer: Viewer,
   params: SearchParams,
   options?: { extra?: Prisma.DocumentWhereInput; take?: number; skip?: number },
 ) {
-  const where = buildDocumentWhere(user, params, options?.extra);
+  const where = buildDocumentWhere(viewer, params, options?.extra);
   const [documents, total] = await Promise.all([
     prisma.document.findMany({
       where,
