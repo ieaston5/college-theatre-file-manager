@@ -15,7 +15,7 @@ import {
 } from "./types";
 
 const FILE_FIELDS =
-  "id,name,mimeType,webViewLink,iconLink,modifiedTime,parents,trashed,owners(emailAddress)";
+  "id,name,mimeType,webViewLink,iconLink,modifiedTime,parents,trashed,size,appProperties,owners(emailAddress)";
 
 function toInfo(file: {
   id?: string | null;
@@ -26,6 +26,8 @@ function toInfo(file: {
   modifiedTime?: string | null;
   parents?: string[] | null;
   trashed?: boolean | null;
+  size?: string | null;
+  appProperties?: Record<string, string> | null;
   owners?: Array<{ emailAddress?: string | null }> | null;
 }): DriveFileInfo {
   return {
@@ -38,6 +40,8 @@ function toInfo(file: {
     parents: file.parents ?? [],
     trashed: file.trashed ?? false,
     ownerEmail: file.owners?.[0]?.emailAddress ?? null,
+    sizeBytes: file.size ? Number(file.size) : null,
+    appProperties: file.appProperties ?? null,
   };
 }
 

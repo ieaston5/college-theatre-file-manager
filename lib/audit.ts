@@ -40,6 +40,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "auth.logout": "Signed out",
   "document.create": "Created a document",
   "document.register": "Registered an existing file",
+  "document.upload": "Uploaded a file",
+  "document.version": "Uploaded a new version",
   "document.update": "Updated a document",
   "document.visibility": "Changed visibility",
   "document.archive": "Archived a document",

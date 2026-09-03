@@ -6,6 +6,7 @@ import {
   DOC_TYPES,
   PRODUCTION_STATUSES,
   ROLES,
+  UPLOAD_MAX_BYTES,
   VISIBILITIES,
 } from "./constants";
 
@@ -71,6 +72,31 @@ export const updateDocumentSchema = z.object({
   visibility: z.enum(VISIBILITIES),
   tags: optionalText(400),
   pinned: z.coerce.boolean().optional().default(false),
+});
+
+/** The metadata the browser sends before it starts pushing bytes. */
+export const uploadStartSchema = z.object({
+  mode: z.enum(["new", "version"]).default("new"),
+  documentId: z.string().optional(),
+  title: z.string().trim().max(160).optional(),
+  description: optionalText(1000),
+  categoryId: z.string().optional(),
+  productionId: z
+    .string()
+    .optional()
+    .transform((value) => (value && value !== "none" ? value : undefined)),
+  visibility: z.enum(VISIBILITIES).optional(),
+  tags: optionalText(400),
+  fileName: z.string().trim().min(1).max(300),
+  mimeType: z.string().trim().min(1).max(255).default("application/octet-stream"),
+  sizeBytes: z.coerce.number().int().min(0).max(UPLOAD_MAX_BYTES, {
+    message: "That file is larger than the 100 MB limit.",
+  }),
+});
+
+export const uploadFinishSchema = z.object({
+  uploadId: z.string().min(1),
+  fileId: z.string().min(1).optional(),
 });
 
 export const productionSchema = z.object({

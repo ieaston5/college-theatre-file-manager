@@ -41,6 +41,7 @@ model User {
   grantedShares  DocumentShare[] @relation("ShareGrantor")
   auditLogs      AuditLog[]
   connectedDrive DriveAccount[]
+  uploads        PendingUpload[]
 
   @@index([role])
   @@index([status])
@@ -147,6 +148,11 @@ model Document {
   webViewLink       String?
   driveFolderId     String?
   driveOwnerEmail   String?
+  /// Bytes, for uploaded files.
+  sizeBytes         Int?
+  /// The name of the file as the uploader had it on their machine.
+  originalFileName  String?
+  mimeType          String?
   googleModifiedAt  DateTime?
   lastSyncedAt      DateTime?
   /// Free-form JSON text of extra fields captured at creation time.
@@ -164,6 +170,7 @@ model Document {
   creator    User            @relation("DocumentCreator", fields: [creatorId], references: [id])
   tags       Tag[]
   shares     DocumentShare[]
+  uploads    PendingUpload[]
 
   @@index([categoryId])
   @@index([productionId])
@@ -246,6 +253,39 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([action])
+}
+
+/// An upload the hub has authorised but not yet finished.
+///
+/// The browser sends the bytes straight to Google (or to the mock endpoint),
+/// which keeps large files out of our request path. The row exists so the
+/// finish step can prove the file that showed up is the one we authorised:
+/// `token` is written into the file's appProperties when the upload session is
+/// opened, and checked again afterwards.
+model PendingUpload {
+  id            String   @id @default(cuid())
+  token         String   @unique
+  createdById   String
+  /// JSON: the document metadata captured in the form.
+  payload       String
+  /// Set when this upload replaces the contents of an existing document.
+  documentId    String?
+  fileName      String
+  driveName     String
+  mimeType      String
+  sizeBytes     Int?
+  driveFolderId String?
+  /// The Google resumable session URI. Kept server-side so the proxy fallback
+  /// cannot be pointed at an arbitrary host.
+  sessionUrl    String?
+  status        String   @default("PENDING") // PENDING | COMPLETE | FAILED
+  createdAt     DateTime @default(now())
+
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  document  Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([createdById])
+  @@index([status])
 }
 
 /// Short-lived OAuth state, so the callback can verify the round trip.

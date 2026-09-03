@@ -14,16 +14,18 @@ import {
 } from "@/app/actions/documents";
 import { DocTypeIcon } from "@/components/document-items";
 import { ShareForm } from "@/components/forms/share-form";
+import { NewVersionUploader } from "@/components/forms/new-version-uploader";
 import { Icon } from "@/components/icons";
 import { Avatar, Badge, Banner, Card, SectionHeader, buttonClass } from "@/components/ui";
 import {
   DOC_TYPE_META,
+  UPLOADED_DOC_TYPES,
   VISIBILITY_META,
   type DocType,
   type Visibility,
 } from "@/lib/constants";
 import { auditLabel } from "@/lib/audit";
-import { formatDateTime, relativeTime } from "@/lib/utils";
+import { formatBytes, formatDateTime, relativeTime } from "@/lib/utils";
 import type { SearchParams } from "@/lib/queries";
 
 export default async function DocumentPage({
@@ -55,6 +57,8 @@ export default async function DocumentPage({
   const canRemove = canDeleteDocument(user, document);
   const visibility = VISIBILITY_META[document.visibility as Visibility];
   const typeMeta = DOC_TYPE_META[(document.docType as DocType) ?? "OTHER"] ?? DOC_TYPE_META.OTHER;
+  const isUploaded =
+    Boolean(document.googleFileId) && UPLOADED_DOC_TYPES.includes(document.docType as DocType);
 
   const [shareableMembers, activity] = await Promise.all([
     canEdit
@@ -168,6 +172,17 @@ export default async function DocumentPage({
           </a>
         ) : null}
 
+        {isUploaded && env.driveMode === "mock" && document.googleFileId ? (
+          <a
+            href={`/api/uploads/blob/${document.googleFileId}`}
+            download={document.originalFileName ?? undefined}
+            className={buttonClass("secondary")}
+          >
+            <Icon name="download" className="size-4" />
+            Download
+          </a>
+        ) : null}
+
         {canEdit ? (
           <>
             <Link href={`/documents/${document.id}/edit`} className={buttonClass("secondary")}>
@@ -237,6 +252,12 @@ export default async function DocumentPage({
             <Row label="Hub updated">{relativeTime(document.updatedAt)}</Row>
             {document.googleModifiedAt ? (
               <Row label="Drive changed">{relativeTime(document.googleModifiedAt)}</Row>
+            ) : null}
+            {document.sizeBytes ? (
+              <Row label="Size">{formatBytes(document.sizeBytes)}</Row>
+            ) : null}
+            {document.originalFileName ? (
+              <Row label="Uploaded as">{document.originalFileName}</Row>
             ) : null}
             {document.driveOwnerEmail ? (
               <Row label="Drive owner">{document.driveOwnerEmail}</Row>
@@ -327,6 +348,20 @@ export default async function DocumentPage({
           )}
         </Card>
       </div>
+
+      {canEdit && isUploaded ? (
+        <Card>
+          <SectionHeader
+            icon="history"
+            title="New version"
+            description="Upload an updated file over this one instead of creating “v2”. Same link, same sharing — Drive keeps the old version."
+          />
+          <NewVersionUploader
+            documentId={document.id}
+            currentFileName={document.originalFileName}
+          />
+        </Card>
+      ) : null}
 
       {canEdit && activity.length > 0 ? (
         <Card>

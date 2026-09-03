@@ -51,17 +51,38 @@ export const USER_STATUS_META: Record<UserStatus, { label: string; tone: Tone }>
 export const CREATABLE_DOC_TYPES = ["DOC", "SHEET", "SLIDES"] as const;
 export type CreatableDocType = (typeof CREATABLE_DOC_TYPES)[number];
 
+/** What the "What should it be?" picker offers. */
+export const CREATION_MODES = ["DOC", "SHEET", "SLIDES", "UPLOAD"] as const;
+export type CreationMode = (typeof CREATION_MODES)[number];
+
 export const DOC_TYPES = [
   "DOC",
   "SHEET",
   "SLIDES",
   "FORM",
   "PDF",
+  "IMAGE",
+  "AUDIO",
+  "VIDEO",
+  "ARCHIVE",
   "FOLDER",
   "LINK",
   "OTHER",
 ] as const;
 export type DocType = (typeof DOC_TYPES)[number];
+
+/** Types whose bytes the hub uploaded, so a new version can be uploaded over them. */
+export const UPLOADED_DOC_TYPES: DocType[] = [
+  "PDF",
+  "IMAGE",
+  "AUDIO",
+  "VIDEO",
+  "ARCHIVE",
+  "OTHER",
+];
+
+/** Refused above this; Drive itself allows far more but a club does not need it. */
+export const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
 
 export const DOC_TYPE_META: Record<
   DocType,
@@ -96,6 +117,10 @@ export const DOC_TYPE_META: Record<
     short: "Form",
   },
   PDF: { label: "PDF", mimeType: "application/pdf", icon: "pdf", color: "#dc2626", short: "PDF" },
+  IMAGE: { label: "Image", mimeType: null, icon: "image", color: "#0891b2", short: "Image" },
+  AUDIO: { label: "Audio", mimeType: null, icon: "music", color: "#7c3aed", short: "Audio" },
+  VIDEO: { label: "Video", mimeType: null, icon: "film", color: "#be123c", short: "Video" },
+  ARCHIVE: { label: "Archive", mimeType: null, icon: "props", color: "#a16207", short: "Zip" },
   FOLDER: {
     label: "Drive folder",
     mimeType: "application/vnd.google-apps.folder",
@@ -107,12 +132,32 @@ export const DOC_TYPE_META: Record<
   OTHER: { label: "File", mimeType: null, icon: "file", color: "#64748b", short: "File" },
 };
 
+/**
+ * Best-effort mapping from a MIME type to one of our buckets. Anything we do
+ * not recognise lands in OTHER, which is a first-class type — "all file types
+ * are supported" means unknown ones still work, they just get a generic icon.
+ */
 export function docTypeFromMime(mimeType: string | null | undefined): DocType {
   if (!mimeType) return "OTHER";
-  const match = (Object.entries(DOC_TYPE_META) as [DocType, { mimeType: string | null }][]).find(
-    ([, meta]) => meta.mimeType === mimeType,
+  const mime = mimeType.toLowerCase();
+
+  const exact = (Object.entries(DOC_TYPE_META) as [DocType, { mimeType: string | null }][]).find(
+    ([, meta]) => meta.mimeType === mime,
   );
-  return match ? match[0] : "OTHER";
+  if (exact) return exact[0];
+
+  if (mime.startsWith("image/")) return "IMAGE";
+  if (mime.startsWith("audio/")) return "AUDIO";
+  if (mime.startsWith("video/")) return "VIDEO";
+  if (
+    /(zip|x-7z|x-rar|x-tar|gzip|compressed)/.test(mime) ||
+    mime === "application/x-apple-diskimage"
+  ) {
+    return "ARCHIVE";
+  }
+  // Office files stay OTHER on purpose: an .xlsx is not a Google Sheet, and
+  // pretending otherwise would mislead people about what they can edit.
+  return "OTHER";
 }
 
 // --- Visibility -------------------------------------------------------------

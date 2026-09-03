@@ -10,6 +10,9 @@ export type DriveFileInfo = {
   modifiedTime?: string | null;
   parents?: string[];
   trashed?: boolean;
+  sizeBytes?: number | null;
+  /** Hub metadata stored on the file itself; used to verify uploads. */
+  appProperties?: Record<string, string> | null;
 };
 
 export type DocHeader = {

@@ -231,6 +231,139 @@ export async function createDocument(
 }
 
 // ---------------------------------------------------------------------------
+// Uploads
+// ---------------------------------------------------------------------------
+
+/**
+ * The Drive file already exists (the browser sent the bytes straight to
+ * Google); this records it on the hub and shares it. Same categories, same
+ * naming rule, same visibility rules as anything created here — an uploaded
+ * script is a first-class hub document, not an attachment.
+ */
+export async function recordUploadedDocument(
+  actor: User,
+  input: {
+    title: string;
+    description?: string;
+    categoryId: string;
+    productionId?: string;
+    visibility: Visibility;
+    tags?: string;
+    originalFileName: string;
+    driveFolderId: string | null;
+    file: {
+      id: string;
+      name: string;
+      mimeType: string;
+      webViewLink: string;
+      sizeBytes?: number | null;
+      ownerEmail?: string | null;
+      modifiedTime?: string | null;
+    };
+  },
+): Promise<DocumentServiceResult> {
+  const category = await prisma.category.findUnique({ where: { id: input.categoryId } });
+  if (!category) throw new Error("That category no longer exists.");
+  const production = input.productionId
+    ? await prisma.production.findUnique({ where: { id: input.productionId } })
+    : null;
+
+  const docType = docTypeFromMime(input.file.mimeType);
+  const warnings: string[] = [];
+
+  const document = await prisma.document.create({
+    data: {
+      title: input.title,
+      description: input.description ?? null,
+      docType,
+      source: "CREATED",
+      visibility: input.visibility,
+      categoryId: category.id,
+      productionId: production?.id ?? null,
+      creatorId: actor.id,
+      googleFileId: input.file.id,
+      webViewLink: input.file.webViewLink || driveViewLink(input.file.id, docType),
+      driveFolderId: input.driveFolderId,
+      driveOwnerEmail: input.file.ownerEmail ?? null,
+      sizeBytes: input.file.sizeBytes ?? null,
+      originalFileName: input.originalFileName,
+      mimeType: input.file.mimeType,
+      googleModifiedAt: input.file.modifiedTime ? new Date(input.file.modifiedTime) : new Date(),
+      lastSyncedAt: new Date(),
+      tags: { connect: await tagIds(input.tags) },
+      metadata: JSON.stringify({
+        createdVia: "upload",
+        driveMode: env.driveMode,
+        driveName: input.file.name,
+      }),
+    },
+  });
+
+  const sharing = await syncSharing(document);
+  warnings.push(...sharing.warnings);
+
+  const config = await getConfig();
+  if (input.visibility === "BOARD" && !config.groupEmail) {
+    warnings.push(
+      "No board Google Group is configured yet, so this file was not shared in Drive. An admin can set it in Admin → Settings.",
+    );
+  }
+
+  await recordAudit({
+    actor,
+    action: "document.upload",
+    targetType: "Document",
+    targetId: document.id,
+    summary:
+      input.visibility === "PRIVATE"
+        ? `Uploaded a private file to ${category.name}`
+        : `Uploaded “${input.title}” to ${category.name}${production ? ` for ${production.name}` : ""}`,
+    metadata: { docType, sizeBytes: input.file.sizeBytes ?? null, originalFileName: input.originalFileName },
+  });
+
+  return { document, warnings };
+}
+
+/**
+ * A new version of an uploaded file: same Drive file id, so every link that
+ * has already been shared keeps working and Drive keeps the old revision.
+ * This is the answer to "Script_FINAL_v3.pdf".
+ */
+export async function recordNewVersion(
+  actor: User,
+  documentId: string,
+  file: { mimeType: string; sizeBytes?: number | null; modifiedTime?: string | null },
+  originalFileName: string,
+): Promise<Document> {
+  const document = await prisma.document.update({
+    where: { id: documentId },
+    data: {
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes ?? null,
+      originalFileName,
+      docType: docTypeFromMime(file.mimeType),
+      googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
+      lastSyncedAt: new Date(),
+      status: "ACTIVE",
+    },
+  });
+
+  await recordAudit({
+    actor,
+    action: "document.version",
+    targetType: "Document",
+    targetId: document.id,
+    summary:
+      document.visibility === "PRIVATE"
+        ? "Uploaded a new version of a private file"
+        : `Uploaded a new version of “${document.title}”`,
+    metadata: { originalFileName, sizeBytes: file.sizeBytes ?? null },
+  });
+
+  return document;
+}
+
+// ---------------------------------------------------------------------------
 // Register something that already exists
 // ---------------------------------------------------------------------------
 

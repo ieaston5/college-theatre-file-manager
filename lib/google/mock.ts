@@ -33,6 +33,11 @@ type MockFile = {
   permissions: MockPermission[];
   headerPreview?: string | null;
   fromTemplate?: string | null;
+  /** Uploaded files: real bytes on disk under .mock-drive/blobs, so the
+   *  simulated Drive can actually preview and download them. */
+  sizeBytes?: number;
+  blobFile?: string;
+  revisions?: number;
 };
 
 type MockState = { accountEmail: string; files: Record<string, MockFile> };
@@ -72,12 +77,78 @@ function toInfo(file: MockFile): DriveFileInfo {
     parents: file.parents,
     trashed: file.trashed,
     ownerEmail: file.permissions.find((perm) => perm.role === "owner")?.email ?? MOCK_ACCOUNT,
+    sizeBytes: file.sizeBytes ?? null,
+    appProperties: file.appProperties ?? null,
   };
 }
 
 /** Used by the /mock-drive viewer page. */
 export function readMockFile(id: string): MockFile | null {
   return load().files[id] ?? null;
+}
+
+const BLOB_DIR = path.join(STORE_DIR, "blobs");
+
+/**
+ * Store real bytes for an uploaded file. Used by the mock upload endpoint so
+ * that uploading a PDF locally produces something you can actually open.
+ */
+export function writeMockUpload(input: {
+  fileId?: string;
+  name: string;
+  mimeType: string;
+  parentFolderId?: string | null;
+  appProperties?: Record<string, string>;
+  description?: string | null;
+  bytes: Buffer;
+}): DriveFileInfo {
+  const state = load();
+  const now = new Date().toISOString();
+  const id = input.fileId ?? newId("upl");
+
+  fs.mkdirSync(BLOB_DIR, { recursive: true });
+  const blobFile = `${id}.bin`;
+  fs.writeFileSync(path.join(BLOB_DIR, blobFile), input.bytes);
+
+  const existing = state.files[id];
+  state.files[id] = {
+    id,
+    name: input.name,
+    mimeType: input.mimeType,
+    description: input.description ?? existing?.description ?? null,
+    parents: input.parentFolderId
+      ? [input.parentFolderId]
+      : (existing?.parents ?? []),
+    appProperties: { ...(existing?.appProperties ?? {}), ...(input.appProperties ?? {}) },
+    createdTime: existing?.createdTime ?? now,
+    modifiedTime: now,
+    trashed: false,
+    permissions:
+      existing?.permissions ??
+      [{ id: newId("perm"), email: MOCK_ACCOUNT, role: "owner", type: "user" }],
+    sizeBytes: input.bytes.byteLength,
+    blobFile,
+    revisions: (existing?.revisions ?? 0) + 1,
+    headerPreview: existing?.headerPreview ?? null,
+  };
+  save(state);
+  return toInfo(state.files[id]);
+}
+
+export function readMockBlob(
+  fileId: string,
+): { bytes: Buffer; mimeType: string; name: string } | null {
+  const file = load().files[fileId];
+  if (!file?.blobFile) return null;
+  try {
+    return {
+      bytes: fs.readFileSync(path.join(BLOB_DIR, file.blobFile)),
+      mimeType: file.mimeType,
+      name: file.name,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function readMockState(): MockState {
@@ -160,7 +231,7 @@ export class MockDriveProvider implements DriveProvider {
     // Ids the hub did not mint are treated as pre-existing Drive files that
     // somebody shared with the hub account, so "add existing" and templates
     // can be exercised without a real Google connection.
-    if (/^(fld|doc|perm)_/.test(fileId)) return null;
+    if (/^(fld|doc|perm|upl)_/.test(fileId)) return null;
 
     const now = new Date().toISOString();
     state.files[fileId] = {

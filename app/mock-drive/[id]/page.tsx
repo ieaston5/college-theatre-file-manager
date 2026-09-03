@@ -6,7 +6,7 @@ import { readMockFile, readMockState } from "@/lib/google/mock";
 import { docTypeFromMime, DOC_TYPE_META } from "@/lib/constants";
 import { Icon } from "@/components/icons";
 import { Badge, Card, SectionHeader, buttonClass } from "@/components/ui";
-import { formatDateTime } from "@/lib/utils";
+import { formatBytes, formatDateTime } from "@/lib/utils";
 
 /**
  * Stand-in for the Google Drive UI while the hub runs on a simulated Drive.
@@ -91,16 +91,41 @@ export default async function MockDriveFilePage({ params }: { params: Promise<{ 
             <span>created {formatDateTime(new Date(file.createdTime))}</span>
             <span>·</span>
             <span>changed {formatDateTime(new Date(file.modifiedTime))}</span>
+            {file.sizeBytes ? (
+              <>
+                <span>·</span>
+                <span>{formatBytes(file.sizeBytes)}</span>
+              </>
+            ) : null}
+            {file.revisions && file.revisions > 1 ? (
+              <>
+                <span>·</span>
+                <Badge tone="slate">{file.revisions} versions</Badge>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
 
-      {hubDocument ? (
-        <Link href={`/documents/${hubDocument.id}`} className={buttonClass("secondary", "mb-6")}>
-          <Icon name="external" className="size-4" />
-          Open “{hubDocument.title}” on the hub
-        </Link>
-      ) : null}
+      <div className="mb-6 flex flex-wrap gap-2">
+        {hubDocument ? (
+          <Link href={`/documents/${hubDocument.id}`} className={buttonClass("secondary")}>
+            <Icon name="external" className="size-4" />
+            Open “{hubDocument.title}” on the hub
+          </Link>
+        ) : null}
+        {file.blobFile ? (
+          <a
+            href={`/api/uploads/blob/${file.id}`}
+            className={buttonClass("primary")}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Icon name="download" className="size-4" />
+            Open the uploaded file
+          </a>
+        ) : null}
+      </div>
 
       {file.headerPreview ? (
         <Card className="mb-4">

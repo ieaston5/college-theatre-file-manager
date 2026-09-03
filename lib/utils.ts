@@ -154,6 +154,43 @@ export function extractDriveFileId(input: string): string | null {
   return null;
 }
 
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/** ".pdf" from "Script draft 3.pdf". Empty string when there isn't one. */
+export function fileExtension(fileName: string): string {
+  const match = fileName.match(/\.([A-Za-z0-9]{1,12})$/);
+  return match ? `.${match[1].toLowerCase()}` : "";
+}
+
+/**
+ * Uploaded files keep their extension even though the hub renames them —
+ * "[URINETOWN] Script — Scripts & scores.pdf" rather than a PDF that Drive and
+ * every operating system then refuse to preview.
+ */
+export function withExtension(name: string, originalFileName: string): string {
+  const ext = fileExtension(originalFileName);
+  if (!ext) return name;
+  return name.toLowerCase().endsWith(ext) ? name : `${name}${ext}`;
+}
+
+/** "Urinetown script draft 3.pdf" -> "Urinetown script draft 3" */
+export function fileNameToTitle(fileName: string): string {
+  const ext = fileExtension(fileName);
+  const base = ext ? fileName.slice(0, -ext.length) : fileName;
+  return base.replace(/[_]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 160);
+}
+
 export function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
