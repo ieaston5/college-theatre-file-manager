@@ -16,6 +16,9 @@ import {
   templateSchema,
 } from "@/lib/validation";
 import { extractDriveFileId, slugify } from "@/lib/utils";
+import { env } from "@/lib/env";
+import { ROLE_META } from "@/lib/constants";
+import { boardWelcome, sendEmail } from "@/lib/email";
 import { bool, text, toActionState, type ActionState } from "./shared";
 
 function refreshEverywhere() {
@@ -346,9 +349,29 @@ export async function saveMemberAction(_prev: ActionState, form: FormData): Prom
       targetId: member.id,
       summary: `Added ${member.email} as ${data.role.toLowerCase()}`,
     });
+
+    const config = await getConfig();
+    const welcome = boardWelcome({
+      orgName: config.orgName,
+      appUrl: env.appUrl,
+      name: member.name,
+      roleLabel: ROLE_META[data.role].label,
+      roleBlurb: ROLE_META[data.role].blurb,
+      addedBy: actor.name ?? actor.email,
+      googleSignIn: env.googleConfigured,
+    });
+    const delivery = await sendEmail({ to: member.email, message: welcome, relatedId: member.id });
+
     refreshEverywhere();
     return {
-      ok: `${member.email} can now sign in with Google. Nothing was emailed — tell them the hub's address.`,
+      ok:
+        delivery.status === "SENT"
+          ? `${member.email} has been added and emailed how to sign in.`
+          : `${member.email} can now sign in with Google. ${
+              delivery.status === "FAILED"
+                ? "The welcome email failed to send — see Admin → Email."
+                : "Email is off, so tell them the hub's address yourself (the message is saved in Admin → Email)."
+            }`,
     };
   } catch (error) {
     return toActionState(error);

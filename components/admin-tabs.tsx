@@ -9,6 +9,7 @@ const TABS = [
   { href: "/admin", label: "Google & settings", icon: "settings" },
   { href: "/admin/members", label: "Members", icon: "users" },
   { href: "/admin/sharing", label: "Sharing", icon: "shield" },
+  { href: "/admin/email", label: "Email", icon: "mail" },
   { href: "/admin/roles", label: "Production roles", icon: "user-cog" },
   { href: "/admin/categories", label: "Categories", icon: "grid" },
   { href: "/admin/import", label: "Import", icon: "download" },

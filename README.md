@@ -171,3 +171,7 @@ prisma/
   moving to Postgres, add `mode: "insensitive"` in `lib/queries.ts`.
 - Local sign-in must be switched off (`ALLOW_DEV_LOGIN=false`) before this goes
   anywhere public. It is disabled automatically in production builds.
+- **Restart `npm run dev` after any schema change.** Changing
+  `prisma/schema.prisma` means `prisma db push && prisma generate`, and a
+  running dev server keeps the old generated client in memory — the symptom is
+  `Cannot read properties of undefined (reading 'findMany')` on the new model.

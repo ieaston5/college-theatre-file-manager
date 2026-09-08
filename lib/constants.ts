@@ -320,7 +320,32 @@ export const DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/documents",
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/presentations",
+  // Lets the hub send its own mail — onboarding, private-share notices and the
+  // weekly digest — from the hub account rather than through a third party.
+  "https://www.googleapis.com/auth/gmail.send",
 ];
+
+export const EMAIL_KINDS = ["WELCOME_BOARD", "WELCOME_COMPANY", "SHARE", "DIGEST"] as const;
+export type EmailKind = (typeof EMAIL_KINDS)[number];
+
+export const EMAIL_KIND_META: Record<EmailKind, { label: string; blurb: string }> = {
+  WELCOME_BOARD: {
+    label: "Board welcome",
+    blurb: "Sent when an admin adds somebody to the board list.",
+  },
+  WELCOME_COMPANY: {
+    label: "Company welcome",
+    blurb: "Sent when cast or crew are added to a show.",
+  },
+  SHARE: {
+    label: "Private share",
+    blurb: "Sent when somebody gives you access to a private document.",
+  },
+  DIGEST: {
+    label: "Weekly digest",
+    blurb: "What changed, and what has gone quiet. Opt-out per person.",
+  },
+};
 
 /** Placeholders replaced inside template copies. */
 export const TEMPLATE_TOKENS = [

@@ -12,6 +12,9 @@ import {
   productionRoleSchema,
 } from "@/lib/validation";
 import { parsePeopleInput, slugify } from "@/lib/utils";
+import { env } from "@/lib/env";
+import { getConfig } from "@/lib/config";
+import { companyWelcome, sendEmailQuietly } from "@/lib/email";
 import { bool, text, toActionState, type ActionState } from "./shared";
 
 function refreshEverywhere() {
@@ -55,6 +58,7 @@ export async function addCompanyMembersAction(
     let added = 0;
     let updated = 0;
     const warnings: string[] = [];
+    const newcomers: Array<{ email: string; name: string | null }> = [];
 
     for (const person of people) {
       const existing = await prisma.user.findUnique({ where: { email: person.email } });
@@ -100,8 +104,32 @@ export async function addCompanyMembersAction(
             addedById: actor.id,
           },
         });
+        newcomers.push({ email: user.email, name: user.name });
         added += 1;
       }
+    }
+
+    // Tell the people who were newly added, once their access exists.
+    const config = await getConfig();
+    const roleCategories = await prisma.category.findMany({
+      where: { productionRoles: { some: { id: role.id } }, archived: false },
+      orderBy: { sortOrder: "asc" },
+      select: { name: true },
+    });
+    for (const person of newcomers) {
+      sendEmailQuietly({
+        to: person.email,
+        relatedId: production.id,
+        message: companyWelcome({
+          orgName: config.orgName,
+          appUrl: env.appUrl,
+          name: person.name,
+          productionName: production.name,
+          roleName: role.name,
+          categoryNames: roleCategories.map((category) => category.name),
+          addedBy: actor.name ?? actor.email,
+        }),
+      });
     }
 
     // Give the new people access to what is already filed.

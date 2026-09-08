@@ -33,6 +33,9 @@ model User {
   googleSub   String?   @unique
   invitedById String?
   lastLoginAt DateTime?
+  /// Opts out of the weekly digest. Transactional mail — you have been added,
+  /// something private was shared with you — is always sent.
+  digestOptOut Boolean  @default(false)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -284,6 +287,36 @@ model ProductionMember {
 }
 
 // ---------------------------------------------------------------------------
+// Email
+// ---------------------------------------------------------------------------
+
+/// Every message the hub has sent or would have sent.
+///
+/// Kept for two reasons: while email is off (or the hub is running on the
+/// simulated Drive) messages are recorded instead of sent, so the whole flow
+/// is reviewable without a Google connection; and in production it is a
+/// straight audit trail of what the hub told people.
+model EmailMessage {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  body      String
+  /// WELCOME_BOARD | WELCOME_COMPANY | SHARE | DIGEST
+  kind      String
+  /// LOGGED (email off) | SENT | FAILED
+  status    String   @default("LOGGED")
+  error     String?
+  /// The document, production or user the message is about.
+  relatedId String?
+  createdAt DateTime @default(now())
+  sentAt    DateTime?
+
+  @@index([kind])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
 // Importing what already exists
 // ---------------------------------------------------------------------------
 
@@ -385,6 +418,10 @@ model OrgConfig {
   driveRootName  String   @default("Penn Players Hub")
   currentSeason  String?
   stampDocHeader Boolean  @default(true)
+  /// Whether the hub sends email at all. Off until an admin turns it on, so
+  /// nothing is ever emailed by surprise.
+  emailEnabled   Boolean  @default(false)
+  lastDigestAt   DateTime?
   updatedAt      DateTime @updatedAt
 }
 

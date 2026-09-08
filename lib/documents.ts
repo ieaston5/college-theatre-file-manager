@@ -1214,6 +1214,27 @@ export async function shareDocument(
   });
 
   const sharing = await syncSharing(document);
+
+  // Being given a private document is invisible otherwise — it appears on
+  // their dashboard with no announcement — so this one is worth an email.
+  if (document.visibility === "PRIVATE") {
+    const config = await getConfig();
+    const { privateShareNotice, sendEmailQuietly } = await import("./email");
+    sendEmailQuietly({
+      to: user.email,
+      relatedId: document.id,
+      message: privateShareNotice({
+        orgName: config.orgName,
+        appUrl: env.appUrl,
+        name: user.name,
+        sharedBy: actor.name ?? actor.email,
+        documentTitle: document.title,
+        documentUrl: `${env.appUrl.replace(/\/$/, "")}/documents/${document.id}`,
+        accessLevel: input.accessLevel,
+      }),
+    });
+  }
+
   await recordAudit({
     actor,
     action: "document.share",
