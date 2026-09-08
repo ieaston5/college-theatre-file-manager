@@ -57,6 +57,13 @@ on is flagged "Canva newer" in lists and offers a one-click re-export — which
 replaces the same Drive file, keeping its link, its sharing and its Drive
 revision history.
 
+Canva has no "design updated" webhook, so freshness is checked three ways, in
+order of usefulness: **when somebody opens the document** (any viewer, throttled
+to one check per five minutes, skipping designs edited in the last half hour),
+on the scheduled run, and on demand from the button. The first is what makes a
+daily schedule survivable — the copy is refreshed at the moment somebody is
+about to use it, rather than whenever the host next calls.
+
 **Finding.** The dashboard is organised by *type of information* (the sidebar),
 crossed with *production*. Every category and show has its own page; there is
 one search box over titles, descriptions, tags, categories and shows; filters

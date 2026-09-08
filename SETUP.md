@@ -323,12 +323,20 @@ downgraded — it fails the build with *"Hobby accounts are limited to daily cro
 jobs"*. Vercel also runs the job at any point inside the chosen hour, to spread
 load, so 08:00 means "some time between 08:00 and 08:59".
 
-Once a day is fine for the digest, which goes out weekly anyway. What it costs
-is freshness: a Canva copy can sit up to a day behind its original, and a
-re-share sweep started by changing the sharing mode makes 24 documents of
-progress per day rather than per hour. Both have buttons — *Admin → Scheduled*
-and *Refresh Canva copies now* on each document — so nothing is stuck, it just
-needs a person.
+Once a day is fine for the digest, which goes out weekly anyway, and for a
+re-share sweep, which the admin page runs interactively while you watch.
+
+Canva is the one that would suffer, so it does not rely on the schedule at all:
+**opening a mirrored document checks Canva there and then**, and re-exports if
+the design has moved on and been quiet for half an hour. Asking Canva is cheap,
+it happens at the moment somebody is about to use the copy, and any viewer
+triggers it — a cast member opening a poster is exactly who should not be handed
+last week's version. A check less than five minutes old is trusted, so a page
+that is reloaded repeatedly does not hammer Canva, and a design somebody is
+still editing is reported rather than grabbed mid-edit. Turning off *keep Canva
+copies up to date on their own* leaves the checks and stops the exports.
+
+So the schedule is a backstop for mirrors nobody has opened, not the mechanism.
 
 Three ways to get hourly:
 

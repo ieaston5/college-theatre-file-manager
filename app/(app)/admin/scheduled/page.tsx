@@ -140,7 +140,8 @@ export default async function AdminScheduledPage() {
                 Canva has no “design updated” webhook, so the only way to notice an edit is to ask.
                 Asking is cheap; exporting is not, so only designs that have moved on{" "}
                 <em>and then gone quiet for half an hour</em> get re-exported — nobody's copy is
-                taken mid-edit.
+                taken mid-edit. Opening a mirrored document also checks it there and then, so this
+                job is really a backstop for the ones nobody has looked at.
               </span>{" "}
               {stale.length > 0 ? (
                 <Badge tone="amber">{stale.length} behind</Badge>

@@ -15,7 +15,7 @@ import { sendDigests } from "./email/digest";
  */
 
 /** Don't re-export a design somebody is still working in. */
-const CANVA_QUIET_MINUTES = 30;
+export const CANVA_QUIET_MINUTES = 30;
 const CANVA_PER_RUN = 25;
 
 /**
@@ -121,6 +121,15 @@ export async function refreshStaleCanvaMirrors(options?: {
       const actor = await prisma.user.findUnique({ where: { id: mirror.creatorId } });
       if (!actor) continue;
       await exportCanvaMirror(actor, mirror.id, { silent: true });
+      // Actorless: the schedule did it, not a person. The run as a whole is
+      // summarised separately, but the document's own History should explain
+      // why the file in Drive changed.
+      await recordAudit({
+        action: "canva.export",
+        targetType: "Document",
+        targetId: mirror.id,
+        summary: `The hub took a fresh copy of “${mirror.title}” because the Canva design had changed`,
+      });
       refreshed += 1;
     } catch (error) {
       failures += 1;

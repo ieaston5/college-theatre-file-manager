@@ -22,6 +22,7 @@ import { decideAccessRequestAction } from "@/app/actions/rollover";
 import { ShareForm } from "@/components/forms/share-form";
 import { NewVersionUploader } from "@/components/forms/new-version-uploader";
 import { CanvaReexportForm } from "@/components/forms/canva-panel";
+import { CanvaWatch } from "@/components/canva-watch";
 import { checkCanvaFreshnessAction, simulateCanvaEditAction } from "@/app/actions/canva";
 import { canvaMirrorIsStale } from "@/lib/documents";
 import { CANVA_FORMAT_META, type CanvaExportFormat } from "@/lib/constants";
@@ -617,6 +618,11 @@ export default async function DocumentPage({
                 "No copy has been exported yet, so nobody but the Canva editors can see this. Export one below."
               )}
             </div>
+
+            {/* Freshness is checked when the page opens, not just on a timer —
+                see the action for why. Every viewer, because a cast member is
+                exactly who should not be handed last week's poster. */}
+            <CanvaWatch documentId={document.id} />
 
             {canEdit ? (
               <>
