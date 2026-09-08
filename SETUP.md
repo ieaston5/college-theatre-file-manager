@@ -72,7 +72,15 @@ In the [Google Cloud console](https://console.cloud.google.com), signed in as
 
 1. **New project** → name it `Penn Players Hub`.
 2. **APIs & Services → Library** → enable: *Google Drive API*, *Google Docs
-   API*, *Google Sheets API*, *Google Slides API*.
+   API*, *Google Sheets API*, *Google Slides API*, *Gmail API*.
+
+   The Gmail one is easy to skip and the failure is confusing: sign-in and
+   documents work fine, and then the first welcome email or digest fails with
+   *"Gmail API has not been used in project … before or it is disabled"*. The
+   hub sends its own mail from the hub account rather than through a third
+   party, which is why it needs it. Skip it deliberately if you never want the
+   hub to send email — everything else works, and messages are recorded in
+   Admin → Email instead of being sent.
 3. **APIs & Services → OAuth consent screen**
    - User type: **External**
    - App name `Penn Players Hub`, support email = the hub account
@@ -105,9 +113,9 @@ Restart `npm run dev`.
 
 1. Sign in to the hub as yourself.
 2. **Admin → Google & settings → Connect the hub's Google account**.
-3. Sign in as `pennplayers.hub@gmail.com` and approve Drive, Docs, Sheets and
-   Slides access. This is the only account that ever grants Drive access —
-   board members only sign in.
+3. Sign in as `pennplayers.hub@gmail.com` and approve Drive, Docs, Sheets,
+   Slides and *send email on your behalf*. This is the only account that ever
+   grants any of this — board members only sign in.
 4. The hub creates `Penn Players Hub / Productions` and
    `Penn Players Hub / Organisation-wide` in that account's Drive.
 5. Still in **Settings**, set the **Board Google Group** to your real group
@@ -124,8 +132,15 @@ Restart `npm run dev`.
 | Board | create and edit documents |
 | Member | read board documents |
 
-Adding someone does not email them — send them the address yourself. They must
-also be in the OAuth **test users** list from 2b until the app is verified.
+They must also be in the OAuth **test users** list from 2b until the app is
+verified, or Google will refuse their sign-in.
+
+Whether they get an email depends on one switch. The hub's email is **off until
+you turn it on** in *Admin → Email*, so nothing is ever sent by surprise: with
+it off, every message the hub would have sent is written to the log on that page
+instead, which is worth reading before you switch it on. With it on, adding a
+member sends them a short note explaining what the hub is and how to sign in,
+from the hub account.
 
 ### 2f. Cast and crew (nothing extra to configure)
 
@@ -194,7 +209,25 @@ account's Drive, then **Admin → Templates → Add a template** with the link. 
 `{{TITLE}}`, `{{PRODUCTION}}`, `{{CATEGORY}}`, `{{OWNER}}`, `{{DATE}}` anywhere
 in the file and they get filled in on each copy.
 
-### 2i. Check it end to end
+### 2i. Email and the weekly digest (optional)
+
+The hub can send its own mail from the hub account: a short welcome when
+somebody is added, a notice when a document is shared with one person, and a
+weekly digest of what changed — built per person, so a cast member's digest
+never mentions a board document.
+
+It is **off by default**, and while it is off every message is written to the
+log in *Admin → Email* rather than sent. Read a few, then:
+
+1. *Admin → Email* → **Send a test digest to myself**. It arrives from the hub
+   account. If it does not, that page shows the exact error.
+2. Turn email on with the switch.
+3. *Admin → Scheduled* → pick the digest day (Monday works well). Anybody can
+   silence their own digest from their profile.
+
+If you skipped the Gmail API in 2b, the test will fail with a message saying so.
+
+### 2j. Check it end to end
 
 - Create a Board document → it appears in the hub account's Drive in the right
   folder, and a board member on the group can open it.
@@ -207,9 +240,15 @@ in the file and they get filled in on each copy.
   *just save the link*.
 - Upload a PDF, then upload a second version over it. The Drive link should not
   change and Drive's *File → Version history* should show both.
-- Mirror a Canva design, edit it in Canva, and reload the document in the hub:
-  it should say the copy is behind. Re-export and check the Drive file kept its
-  link and gained a revision.
+- Mirror a Canva design, edit it in Canva, wait half an hour, and reload the
+  document in the hub: opening it checks Canva, so the copy in Drive should be
+  refreshed for you. Check the Drive file kept its link and gained a revision.
+- **Disable a member** in Admin → Members. They lose the hub immediately. Their
+  *Drive* access depends on which sharing mode you chose in Admin → Sharing: on
+  **per-member** sharing their permission is removed from every board document
+  too, which is what makes offboarding real; on **group** sharing the hub cannot
+  see inside a consumer Google Group, so you must also remove them from the
+  group by hand. The Sharing page says which you are on.
 
 ---
 
