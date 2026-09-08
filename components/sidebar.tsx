@@ -7,6 +7,7 @@ import { Icon } from "./icons";
 import { Avatar, Badge } from "./ui";
 import { cn } from "@/lib/utils";
 import { ROLE_META, isRole } from "@/lib/constants";
+import { signOutAction } from "@/app/actions/auth";
 
 export type SidebarCategory = {
   name: string;
@@ -201,7 +202,7 @@ export function Sidebar(props: SidebarProps) {
             <Badge tone={props.user.role === "ADMIN" ? "indigo" : "slate"}>
               {isRole(props.user.role) ? ROLE_META[props.user.role].label : props.user.role}
             </Badge>
-            <form action="/api/auth/signout" method="post">
+            <form action={signOutAction}>
               <button
                 type="submit"
                 className="flex items-center gap-1 rounded px-1.5 py-1 text-xs text-ink-500 transition hover:bg-ink-100 hover:text-ink-800"

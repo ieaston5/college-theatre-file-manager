@@ -19,5 +19,9 @@ prisma/*.db-journal
 .mock-drive/
 .mock-canva/
 
+# Metadata dumps from `npm run backup`. They hold no credentials, but they do
+# hold every member's address — keep them out of the repository.
+backups/
+
 .DS_Store
 *.log

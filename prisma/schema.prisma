@@ -519,6 +519,12 @@ model OrgConfig {
   /// Where archived shows' folders are moved at season rollover.
   archiveFolderId String?
   lastRolloverAt  DateTime?
+  /// Day of the week the digest goes out, 0 = Sunday. Null = never.
+  digestDay          Int?
+  /// Whether the scheduled run re-exports Canva mirrors that have fallen behind.
+  canvaAutoRefresh   Boolean   @default(true)
+  lastCronAt         DateTime?
+  lastCanvaRefreshAt DateTime?
   updatedAt      DateTime @updatedAt
 }
 
@@ -570,6 +576,22 @@ model PendingUpload {
 
   @@index([createdById])
   @@index([status])
+}
+
+/// A fixed-window rate limit counter.
+///
+/// Database-backed rather than in-memory because the app is meant to run on
+/// serverless, where every request may be a fresh process and an in-memory
+/// counter would protect nothing. One row per key per window; old rows are
+/// swept opportunistically.
+model RateLimit {
+  id        String   @id @default(cuid())
+  bucket    String
+  windowAt  DateTime
+  count     Int      @default(0)
+
+  @@unique([bucket, windowAt])
+  @@index([windowAt])
 }
 
 /// Short-lived OAuth state, so the callback can verify the round trip.

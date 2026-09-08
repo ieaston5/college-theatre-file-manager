@@ -16,6 +16,8 @@ const ERRORS: Record<string, string> = {
   dev_login_disabled: "Local sign-in is switched off on this environment.",
   missing_email: "Pick an account to sign in as.",
   access_denied: "You cancelled the Google sign-in.",
+  rate_limited:
+    "That is a lot of sign-in attempts from this connection. Wait a few minutes and try again.",
 };
 
 export default async function LoginPage({

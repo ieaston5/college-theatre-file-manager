@@ -507,6 +507,14 @@ export async function recordUploadedDocument(
     },
   });
 
+  // The upload session was opened before this row existed, so the file's
+  // labels are missing the one that matters most for a rebuild: its hub id.
+  try {
+    await driveProvider().setAppProperties(input.file.id, { hubDocumentId: document.id });
+  } catch (error) {
+    console.error("[documents] could not label the uploaded file", error);
+  }
+
   const sharing = await syncSharing(document);
   warnings.push(...sharing.warnings);
 
@@ -1147,6 +1155,26 @@ export async function updateDocument(
       } catch (error) {
         warnings.push(`Could not move the file in Drive: ${(error as Error).message}`);
       }
+    }
+  }
+
+  // The file's own labels are the fallback for scripts/rebuild-from-drive.ts,
+  // so they have to follow the hub rather than record where a document started
+  // out. Best effort: a document is not worth failing to save over a label.
+  if (
+    document.googleFileId &&
+    hubOwnsFile &&
+    (movedShelf || current.visibility !== document.visibility)
+  ) {
+    try {
+      await driveProvider().setAppProperties(document.googleFileId, {
+        hubDocumentId: document.id,
+        hubCategory: category.slug,
+        hubProduction: production?.slug ?? "",
+        hubVisibility: document.visibility,
+      });
+    } catch (error) {
+      console.error("[documents] could not update hub labels in Drive", error);
     }
   }
 

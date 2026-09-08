@@ -327,6 +327,20 @@ export class GoogleDriveProvider implements DriveProvider {
     }
   }
 
+  async setAppProperties(fileId: string, properties: Record<string, string>): Promise<void> {
+    const drive = await this.drive();
+    try {
+      // Drive merges appProperties key by key; a key set to null is removed.
+      await drive.files.update({
+        fileId,
+        requestBody: { appProperties: properties },
+        supportsAllDrives: true,
+      });
+    } catch (error) {
+      wrap(error, "Updating the file's hub labels");
+    }
+  }
+
   async moveFile(fileId: string, parentFolderId: string): Promise<void> {
     const drive = await this.drive();
     try {

@@ -214,6 +214,10 @@ export function docTypeFromMime(mimeType: string | null | undefined): DocType {
 export const VISIBILITIES = ["PRIVATE", "COMPANY", "BOARD"] as const;
 export type Visibility = (typeof VISIBILITIES)[number];
 
+export function isVisibility(value: string | null | undefined): value is Visibility {
+  return typeof value === "string" && (VISIBILITIES as readonly string[]).includes(value);
+}
+
 export const VISIBILITY_META: Record<
   Visibility,
   { label: string; blurb: string; icon: string; tone: Tone }

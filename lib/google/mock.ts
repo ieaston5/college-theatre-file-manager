@@ -279,6 +279,14 @@ export class MockDriveProvider implements DriveProvider {
     save(state);
   }
 
+  async setAppProperties(fileId: string, properties: Record<string, string>): Promise<void> {
+    const state = load();
+    const file = state.files[fileId];
+    if (!file) return;
+    file.appProperties = { ...(file.appProperties ?? {}), ...properties };
+    save(state);
+  }
+
   async moveFile(fileId: string, parentFolderId: string): Promise<void> {
     const state = load();
     const file = state.files[fileId];

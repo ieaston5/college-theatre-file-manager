@@ -10,6 +10,7 @@ import { seedChecklistFor } from "@/lib/checklist";
 import { shareDocument } from "@/lib/documents";
 import { getConfig } from "@/lib/config";
 import { env } from "@/lib/env";
+import { rateLimit, tooManyMessage } from "@/lib/rate-limit";
 import { text, toActionState, type ActionState } from "./shared";
 
 function refreshEverywhere() {
@@ -79,6 +80,9 @@ export async function requestAccessAction(
   };
 
   try {
+    const limit = await rateLimit("accessRequest", user.id);
+    if (!limit.ok) return { error: tooManyMessage(limit, "access requests") };
+
     const document = await prisma.document.findUnique({
       where: { id: documentId },
       include: { shares: { select: { userId: true } }, creator: true, category: true },

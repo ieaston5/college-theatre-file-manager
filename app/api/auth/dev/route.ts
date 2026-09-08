@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { issueSession } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { callerKey, rateLimit, rateLimitClear } from "@/lib/rate-limit";
 
 /**
  * Local-only shortcut so the hub can be evaluated without a Google project.
@@ -11,6 +12,11 @@ import { recordAudit } from "@/lib/audit";
 export async function POST(request: NextRequest) {
   if (!env.allowDevLogin) {
     return NextResponse.redirect(new URL("/login?error=dev_login_disabled", request.url));
+  }
+
+  const limit = await rateLimit("login", callerKey(request.headers));
+  if (!limit.ok) {
+    return NextResponse.redirect(new URL("/login?error=rate_limited", request.url));
   }
 
   const form = await request.formData();
@@ -36,6 +42,7 @@ export async function POST(request: NextRequest) {
     data: { status: "ACTIVE", lastLoginAt: new Date() },
   });
   await issueSession(user.id);
+  await rateLimitClear("login", callerKey(request.headers));
   await recordAudit({
     actor: user,
     action: "auth.login",

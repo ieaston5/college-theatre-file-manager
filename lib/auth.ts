@@ -92,6 +92,12 @@ export async function assertCanCreate() {
   if (!canCreateDocuments(viewer)) {
     throw new Error("You do not have permission to add documents to the hub.");
   }
+  // Every document filed here means Drive writes and a handful of sharing
+  // calls, all against the hub account's quota. This is the one place all the
+  // creation paths pass through, so the leash goes here.
+  const { rateLimit, tooManyMessage } = await import("./rate-limit");
+  const limit = await rateLimit("documentCreate", user.id);
+  if (!limit.ok) throw new Error(tooManyMessage(limit, "new documents"));
   return { user, viewer };
 }
 

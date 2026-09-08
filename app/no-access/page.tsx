@@ -2,6 +2,7 @@ import { getConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { Icon } from "@/components/icons";
 import { buttonClass } from "@/components/ui";
+import { signOutAction } from "@/app/actions/auth";
 
 export default async function NoAccessPage({
   searchParams,
@@ -74,7 +75,7 @@ export default async function NoAccessPage({
         ) : null}
 
         <div className="mt-6 flex justify-center gap-2">
-          <form action="/api/auth/signout" method="post">
+          <form action={signOutAction}>
             <button type="submit" className={buttonClass("secondary")}>
               Sign in as someone else
             </button>

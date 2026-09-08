@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { visibleDocumentsWhere, type Viewer } from "./access";
+import { containsInsensitive, containsInsensitiveNullable } from "./db-portability";
 
 export const DOCUMENT_LIST_INCLUDE = {
   category: { select: { name: true, slug: true, icon: true, color: true } },
@@ -18,20 +19,18 @@ function one(params: SearchParams, key: string): string | undefined {
 }
 
 /**
- * Text search across title, description and tag names.
- *
- * SQLite's LIKE is case-insensitive for ASCII, which is what `contains`
- * compiles to, so this behaves as expected locally. On Postgres (Pass 3) add
- * `mode: "insensitive"` to each clause.
+ * Text search across title, description, tags, production and category.
+ * Case-insensitivity is handled in lib/db-portability so the behaviour is the
+ * same on SQLite and Postgres.
  */
 function searchWhere(term: string): Prisma.DocumentWhereInput {
   return {
     OR: [
-      { title: { contains: term } },
-      { description: { contains: term } },
-      { tags: { some: { name: { contains: term } } } },
-      { production: { name: { contains: term } } },
-      { category: { name: { contains: term } } },
+      { title: containsInsensitive(term) },
+      { description: containsInsensitiveNullable(term) },
+      { tags: { some: { name: containsInsensitive(term) } } },
+      { production: { name: containsInsensitive(term) } },
+      { category: { name: containsInsensitive(term) } },
     ],
   };
 }

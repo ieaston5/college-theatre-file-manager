@@ -10,6 +10,7 @@ import { openResumableCreate, openResumableUpdate } from "@/lib/google/upload";
 import { UPLOADED_DOC_TYPES, type DocType } from "@/lib/constants";
 import { firstError, uploadStartSchema } from "@/lib/validation";
 import { randomToken } from "@/lib/crypto";
+import { rateLimit, tooManyMessage } from "@/lib/rate-limit";
 import { applyNamingTemplate, fileNameToTitle, withExtension } from "@/lib/utils";
 
 /**
@@ -27,6 +28,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "You do not have permission to add documents to the hub." },
       { status: 403 },
+    );
+  }
+
+  // Keyed on the user rather than the address: every caller here is signed in,
+  // and a signed-in id is the thing that cannot be spoofed.
+  const limit = await rateLimit("uploadStart", user.id);
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: tooManyMessage(limit, "uploads") },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
     );
   }
 

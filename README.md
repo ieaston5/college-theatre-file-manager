@@ -102,6 +102,20 @@ the titles of private documents.
 hub creates, so nothing disappears when a board member graduates. Existing
 files can be registered (link + metadata) without changing their ownership.
 
+**On its own.** One request an hour to `/api/cron` (Vercel Cron, or anything
+else that can call a URL) finishes re-share sweeps, re-exports Canva copies
+whose originals have moved on and gone quiet, and sends the weekly digest on
+the chosen day. Every job decides for itself whether there is anything to do,
+so a missed run costs nothing and a double run does nothing twice. Admin →
+Scheduled shows what ran and lets you trigger it by hand.
+
+**If it all goes wrong.** `npm run backup` writes the whole index — categories,
+shows, members, documents, who may see what — to one JSON file with no
+credentials in it, and `npm run restore` puts it back. Failing that, every file
+the hub created or imported carries its category, show and visibility in its own
+Drive `appProperties`, and `npm run rebuild` reconstructs the dashboard from the
+folder tree alone.
+
 ---
 
 ## Two modes
@@ -142,9 +156,17 @@ lib/
   google/                 oauth.ts · real.ts (Drive API) · mock.ts · upload.ts · index.ts
   canva/                  oauth.ts (PKCE) · real.ts (Connect API) · mock.ts · index.ts
   constants.ts            roles, doc types, visibilities — the enum vocabulary
+  cron.ts                 the hourly jobs; each one decides if it has work
+  rate-limit.ts           database-backed fixed-window limits
+  db-portability.ts       the SQLite/Postgres differences, in one place
 prisma/
   schema.prisma           SQLite now, portable to Postgres
   seed.ts                 sample categories, shows, members and documents
+scripts/
+  export-metadata.ts      npm run backup
+  restore-metadata.ts     npm run restore
+  rebuild-from-drive.ts   npm run rebuild — the no-backup disaster path
+  use-database.mjs        npm run use-db
 ```
 
 ## Scripts
@@ -157,6 +179,10 @@ prisma/
 | `npm run db:studio` | browse the database |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | production build |
+| `npm run backup` | dump the index to `backups/hub-<timestamp>.json` |
+| `npm run restore -- <file> [--dry-run]` | put a dump back, row by row |
+| `npm run rebuild -- [--apply]` | reconstruct documents from Drive's own labels |
+| `npm run use-db -- <sqlite\|postgres>` | switch the Prisma datasource |
 
 ## Notes for whoever picks this up
 
@@ -167,8 +193,12 @@ prisma/
 - The seeded board group is a placeholder
   (`pennplayers-board@googlegroups.com`). Change it in Admin → Settings before
   connecting a real Google account.
-- Text search uses Prisma `contains`, which is case-insensitive on SQLite. When
-  moving to Postgres, add `mode: "insensitive"` in `lib/queries.ts`.
+- Text search goes through `containsInsensitive` in `lib/db-portability.ts`,
+  which adds Prisma's `mode: "insensitive"` only when `DATABASE_PROVIDER` says
+  Postgres — the option does not exist for SQLite and Prisma rejects it.
+- Rate limits live in `lib/rate-limit.ts`, counted in the database rather than
+  in memory because a serverless host may answer each request from a different
+  process. Response headers, including the CSP, are in `next.config.ts`.
 - Local sign-in must be switched off (`ALLOW_DEV_LOGIN=false`) before this goes
   anywhere public. It is disabled automatically in production builds.
 - **Restart `npm run dev` after any schema change.** Changing

@@ -84,6 +84,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "checklist.tick": "Ticked a checklist item",
   "checklist.template": "Updated the checklist template",
   "rollover.run": "Rolled the season over",
+  "cron.run": "Scheduled run",
   "config.update": "Updated settings",
   "drive.connect": "Connected the Google account",
   "drive.disconnect": "Disconnected the Google account",

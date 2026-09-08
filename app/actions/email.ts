@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { assertRole, getCurrentUser } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { sendDigests } from "@/lib/email/digest";
+import { rateLimit, tooManyMessage } from "@/lib/rate-limit";
 import { toActionState, type ActionState } from "./shared";
 
 function refresh() {
@@ -29,6 +30,13 @@ export async function sendDigestAction(_prev: ActionState, form: FormData): Prom
   try {
     const actor = await assertRole("ADMIN");
     const justMe = form.get("justMe") !== null;
+
+    // The hub sends through one Gmail account with a real daily quota, and this
+    // button mails the whole company at once. Worth a leash even for admins.
+    if (!justMe) {
+      const limit = await rateLimit("emailSend", actor.id);
+      if (!limit.ok) return { error: tooManyMessage(limit, "digest sends") };
+    }
 
     const result = await sendDigests(justMe ? { onlyTo: actor.email } : undefined);
     await recordAudit({

@@ -340,6 +340,22 @@ export async function fileImportItems(
       // adds access without touching anybody else's.
       await syncSharing(document);
 
+      // Label the file with where the hub filed it, so it can be recovered
+      // from Drive alone (scripts/rebuild-from-drive.ts). Needs edit access,
+      // which the hub does not have on every imported file — hence best
+      // effort, the same as the rename below.
+      try {
+        await provider.setAppProperties(item.googleFileId, {
+          hubDocumentId: document.id,
+          hubCategory: category.slug,
+          hubProduction: production?.slug ?? "",
+          hubVisibility: decision.visibility,
+        });
+      } catch {
+        // Not worth reporting: the import itself succeeded, and the file will
+        // be recovered from its folder rather than its label.
+      }
+
       // Optionally bring the Drive name into line with the hub's rule. This
       // needs edit access on a file the hub usually does not own, so a refusal
       // is reported rather than treated as a failure to file.

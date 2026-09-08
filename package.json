@@ -12,6 +12,10 @@
     "db:studio": "prisma studio",
     "db:seed": "node --env-file=.env --import tsx prisma/seed.ts",
     "db:reset": "rm -f prisma/dev.db && prisma db push && npm run db:seed",
+    "backup": "node --env-file=.env --import tsx scripts/export-metadata.ts",
+    "restore": "node --env-file=.env --import tsx scripts/restore-metadata.ts",
+    "rebuild": "node --env-file=.env --import tsx scripts/rebuild-from-drive.ts",
+    "use-db": "node scripts/use-database.mjs",
     "setup": "prisma generate && prisma db push && npm run db:seed"
   },
   "prisma": {

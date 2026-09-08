@@ -213,30 +213,158 @@ in the file and they get filled in on each copy.
 
 ---
 
-## Stage 3 — when you want it public-facing
+## Stage 3 — put it on the internet
 
-Not done yet; this is the third pass of the plan. What it involves:
+Everything below is ready to run. Budget an hour, most of it waiting for a
+database to provision. Do it in this order — the Google redirect URIs need the
+real domain, which you do not have until the deploy exists.
 
-1. **Postgres.** Change `datasource db { provider = "postgresql" }` in
-   `prisma/schema.prisma`, point `DATABASE_URL` at a hosted database (Neon and
-   Supabase both have free tiers), run `npx prisma migrate dev --name init`.
-   Add `mode: "insensitive"` to the search clauses in `lib/queries.ts`.
-2. **Deploy** to Vercel from GitHub. Environment variables: `DATABASE_URL`,
-   `APP_URL` (the real https URL), `SESSION_SECRET`, `APP_ENCRYPTION_KEY`,
-   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DRIVE_MODE=google`,
-   `ALLOW_DEV_LOGIN=false`.
-3. **New secrets for production** — do not reuse the local ones:
-   `openssl rand -base64 48` for `SESSION_SECRET`, `openssl rand -base64 32`
-   for `APP_ENCRYPTION_KEY`. Note that changing `APP_ENCRYPTION_KEY` makes the
-   stored Google refresh token unreadable; reconnect the account afterwards.
-4. **Redirect URIs** — add `https://<your-domain>/api/auth/google/callback` and
-   `https://<your-domain>/api/google/callback` to the OAuth client.
-5. **Google verification** — either keep the app in testing mode with the board
-   as test users (simplest, and fine for a club), or submit for verification if
-   you want to drop the warning screen.
-6. **Backups** — whatever your Postgres host offers. The documents themselves
-   live in Google Drive, so the database is metadata only, but it is the part
-   that makes the pile navigable.
+### 3a. Move to Postgres
+
+SQLite is a file on one machine, which is fine locally and no use at all on a
+host that starts a fresh container per request. One command switches the
+project over:
+
+```
+npm run use-db -- postgres
+```
+
+That rewrites the datasource in `prisma/schema.prisma` and prints the follow-up
+commands. Then get a database — [Neon](https://neon.tech) and
+[Supabase](https://supabase.com) both have a free tier that is plenty for a
+club — and put **both** of its URLs in `.env`:
+
+```
+DATABASE_PROVIDER=postgresql
+DATABASE_URL="postgres://…?sslmode=require&pgbouncer=true"   # pooled: the app
+DIRECT_URL="postgres://…?sslmode=require"                    # direct: migrations
+```
+
+Two URLs because serverless opens and drops connections constantly, which a
+pooler is built for and a Postgres server is not; migrations need the direct
+one because they take advisory locks a pooler will not pass through. Neon calls
+these the *pooled* and *unpooled* connection strings; Supabase calls them the
+*connection pooler* and *direct connection*.
+
+Then create the schema and check it:
+
+```
+npx prisma migrate dev --name init
+npm run typecheck
+```
+
+`DATABASE_PROVIDER=postgresql` also switches the hub's search from
+case-sensitive `LIKE` to Postgres' `ILIKE`, so searching "budget" starts
+matching "Budget" too.
+
+To go back to SQLite for local work: `npm run use-db -- sqlite`.
+
+The datasource block also needs `directUrl` while you are on Postgres — the
+switcher prints the exact three lines.
+
+### 3b. Deploy to Vercel
+
+Push the repository to GitHub, then *Add New → Project* in Vercel and pick it.
+It is a stock Next.js app: no build settings to change. Set these environment
+variables (Project → Settings → Environment Variables) before the first
+deploy:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | the **pooled** Postgres URL |
+| `DIRECT_URL` | the **direct** Postgres URL |
+| `DATABASE_PROVIDER` | `postgresql` |
+| `APP_URL` | `https://<your-domain>` — no trailing slash |
+| `SESSION_SECRET` | fresh: `openssl rand -base64 48` |
+| `APP_ENCRYPTION_KEY` | fresh: `openssl rand -base64 32` |
+| `CRON_SECRET` | fresh: `openssl rand -base64 32` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | from stage 2b |
+| `DRIVE_MODE` | `google` |
+| `ALLOW_DEV_LOGIN` | `false` |
+| `BOOTSTRAP_ADMIN_EMAILS` | your address, so you can sign in to an empty hub |
+| `CANVA_CLIENT_ID` / `CANVA_CLIENT_SECRET` | only if you use Canva (2g) |
+
+**Generate new secrets; do not copy the local ones.** They have been in a file
+on your laptop, in your shell history, and possibly in a screenshot. Note that
+`APP_ENCRYPTION_KEY` is what the stored Google refresh token is encrypted with,
+so a new key means reconnecting the Google account on the new deployment — 
+which you have to do anyway, since the token does not travel.
+
+### 3c. Point Google at the real domain
+
+Back in the OAuth client (stage 2b), add to **Authorised redirect URIs**:
+
+```
+https://<your-domain>/api/auth/google/callback
+https://<your-domain>/api/google/callback
+```
+
+Leave the `localhost` ones in place; an OAuth client can have several, and you
+will still want to run it locally. If you use Canva, add
+`https://<your-domain>/api/canva/callback` to the Canva app's return URLs too.
+
+Keep the app in **Testing** status with the board (and any company members who
+sign in) as test users. That caps you at 100 accounts and shows an "unverified
+app" screen once per person, and it avoids Google's verification review
+entirely. Verification for `drive` scope means a security assessment (CASA)
+repeated annually, at real cost — not worth it for one club. If you outgrow 100
+people, the honest answer is a Google Workspace account rather than
+verification.
+
+### 3d. Switch the schedule on
+
+`vercel.json` already asks Vercel to call `/api/cron` hourly; it starts working
+as soon as `CRON_SECRET` is set. Check *Admin → Scheduled* an hour after the
+first deploy: "last scheduled run" should be recent. Anything else that can
+make an HTTPS request will do the same job if you are not on Vercel —
+
+```
+curl -H "Authorization: Bearer $CRON_SECRET" https://<your-domain>/api/cron
+```
+
+Vercel's Hobby plan runs cron jobs once a day rather than hourly. That is
+enough for the digest, and it means Canva copies may sit up to a day behind;
+the button on each document still re-exports on demand.
+
+### 3e. First sign-in on the real thing
+
+1. Sign in with your own address — `BOOTSTRAP_ADMIN_EMAILS` makes it an admin.
+2. *Admin → Google connection*: connect the hub account (stage 2a). This is a
+   separate connection from your sign-in and has to be done again per
+   deployment.
+3. *Admin → Settings*: set the board group address and the naming template.
+4. *Admin → Members*: add the board. They get a welcome email if email is on.
+5. *Admin → Import*: point it at your existing Drive folder.
+
+### 3f. Back it up
+
+The files live in Google Drive, so Google is backing those up. What is only
+here is the *organisation* — categories, shows, the board list, who may see
+what — and that is the part that makes the pile navigable.
+
+```
+npm run backup                     # writes backups/hub-<timestamp>.json
+npm run restore -- <file> --dry-run
+npm run restore -- <file>
+```
+
+The dump deliberately holds no Google or Canva tokens, so it is safe to keep in
+Drive itself. Run it before each season rollover and before any upgrade. Your
+Postgres host almost certainly also offers point-in-time restore — use both;
+they fail differently.
+
+If you ever lose the database *and* the dumps, every file the hub created or
+imported carries its own labels in Drive (category, show, visibility), and:
+
+```
+npm run rebuild                    # reports what it would recover
+npm run rebuild -- --apply
+```
+
+reconstructs the index from the folder tree. It cannot bring back tags,
+descriptions written in the hub, per-person shares or the activity log, and it
+files everything as read-only until you say otherwise — but it gets the
+dashboard back.
 
 ---
 

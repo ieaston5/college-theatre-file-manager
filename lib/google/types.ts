@@ -75,6 +75,15 @@ export interface DriveProvider {
   getFile(fileId: string): Promise<DriveFileInfo | null>;
   listFolder(folderId: string): Promise<DriveFileInfo[]>;
   renameFile(fileId: string, name: string): Promise<void>;
+  /**
+   * Merge hub labels into the file's appProperties.
+   *
+   * These labels are how a file says which category, show and visibility it
+   * belongs to, and they are the only thing scripts/rebuild-from-drive.ts has
+   * to work from if the database is ever lost. They therefore have to be
+   * updated when the hub's answer changes, not just when the file is created.
+   */
+  setAppProperties(fileId: string, properties: Record<string, string>): Promise<void>;
   moveFile(fileId: string, parentFolderId: string): Promise<void>;
   updateDescription(fileId: string, description: string): Promise<void>;
   trashFile(fileId: string): Promise<void>;
