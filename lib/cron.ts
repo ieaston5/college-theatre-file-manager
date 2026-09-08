@@ -138,16 +138,34 @@ export async function refreshStaleCanvaMirrors(options?: {
   return { checked, refreshed, failures, stale };
 }
 
-/** Whether the digest is due: the configured day, and not already sent this week. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the digest is due: the configured day, and not already sent.
+ *
+ * With an hourly schedule the "is it the right day" test had two dozen chances
+ * to be true each week. On a daily schedule it has exactly one — so a single
+ * missed or failed run would silently cost a whole week. Hence the catch-up
+ * clause: once a digest is more than eight days overdue it goes out on the
+ * next run whatever the weekday, and the schedule resettles from there.
+ *
+ * The weekday is read in the server's timezone, which on a host like Vercel is
+ * UTC rather than Philadelphia.
+ */
 export function digestIsDue(config: {
   digestDay: number | null;
   lastDigestAt: Date | null;
   emailEnabled: boolean;
 }): boolean {
   if (!config.emailEnabled || config.digestDay === null) return false;
-  if (new Date().getDay() !== config.digestDay) return false;
-  if (!config.lastDigestAt) return true;
-  return Date.now() - config.lastDigestAt.getTime() > 6 * 24 * 60 * 60 * 1000;
+
+  // Never sent: wait for the chosen day rather than mailing everybody the
+  // moment somebody turns email on.
+  if (!config.lastDigestAt) return new Date().getDay() === config.digestDay;
+
+  const since = Date.now() - config.lastDigestAt.getTime();
+  if (new Date().getDay() === config.digestDay) return since > 6 * DAY_MS;
+  return since > 8 * DAY_MS;
 }
 
 export async function runScheduledJobs(options?: {

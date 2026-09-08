@@ -47,7 +47,7 @@ export function ScheduleForm({
           htmlFor="digestDay"
           hint={
             emailEnabled
-              ? "Monday morning tends to work: it lands before the week's rehearsals rather than after them."
+              ? "Monday tends to work: it lands before the week's rehearsals rather than after them. The day is read in the server's timezone (UTC when hosted), so a digest set for Monday can arrive late on Sunday evening locally. If a send is ever missed, the next run more than eight days later catches it up rather than skipping the week."
               : "Email is switched off, so this will not send anything until you turn it on in Admin → Email."
           }
         >
