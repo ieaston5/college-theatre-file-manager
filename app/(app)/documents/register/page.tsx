@@ -1,4 +1,11 @@
-import { requireRole } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { requireUser } from "@/lib/auth";
+import {
+  canCreateDocuments,
+  creatableCategoryIds,
+  creatableProductionIds,
+  getViewerContext,
+} from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { getSetupState } from "@/lib/config";
 import { env } from "@/lib/env";
@@ -6,16 +13,29 @@ import { DocumentRegisterForm } from "@/components/forms/document-register-form"
 import { Banner, PageHeader } from "@/components/ui";
 
 export default async function RegisterDocumentPage() {
-  await requireRole("BOARD");
+  const user = await requireUser();
+  const viewer = await getViewerContext(user);
+  if (!canCreateDocuments(viewer)) redirect("/no-access?need=board");
+  const companyCreatorOnly = !viewer.isBoard;
   const setup = await getSetupState();
 
   const [categories, productions] = await Promise.all([
     prisma.category.findMany({
-      where: { archived: false },
+      where: {
+        archived: false,
+        ...(creatableCategoryIds(viewer) === null
+          ? {}
+          : { id: { in: creatableCategoryIds(viewer)! } }),
+      },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.production.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: {
+        status: { not: "ARCHIVED" },
+        ...(creatableProductionIds(viewer) === null
+          ? {}
+          : { id: { in: creatableProductionIds(viewer)! } }),
+      },
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
     }),
   ]);
@@ -45,6 +65,7 @@ export default async function RegisterDocumentPage() {
           icon: category.icon,
           description: category.description,
           companyVisible: category.companyVisible,
+          defaultEditAccess: category.defaultEditAccess,
         }))}
         productions={productions.map((production) => ({
           id: production.id,
@@ -56,6 +77,7 @@ export default async function RegisterDocumentPage() {
         groupEmail={setup.config.groupEmail}
         hubAccountEmail={setup.account?.email ?? null}
         driveMode={env.driveMode}
+        companyCreatorOnly={companyCreatorOnly}
       />
     </div>
   );

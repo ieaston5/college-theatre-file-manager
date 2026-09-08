@@ -3,6 +3,7 @@ import {
   ACCESS_LEVELS,
   CANVA_EXPORT_FORMATS,
   CATEGORY_SCOPES,
+  EDIT_ACCESS_LEVELS,
   CREATABLE_DOC_TYPES,
   DOC_TYPES,
   PRODUCTION_STATUSES,
@@ -36,6 +37,7 @@ export const createDocumentSchema = z.object({
     .optional()
     .transform((value) => (value && value !== "none" ? value : undefined)),
   visibility: z.enum(VISIBILITIES),
+  editAccess: z.enum(EDIT_ACCESS_LEVELS).optional(),
   templateId: z
     .string()
     .optional()
@@ -54,6 +56,7 @@ export const registerDocumentSchema = z.object({
     .optional()
     .transform((value) => (value && value !== "none" ? value : undefined)),
   visibility: z.enum(VISIBILITIES),
+  editAccess: z.enum(EDIT_ACCESS_LEVELS).optional(),
   tags: optionalText(400),
   /** Move the file into the hub's Drive folder tree (needs edit access). */
   organize: z.coerce.boolean().optional().default(false),
@@ -72,6 +75,7 @@ export const updateDocumentSchema = z.object({
     .optional()
     .transform((value) => (value && value !== "none" ? value : undefined)),
   visibility: z.enum(VISIBILITIES),
+  editAccess: z.enum(EDIT_ACCESS_LEVELS).optional(),
   tags: optionalText(400),
   pinned: z.coerce.boolean().optional().default(false),
 });
@@ -87,6 +91,7 @@ export const canvaMirrorSchema = z.object({
     .optional()
     .transform((value) => (value && value !== "none" ? value : undefined)),
   visibility: z.enum(VISIBILITIES),
+  editAccess: z.enum(EDIT_ACCESS_LEVELS).optional(),
   tags: optionalText(400),
   format: z.enum(CANVA_EXPORT_FORMATS).default("pdf"),
 });
@@ -103,6 +108,7 @@ export const uploadStartSchema = z.object({
     .optional()
     .transform((value) => (value && value !== "none" ? value : undefined)),
   visibility: z.enum(VISIBILITIES).optional(),
+  editAccess: z.enum(EDIT_ACCESS_LEVELS).optional(),
   tags: optionalText(400),
   fileName: z.string().trim().min(1).max(300),
   mimeType: z.string().trim().min(1).max(255).default("application/octet-stream"),
@@ -148,6 +154,7 @@ export const categorySchema = z.object({
   folderName: optionalText(120),
   sortOrder: z.coerce.number().int().min(0).max(999).default(0),
   companyVisible: z.coerce.boolean().optional().default(false),
+  defaultEditAccess: z.enum(EDIT_ACCESS_LEVELS).default("BOARD"),
   keywords: optionalText(400),
 });
 
@@ -191,6 +198,7 @@ export const productionRoleSchema = z.object({
   description: optionalText(400),
   sortOrder: z.coerce.number().int().min(0).max(999).default(0),
   isDefault: z.coerce.boolean().optional().default(false),
+  canCreate: z.coerce.boolean().optional().default(false),
   categoryIds: z.array(z.string()).default([]),
 });
 

@@ -20,15 +20,19 @@ export default async function NoAccessPage({
     take: 4,
   });
 
-  const heading = need
+  const heading = need === "admin"
     ? "That area is for admins"
-    : reason === "disabled"
+    : need
+      ? "You cannot add documents"
+      : reason === "disabled"
       ? "This account has been switched off"
       : "You are not on the hub's member list";
 
-  const body = need
+  const body = need === "admin"
     ? "Your account does not have the admin role, so this part of the hub is hidden. Ask a current admin if you need it."
-    : reason === "disabled"
+    : need
+      ? "Your role on the hub is read-only, so you can open what has been shared with you but cannot file anything new. Whoever runs your show can change that if you need it."
+      : reason === "disabled"
       ? "Your access to the hub was disabled — usually because a board term ended. An admin can turn it back on."
       : `The hub only opens for board members who have been added by an admin.${
           email ? ` Nothing is set up for ${email} yet.` : ""

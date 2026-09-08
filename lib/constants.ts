@@ -241,6 +241,56 @@ export const VISIBILITY_META: Record<
 
 export const MEMBER_STATUSES = ["ACTIVE", "REMOVED"] as const;
 
+// --- who can change a file's contents ---------------------------------------
+
+/**
+ * Edit access is a second, narrower ladder than visibility: everyone who can
+ * see a document reads it, and this says how far up the same ladder writing
+ * goes. It governs Google file contents only — hub curation (category,
+ * production, visibility, deletion) always stays with the creator and admins,
+ * so an editor can never widen who sees something.
+ */
+export const EDIT_ACCESS_LEVELS = ["CREATOR_ONLY", "BOARD", "COMPANY"] as const;
+export type EditAccess = (typeof EDIT_ACCESS_LEVELS)[number];
+
+export const EDIT_ACCESS_META: Record<
+  EditAccess,
+  { label: string; blurb: string; icon: string; tint: string }
+> = {
+  CREATOR_ONLY: {
+    label: "Only me",
+    blurb:
+      "Everyone who can see it reads it. Only you — and anyone you name — can change the file. Right for scripts, reports and anything that should not be edited by committee.",
+    icon: "lock",
+    tint: "#d97706",
+  },
+  BOARD: {
+    label: "The board",
+    blurb: "Board members can edit the file. A company that can see it still only reads.",
+    icon: "users",
+    tint: "#5b3de0",
+  },
+  COMPANY: {
+    label: "Everyone who can see it",
+    blurb:
+      "Anyone the document is shared with can edit the file, including the company. Right for a contact sheet people fill in themselves.",
+    icon: "theater",
+    tint: "#16a34a",
+  },
+};
+
+/** Editors must be a subset of viewers, so the ladder is capped by visibility. */
+export function allowedEditAccess(visibility: string): EditAccess[] {
+  if (visibility === "PRIVATE") return ["CREATOR_ONLY"];
+  if (visibility === "COMPANY") return ["CREATOR_ONLY", "BOARD", "COMPANY"];
+  return ["CREATOR_ONLY", "BOARD"];
+}
+
+export function clampEditAccess(visibility: string, editAccess: string): EditAccess {
+  const allowed = allowedEditAccess(visibility);
+  return allowed.includes(editAccess as EditAccess) ? (editAccess as EditAccess) : allowed[0];
+}
+
 // --- how board documents reach the board ------------------------------------
 
 export const SHARE_MODES = ["GROUP", "MEMBERS"] as const;

@@ -8,6 +8,7 @@ import type { DocHeader, SharingPlan, SharingResult } from "./google/types";
 import {
   CANVA_FORMAT_META,
   DOC_TYPE_META,
+  clampEditAccess,
   docTypeFromMime,
   type CanvaExportFormat,
   type CreatableDocType,
@@ -15,6 +16,7 @@ import {
   type Visibility,
 } from "./constants";
 import { canvaProvider, extractCanvaDesignId, getCanvaAccount } from "./canva";
+import { canCreateDocuments, type Viewer } from "./access";
 import { putBytesToDrive } from "./google/upload";
 import {
   applyNamingTemplate,
@@ -87,9 +89,44 @@ function assertVisibilityAllowed(
   }
 }
 
+/**
+ * A company member who is allowed to file may only do so inside the envelope
+ * their role gives them: their own categories, their own shows, and never at
+ * board visibility — they cannot see board documents, so they must not be able
+ * to make one. Checked here as well as in the form.
+ */
+export function assertCreationAllowed(
+  viewer: Viewer,
+  input: { categoryId: string; productionId?: string | null; visibility: string },
+) {
+  if (viewer.isBoard) return;
+  if (!canCreateDocuments(viewer)) {
+    throw new Error("Your role on this show does not allow filing documents on the hub.");
+  }
+  if (input.visibility === "BOARD") {
+    throw new Error("Only board members can file a document for the board.");
+  }
+
+  const membership = viewer.memberships.find(
+    (entry) => entry.canCreate && entry.productionId === input.productionId,
+  );
+  const orgWideAllowed =
+    !input.productionId &&
+    viewer.memberships.some(
+      (entry) => entry.canCreate && entry.categoryIds.includes(input.categoryId),
+    );
+
+  if (!membership && !orgWideAllowed) {
+    throw new Error("You can only file documents for a show you are working on.");
+  }
+  if (membership && !membership.categoryIds.includes(input.categoryId)) {
+    throw new Error("Your role on this show does not cover that category.");
+  }
+}
+
 type SharableDocument = Pick<
   Document,
-  "id" | "visibility" | "source" | "creatorId" | "categoryId" | "productionId"
+  "id" | "visibility" | "source" | "creatorId" | "categoryId" | "productionId" | "editAccess"
 >;
 
 /**
@@ -100,7 +137,7 @@ type SharableDocument = Pick<
  * Naming everybody costs more permissions but makes offboarding real.
  */
 async function boardRecipients(
-  groupCanEdit: boolean,
+  boardCanEdit: boolean,
 ): Promise<Array<{ email: string; level: "READER" | "WRITER" }>> {
   const members = await prisma.user.findMany({
     where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
@@ -110,7 +147,7 @@ async function boardRecipients(
     email: member.email,
     // A hub MEMBER is read-only, so they must not get Drive edit access even
     // when the board as a whole can edit.
-    level: member.role === "MEMBER" || !groupCanEdit ? "READER" : "WRITER",
+    level: member.role === "MEMBER" || !boardCanEdit ? "READER" : "WRITER",
   }));
 }
 
@@ -118,13 +155,19 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   const config = await getConfig();
   const perMember = config.shareMode === "MEMBERS";
 
+  // Edit access is the narrower ladder: who can change the file's contents, as
+  // opposed to who can see it. Clamped to visibility so it can never exceed it.
+  const editAccess = clampEditAccess(doc.visibility, doc.editAccess);
+  const boardCanEdit = editAccess === "BOARD" || editAccess === "COMPANY";
+  const companyCanEdit = editAccess === "COMPANY";
+
   const [creator, shares, company, board] = await Promise.all([
     prisma.user.findUnique({ where: { id: doc.creatorId } }),
     prisma.documentShare.findMany({ where: { documentId: doc.id }, include: { user: true } }),
     companyRecipients(doc),
     doc.visibility === "PRIVATE" || !perMember
       ? Promise.resolve([])
-      : boardRecipients(config.groupCanEdit),
+      : boardRecipients(boardCanEdit),
   ]);
 
   const extra = shares.map((share) => ({
@@ -142,8 +185,9 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   // The board first: they can see everything that is not private, at the level
   // their hub role allows.
   for (const member of board) add(member.email, member.level);
-  // Then the company, who only ever read.
-  for (const email of company) add(email, "READER");
+  // Then the company, who read unless the document says everyone who can see
+  // it may edit it.
+  for (const email of company) add(email, companyCanEdit ? "WRITER" : "READER");
 
   return {
     visibility: doc.visibility as Visibility,
@@ -151,7 +195,9 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
     // In per-member mode the group is deliberately left out of the plan, so a
     // reconciling pass removes it from files that used to be shared with it.
     groupEmail: perMember ? null : config.groupEmail,
-    groupCanEdit: config.groupCanEdit,
+    // Whether the group gets write on *this* file now comes from the document,
+    // not from an org-wide toggle.
+    groupCanEdit: boardCanEdit,
     extra,
     // Anything the hub made in its own Drive — created, uploaded or mirrored
     // from Canva — is reconciled, so dropping a document's visibility actually
@@ -203,6 +249,7 @@ export async function createDocument(
     categoryId: string;
     productionId?: string;
     visibility: Visibility;
+    editAccess?: string;
     templateId?: string;
     tags?: string;
   },
@@ -238,6 +285,10 @@ export async function createDocument(
       docType: input.docType,
       source: "CREATED",
       visibility: input.visibility,
+      editAccess: clampEditAccess(
+        input.visibility,
+        input.editAccess ?? category.defaultEditAccess,
+      ),
       categoryId: category.id,
       productionId: production?.id ?? null,
       creatorId: actor.id,
@@ -361,6 +412,7 @@ export async function resyncCompanySharing(options: {
       creatorId: true,
       categoryId: true,
       productionId: true,
+      editAccess: true,
       googleFileId: true,
       docType: true,
     },
@@ -397,6 +449,7 @@ export async function recordUploadedDocument(
     categoryId: string;
     productionId?: string;
     visibility: Visibility;
+    editAccess?: string;
     tags?: string;
     originalFileName: string;
     driveFolderId: string | null;
@@ -428,6 +481,7 @@ export async function recordUploadedDocument(
       docType,
       source: "CREATED",
       visibility: input.visibility,
+      editAccess: clampEditAccess(input.visibility, input.editAccess ?? category.defaultEditAccess),
       categoryId: category.id,
       productionId: production?.id ?? null,
       creatorId: actor.id,
@@ -559,6 +613,7 @@ export async function runSharingSweep(options?: { chunk?: number }): Promise<{
         creatorId: true,
         categoryId: true,
         productionId: true,
+        editAccess: true,
         googleFileId: true,
         docType: true,
       },
@@ -632,6 +687,7 @@ export async function mirrorCanvaDesign(
     categoryId: string;
     productionId?: string;
     visibility: Visibility;
+    editAccess?: string;
     tags?: string;
     format: CanvaExportFormat;
   },
@@ -685,6 +741,7 @@ export async function mirrorCanvaDesign(
       docType: "CANVA",
       source: "CANVA",
       visibility: input.visibility,
+      editAccess: clampEditAccess(input.visibility, input.editAccess ?? category.defaultEditAccess),
       categoryId: category.id,
       productionId: production?.id ?? null,
       creatorId: actor.id,
@@ -887,6 +944,7 @@ export async function registerDocument(
     categoryId: string;
     productionId?: string;
     visibility: Visibility;
+    editAccess?: string;
     tags?: string;
     organize?: boolean;
     externalOnly?: boolean;
@@ -959,6 +1017,7 @@ export async function registerDocument(
       docType,
       source: fileId ? "REGISTERED" : "LINK",
       visibility: input.visibility,
+      editAccess: clampEditAccess(input.visibility, input.editAccess ?? category.defaultEditAccess),
       categoryId: category.id,
       productionId: production?.id ?? null,
       creatorId: actor.id,
@@ -1006,6 +1065,7 @@ export async function updateDocument(
     categoryId: string;
     productionId?: string;
     visibility: Visibility;
+    editAccess?: string;
     tags?: string;
     pinned?: boolean;
   },
@@ -1042,6 +1102,10 @@ export async function updateDocument(
       categoryId: category.id,
       productionId: production?.id ?? null,
       visibility: input.visibility,
+      editAccess: clampEditAccess(
+        input.visibility,
+        input.editAccess ?? current.editAccess,
+      ),
       pinned: input.pinned ?? false,
       tags: { set: await tagIds(input.tags) },
     },
@@ -1082,7 +1146,7 @@ export async function updateDocument(
     }
   }
 
-  if (current.visibility !== document.visibility) {
+  if (current.visibility !== document.visibility || current.editAccess !== document.editAccess) {
     const sharing = await syncSharing(document);
     warnings.push(...sharing.warnings);
     await recordAudit({

@@ -64,6 +64,7 @@ export default async function AdminRolesPage({
                   description: editing.description,
                   sortOrder: editing.sortOrder,
                   isDefault: editing.isDefault,
+                  canCreate: editing.canCreate,
                   categoryIds: editing.categories.map((category) => category.id),
                 }
               : undefined
@@ -88,6 +89,9 @@ export default async function AdminRolesPage({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-ink-900">{role.name}</span>
                     {role.isDefault ? <Badge tone="violet">Default</Badge> : null}
+                    <Badge tone={role.canCreate ? "green" : "slate"}>
+                      {role.canCreate ? "can add documents" : "view only"}
+                    </Badge>
                     {role.archived ? <Badge tone="slate">Archived</Badge> : null}
                     <Badge tone="slate">
                       {role._count.members} {pluralize(role._count.members, "person", "people")}

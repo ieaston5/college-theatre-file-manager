@@ -28,7 +28,9 @@ import { Icon } from "@/components/icons";
 import { Avatar, Badge, Banner, Card, SectionHeader, buttonClass } from "@/components/ui";
 import {
   DOC_TYPE_META,
+  EDIT_ACCESS_META,
   UPLOADED_DOC_TYPES,
+  clampEditAccess,
   VISIBILITY_META,
   type DocType,
   type Visibility,
@@ -327,7 +329,10 @@ export default async function DocumentPage({
           <SectionHeader
             icon={visibility?.icon ?? "users"}
             title="Who can see this"
-            description={visibility?.label}
+            description={`${visibility?.label} · ${
+              EDIT_ACCESS_META[clampEditAccess(document.visibility, document.editAccess)]?.label ??
+              document.editAccess
+            } can edit the file`}
           />
 
           {document.visibility === "COMPANY" ? (

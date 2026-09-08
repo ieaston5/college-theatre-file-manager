@@ -1,6 +1,13 @@
 "use client";
 
-import { CATEGORY_SCOPE_META, VISIBILITIES, VISIBILITY_META, type CategoryScope } from "@/lib/constants";
+import {
+  CATEGORY_SCOPE_META,
+  EDIT_ACCESS_META,
+  VISIBILITIES,
+  VISIBILITY_META,
+  allowedEditAccess,
+  type CategoryScope,
+} from "@/lib/constants";
 import { Field, inputClass, selectClass } from "../ui";
 import { RadioCards } from "./form-bits";
 import { Icon } from "../icons";
@@ -16,6 +23,7 @@ export type FormCategory = {
   description: string | null;
   /** Whether this category may be shared with a production's company. */
   companyVisible: boolean;
+  defaultEditAccess: string;
 };
 
 export type FormProduction = {
@@ -142,6 +150,7 @@ export function VisibilityPicker({
   groupEmail,
   category,
   companyCount,
+  companyCreatorOnly,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -150,9 +159,13 @@ export function VisibilityPicker({
   category?: FormCategory;
   /** How many people would get access if Company is chosen. */
   companyCount?: number | null;
+  /** A company member filing for their show cannot publish to the board. */
+  companyCreatorOnly?: boolean;
 }) {
   const options = VISIBILITIES.filter(
-    (visibility) => visibility !== "COMPANY" || category?.companyVisible,
+    (visibility) =>
+      (visibility !== "COMPANY" || category?.companyVisible) &&
+      (visibility !== "BOARD" || !companyCreatorOnly),
   );
 
   return (
@@ -190,6 +203,63 @@ export function VisibilityPicker({
               : VISIBILITY_META[visibility].blurb,
           icon: VISIBILITY_META[visibility].icon,
           tint: VISIBILITY_TINT[visibility],
+        }))}
+      />
+    </Field>
+  );
+}
+
+/**
+ * The second, narrower ladder: everyone who can see it reads it, this says who
+ * can change the file. Options are capped by the visibility chosen, and it is
+ * pre-filled from the category, so it is normally a no-op.
+ */
+export function EditAccessPicker({
+  value,
+  onChange,
+  visibility,
+  category,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  visibility: string;
+  category?: FormCategory;
+}) {
+  const options = allowedEditAccess(visibility);
+
+  if (options.length === 1) {
+    return (
+      <Field label="Who can change it?">
+        <p className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
+          {visibility === "PRIVATE"
+            ? "Private documents are only editable by you and anyone you add by hand."
+            : EDIT_ACCESS_META[options[0]].blurb}
+        </p>
+      </Field>
+    );
+  }
+
+  return (
+    <Field
+      label="Who can change it?"
+      required
+      hint={`Everyone above can read it — this is only about editing the file itself. Renaming, recategorising and changing who sees it always stays with you${
+        category ? ` (${category.name} starts at “${EDIT_ACCESS_META[
+          (category.defaultEditAccess as "BOARD") ?? "BOARD"
+        ]?.label ?? "the board"}”)` : ""
+      }.`}
+    >
+      <RadioCards
+        name="editAccess"
+        columns={options.length > 2 ? 3 : 2}
+        value={options.includes(value as "BOARD") ? value : options[0]}
+        onChange={onChange}
+        options={options.map((option) => ({
+          value: option,
+          label: EDIT_ACCESS_META[option].label,
+          description: EDIT_ACCESS_META[option].blurb,
+          icon: EDIT_ACCESS_META[option].icon,
+          tint: EDIT_ACCESS_META[option].tint,
         }))}
       />
     </Field>

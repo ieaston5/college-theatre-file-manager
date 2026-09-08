@@ -1,8 +1,14 @@
 import Link from "next/link";
-import { canCreateDocuments, isAdmin, requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getConfig, getSetupState } from "@/lib/config";
-import { categoryFilterFor, getViewerContext, productionFilterFor, visibleDocumentsWhere } from "@/lib/access";
+import {
+  canCreateDocuments,
+  categoryFilterFor,
+  getViewerContext,
+  productionFilterFor,
+  visibleDocumentsWhere,
+} from "@/lib/access";
 import { env } from "@/lib/env";
 import { CompanyDashboard } from "@/components/company-dashboard";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -103,7 +109,7 @@ export default async function DashboardPage() {
         title={`Hello, ${greeting}`}
         description="Everything the board keeps — sorted by what it is and which show it belongs to."
         action={
-          canCreateDocuments(user) ? (
+          canCreateDocuments(viewer) ? (
             <>
               <Link href="/documents/register" className={buttonClass("secondary")}>
                 <Icon name="link" className="size-4" />
@@ -328,7 +334,7 @@ export default async function DashboardPage() {
                 icon="folder"
                 title="Nothing on the hub yet"
                 action={
-                  canCreateDocuments(user) ? (
+                  canCreateDocuments(viewer) ? (
                     <Link href="/documents/new" className={buttonClass("primary")}>
                       <Icon name="plus" className="size-4" />
                       Create the first document

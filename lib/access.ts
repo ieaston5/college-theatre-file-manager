@@ -30,6 +30,8 @@ export type ViewerMembership = {
   roleName: string | null;
   title: string | null;
   categoryIds: string[];
+  /** Whether this role may file documents on the hub. */
+  canCreate: boolean;
 };
 
 export type Viewer = {
@@ -73,6 +75,7 @@ export async function getViewerContext(
           id: true,
           name: true,
           archived: true,
+          canCreate: true,
           categories: { where: { archived: false, companyVisible: true }, select: { id: true } },
         },
       },
@@ -88,6 +91,7 @@ export async function getViewerContext(
     title: row.title,
     // An archived role grants nothing — the safe direction.
     categoryIds: row.role && !row.role.archived ? row.role.categories.map((c) => c.id) : [],
+    canCreate: Boolean(row.role && !row.role.archived && row.role.canCreate),
   }));
 
   const companyCategoryIds = [
@@ -103,6 +107,49 @@ export async function getViewerContext(
     memberships,
     companyCategoryIds,
   };
+}
+
+/**
+ * Whether this person may file anything at all. Board members always can;
+ * a company member can only if one of their production roles says so.
+ */
+export function canCreateDocuments(viewer: Viewer): boolean {
+  if (viewer.isBoard) return true;
+  return viewer.memberships.some((membership) => membership.canCreate);
+}
+
+/** The productions a company creator may file against. */
+export function creatableProductionIds(viewer: Viewer): string[] | null {
+  if (viewer.isBoard) return null;
+  return viewer.memberships
+    .filter((membership) => membership.canCreate)
+    .map((membership) => membership.productionId);
+}
+
+/** The categories a company creator may file into. */
+export function creatableCategoryIds(viewer: Viewer): string[] | null {
+  if (viewer.isBoard) return null;
+  return [
+    ...new Set(
+      viewer.memberships
+        .filter((membership) => membership.canCreate)
+        .flatMap((membership) => membership.categoryIds),
+    ),
+  ];
+}
+
+/**
+ * The visibilities somebody may choose. A company member can never publish to
+ * the board — they cannot see board documents, so they must not be able to
+ * make one.
+ */
+export function allowedVisibilitiesFor(
+  viewer: Viewer,
+  category: { companyVisible: boolean },
+): string[] {
+  const byCategory = allowedVisibilities(category);
+  if (viewer.isBoard) return byCategory;
+  return byCategory.filter((visibility) => visibility !== "BOARD");
 }
 
 export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput {
@@ -204,4 +251,23 @@ export function productionFilterFor(viewer: Viewer): Prisma.ProductionWhereInput
  */
 export function allowedVisibilities(category: { companyVisible: boolean }): string[] {
   return category.companyVisible ? ["PRIVATE", "COMPANY", "BOARD"] : ["PRIVATE", "BOARD"];
+}
+
+/**
+ * Whether this person may change the file's *contents* in Google. Distinct
+ * from canEditDocument, which is about the hub record.
+ */
+export function canEditFileContents(
+  viewer: Viewer,
+  doc: DocumentLike & { editAccess: string },
+): boolean {
+  if (!canViewDocument(viewer, doc)) return false;
+  if (doc.creatorId === viewer.id) return true;
+  if (doc.shares?.some((share) => share.userId === viewer.id)) {
+    // A named share carries its own level, checked where it is applied.
+    return true;
+  }
+  if (doc.editAccess === "CREATOR_ONLY") return false;
+  if (doc.editAccess === "BOARD") return viewer.isBoard && viewer.role !== "MEMBER";
+  return true;
 }

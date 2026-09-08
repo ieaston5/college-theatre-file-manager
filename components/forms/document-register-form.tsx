@@ -10,6 +10,7 @@ import { FormBanner, SubmitButton, Toggle } from "./form-bits";
 import {
   CategorySelect,
   DescriptionField,
+  EditAccessPicker,
   ProductionSelect,
   TagsField,
   VisibilityPicker,
@@ -23,17 +24,20 @@ export function DocumentRegisterForm({
   groupEmail,
   hubAccountEmail,
   driveMode,
+  companyCreatorOnly = false,
 }: {
   categories: FormCategory[];
   productions: FormProduction[];
   groupEmail: string | null;
   hubAccountEmail: string | null;
   driveMode: "google" | "mock";
+  companyCreatorOnly?: boolean;
 }) {
   const [state, formAction] = useActionState(registerDocumentAction, emptyState);
   const [categoryId, setCategoryId] = useState("");
   const [productionId, setProductionId] = useState("none");
-  const [visibility, setVisibility] = useState("BOARD");
+  const [visibility, setVisibility] = useState(companyCreatorOnly ? "COMPANY" : "BOARD");
+  const [editAccess, setEditAccess] = useState("BOARD");
   const [externalOnly, setExternalOnly] = useState(false);
 
   const category = categories.find((item) => item.id === categoryId);
@@ -42,11 +46,12 @@ export function DocumentRegisterForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
-    setVisibility(
+    const wanted =
       next.defaultVisibility === "COMPANY" && !next.companyVisible
         ? "BOARD"
-        : next.defaultVisibility,
-    );
+        : next.defaultVisibility;
+    setVisibility(companyCreatorOnly && wanted === "BOARD" ? "COMPANY" : wanted);
+    setEditAccess(next.defaultEditAccess);
     if (next.scope === "STANDING") setProductionId("none");
     if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
   }
@@ -138,6 +143,13 @@ export function DocumentRegisterForm({
           value={visibility}
           onChange={setVisibility}
           groupEmail={groupEmail}
+          category={category}
+          companyCreatorOnly={companyCreatorOnly}
+        />
+        <EditAccessPicker
+          value={editAccess}
+          onChange={setEditAccess}
+          visibility={visibility}
           category={category}
         />
         <DescriptionField />

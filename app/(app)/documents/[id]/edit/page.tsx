@@ -47,6 +47,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           categoryId: document.categoryId,
           productionId: document.productionId,
           visibility: document.visibility,
+          editAccess: document.editAccess,
           pinned: document.pinned,
           source: document.source,
           tags: document.tags.map((tag) => tag.name).join(", "),
@@ -61,6 +62,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           icon: category.icon,
           description: category.description,
           companyVisible: category.companyVisible,
+          defaultEditAccess: category.defaultEditAccess,
         }))}
         productions={productions.map((production) => ({
           id: production.id,

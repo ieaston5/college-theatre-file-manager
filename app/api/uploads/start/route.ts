@@ -2,11 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth";
-import { canEditDocument, getViewerContext } from "@/lib/access";
+import { canCreateDocuments, canEditDocument, getViewerContext } from "@/lib/access";
+import { assertCreationAllowed } from "@/lib/documents";
 import { getConfig } from "@/lib/config";
 import { resolveFolder } from "@/lib/google";
 import { openResumableCreate, openResumableUpdate } from "@/lib/google/upload";
-import { UPLOADED_DOC_TYPES, atLeast, type DocType } from "@/lib/constants";
+import { UPLOADED_DOC_TYPES, type DocType } from "@/lib/constants";
 import { firstError, uploadStartSchema } from "@/lib/validation";
 import { randomToken } from "@/lib/crypto";
 import { applyNamingTemplate, fileNameToTitle, withExtension } from "@/lib/utils";
@@ -21,9 +22,10 @@ import { applyNamingTemplate, fileNameToTitle, withExtension } from "@/lib/utils
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "You are signed out." }, { status: 401 });
-  if (!atLeast(user.role, "BOARD")) {
+  const viewer = await getViewerContext(user);
+  if (!canCreateDocuments(viewer)) {
     return NextResponse.json(
-      { error: "Only board members can add documents to the hub." },
+      { error: "You do not have permission to add documents to the hub." },
       { status: 403 },
     );
   }
@@ -62,7 +64,6 @@ export async function POST(request: NextRequest) {
         where: { id: input.documentId },
         include: { shares: { select: { userId: true } } },
       });
-      const viewer = await getViewerContext(user);
       if (!document || !canEditDocument(viewer, document)) {
         return NextResponse.json(
           { error: "That document is not yours to change." },
@@ -172,6 +173,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    try {
+      assertCreationAllowed(viewer, {
+        categoryId: category.id,
+        productionId: production?.id ?? null,
+        visibility: input.visibility,
+      });
+    } catch (error) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 403 });
+    }
+
     const title = (input.title?.trim() || fileNameToTitle(input.fileName)).slice(0, 160);
     const driveFolderId = await resolveFolder({ category, production });
     const driveName = withExtension(
@@ -195,6 +206,7 @@ export async function POST(request: NextRequest) {
           categoryId: category.id,
           productionId: production?.id ?? null,
           visibility: input.visibility,
+          editAccess: input.editAccess ?? category.defaultEditAccess,
           tags: input.tags ?? null,
         }),
         fileName: input.fileName,

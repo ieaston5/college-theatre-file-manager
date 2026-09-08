@@ -1,3 +1,10 @@
+/**
+ * Shared shapes for server actions.
+ *
+ * This module is imported by client components (for `ActionState`), so it must
+ * never pull in anything server-only — importing `next/headers` here breaks
+ * every form that uses it. Guards that need the request live in lib/auth.ts.
+ */
 import { GoogleCallError, GoogleNotConnectedError } from "@/lib/google/types";
 
 export type ActionState = {

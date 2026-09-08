@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { requireUser, canCreateDocuments, isAdmin } from "@/lib/auth";
+import { requireUser, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import {
+  canCreateDocuments,
   categoryFilterFor,
   getViewerContext,
   productionFilterFor,
@@ -82,7 +83,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-3">
             <SearchField className="max-w-md flex-1" />
             <div className="ml-auto flex items-center gap-2">
-              {canCreateDocuments(user) ? (
+              {canCreateDocuments(viewer) ? (
                 <>
                   <Link href="/documents/register" className={buttonClass("secondary")}>
                     <Icon name="link" className="size-4" />

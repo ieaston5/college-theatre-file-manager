@@ -14,6 +14,7 @@ type DraftPayload = {
   categoryId?: string;
   productionId?: string | null;
   visibility?: Visibility;
+  editAccess?: string | null;
   tags?: string | null;
 };
 
@@ -114,6 +115,7 @@ export async function POST(request: NextRequest) {
       categoryId: payload.categoryId,
       productionId: payload.productionId ?? undefined,
       visibility: payload.visibility,
+      editAccess: payload.editAccess ?? undefined,
       tags: payload.tags ?? undefined,
       originalFileName: pending.fileName,
       driveFolderId: pending.driveFolderId,

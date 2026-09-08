@@ -18,6 +18,7 @@ export type RoleOption = {
   name: string;
   description: string | null;
   isDefault: boolean;
+  canCreate: boolean;
   categoryNames: string[];
 };
 
@@ -251,6 +252,7 @@ export function ProductionRoleForm({
     description: string | null;
     sortOrder: number;
     isDefault: boolean;
+    canCreate: boolean;
     categoryIds: string[];
   };
   categories: Array<{ id: string; name: string; icon: string; color: string }>;
@@ -346,6 +348,13 @@ export function ProductionRoleForm({
           </div>
         )}
       </Field>
+
+      <Toggle
+        name="canCreate"
+        label="This role can add documents to the hub"
+        hint="Off for cast — they read what is shared with them. Worth turning on for stage management, who file a rehearsal report every night and should not need a board account. Even when on, they can only file into this role's categories, on shows they are working on, and never for the board."
+        defaultChecked={role?.canCreate ?? false}
+      />
 
       <Toggle
         name="isDefault"

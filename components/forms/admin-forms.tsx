@@ -19,6 +19,8 @@ import {
   CATEGORY_SCOPE_META,
   CREATABLE_DOC_TYPES,
   DOC_TYPE_META,
+  EDIT_ACCESS_LEVELS,
+  EDIT_ACCESS_META,
   PRODUCTION_STATUSES,
   PRODUCTION_STATUS_META,
   ROLE_META,
@@ -131,13 +133,6 @@ export function ConfigForm({
           className={inputClass}
         />
       </Field>
-
-      <Toggle
-        name="groupCanEdit"
-        label="The group can edit board documents"
-        hint="Off means the group gets view-only access and only the creator can edit."
-        defaultChecked={config.groupCanEdit}
-      />
 
       <Field
         label="File naming rule"
@@ -284,6 +279,7 @@ export function CategoryForm({
     sortOrder: number;
     companyVisible: boolean;
     keywords: string | null;
+    defaultEditAccess: string;
   };
 }) {
   const [state, formAction] = useActionState(saveCategoryAction, emptyState);
@@ -385,6 +381,26 @@ export function CategoryForm({
             ))}
           </select>
         </Field>
+        <Field
+          label="Default edit level"
+          htmlFor="defaultEditAccess"
+          required
+          hint="Who can change the file, before anyone overrides it per document."
+        >
+          <select
+            id="defaultEditAccess"
+            name="defaultEditAccess"
+            defaultValue={category?.defaultEditAccess ?? "BOARD"}
+            className={selectClass}
+          >
+            {EDIT_ACCESS_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {EDIT_ACCESS_META[level].label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
         <Field label="Default visibility" htmlFor="defaultVisibility" required>
           <select
             id="defaultVisibility"

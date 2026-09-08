@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { canCreateDocuments, requireUser } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
-import { getViewerContext, visibleProductionIds } from "@/lib/access";
+import { canCreateDocuments, getViewerContext, visibleProductionIds } from "@/lib/access";
 import { removeMembershipAction, resyncProductionSharingAction } from "@/app/actions/company";
 import {
   AddCompanyMembersForm,
@@ -35,7 +35,7 @@ export default async function ProductionCompanyPage({
   const allowed = visibleProductionIds(viewer);
   if (allowed !== null && !allowed.includes(production.id)) notFound();
 
-  const canManage = canCreateDocuments(user);
+  const canManage = canCreateDocuments(viewer);
 
   const [members, roles, companyDocCount] = await Promise.all([
     prisma.productionMember.findMany({
@@ -71,6 +71,7 @@ export default async function ProductionCompanyPage({
     name: role.name,
     description: role.description,
     isDefault: role.isDefault,
+    canCreate: role.canCreate,
     categoryNames: role.categories.map((category) => category.name),
   }));
 

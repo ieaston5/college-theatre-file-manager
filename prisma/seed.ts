@@ -63,6 +63,7 @@ const CATEGORIES = [
   },
   {
     name: "Rehearsal reports",
+    defaultEditAccess: "CREATOR_ONLY",
     keywords:
       "rehearsal report, report, nightly, notes, sm report",
     companyVisible: true,
@@ -75,6 +76,7 @@ const CATEGORIES = [
   },
   {
     name: "Contact sheets",
+    defaultEditAccess: "COMPANY",
     keywords:
       "contact, contacts, phone, roster, emergency, directory, cast list, crew list",
     companyVisible: true,
@@ -87,6 +89,7 @@ const CATEGORIES = [
   },
   {
     name: "Scripts & scores",
+    defaultEditAccess: "CREATOR_ONLY",
     keywords:
       "script, score, libretto, book, cuts, sides, monologue, vocal, sheet music, perusal",
     companyVisible: true,
@@ -99,6 +102,7 @@ const CATEGORIES = [
   },
   {
     name: "Casting & auditions",
+    defaultEditAccess: "CREATOR_ONLY",
     keywords:
       "audition, callback, casting, headshot, sign-up, signup, resume, tape",
     icon: "mic",
@@ -157,6 +161,7 @@ const CATEGORIES = [
   },
   {
     name: "Board & governance",
+    defaultEditAccess: "CREATOR_ONLY",
     keywords:
       "minutes, agenda, constitution, bylaws, board, election, policy, vote",
     icon: "gavel",
@@ -495,8 +500,9 @@ const PRODUCTION_ROLES = [
   },
   {
     name: "Stage management",
-    description: "Runs the room. Sees everything a company member can see.",
+    description: "Runs the room. Sees everything a company member can see, and files reports.",
     sortOrder: 20,
+    canCreate: true,
     categories: [
       "Schedules & calendars",
       "Rehearsal reports",
@@ -641,6 +647,7 @@ async function main() {
         defaultDocType: category.defaultDocType,
         defaultVisibility: category.defaultVisibility ?? "BOARD",
         companyVisible: category.companyVisible ?? false,
+        defaultEditAccess: category.defaultEditAccess ?? "BOARD",
         keywords: category.keywords ?? null,
         sortOrder: category.sortOrder,
       },
@@ -653,6 +660,7 @@ async function main() {
         defaultDocType: category.defaultDocType,
         defaultVisibility: category.defaultVisibility ?? "BOARD",
         companyVisible: category.companyVisible ?? false,
+        defaultEditAccess: category.defaultEditAccess ?? "BOARD",
         keywords: category.keywords ?? null,
         sortOrder: category.sortOrder,
       },
@@ -687,6 +695,7 @@ async function main() {
         name: role.name,
         description: role.description,
         isDefault: role.isDefault ?? false,
+        canCreate: role.canCreate ?? false,
         sortOrder: role.sortOrder,
         categories: { connect: categoryIds },
       },
@@ -694,6 +703,7 @@ async function main() {
         name: role.name,
         description: role.description,
         isDefault: role.isDefault ?? false,
+        canCreate: role.canCreate ?? false,
         sortOrder: role.sortOrder,
         categories: { set: categoryIds },
       },

@@ -9,6 +9,7 @@ import { FormBanner, SubmitButton, Toggle } from "./form-bits";
 import {
   CategorySelect,
   DescriptionField,
+  EditAccessPicker,
   ProductionSelect,
   TagsField,
   VisibilityPicker,
@@ -21,6 +22,7 @@ export function DocumentEditForm({
   categories,
   productions,
   groupEmail,
+  companyCreatorOnly = false,
 }: {
   document: {
     id: string;
@@ -29,6 +31,7 @@ export function DocumentEditForm({
     categoryId: string;
     productionId: string | null;
     visibility: string;
+    editAccess: string;
     pinned: boolean;
     tags: string;
     source: string;
@@ -36,11 +39,13 @@ export function DocumentEditForm({
   categories: FormCategory[];
   productions: FormProduction[];
   groupEmail: string | null;
+  companyCreatorOnly?: boolean;
 }) {
   const [state, formAction] = useActionState(updateDocumentAction, emptyState);
   const [categoryId, setCategoryId] = useState(document.categoryId);
   const [productionId, setProductionId] = useState(document.productionId ?? "none");
   const [visibility, setVisibility] = useState(document.visibility);
+  const [editAccess, setEditAccess] = useState(document.editAccess);
 
   const category = categories.find((item) => item.id === categoryId);
 
@@ -92,6 +97,13 @@ export function DocumentEditForm({
           value={visibility}
           onChange={setVisibility}
           groupEmail={groupEmail}
+          category={category}
+          companyCreatorOnly={companyCreatorOnly}
+        />
+        <EditAccessPicker
+          value={editAccess}
+          onChange={setEditAccess}
+          visibility={visibility}
           category={category}
         />
         <DescriptionField defaultValue={document.description ?? undefined} />

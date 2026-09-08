@@ -14,6 +14,7 @@ export type UploadStartBody = {
   categoryId?: string;
   productionId?: string;
   visibility?: string;
+  editAccess?: string;
   tags?: string;
 };
 

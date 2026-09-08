@@ -151,6 +151,7 @@ export async function saveCategoryAction(
       folderName: text(form, "folderName"),
       sortOrder: text(form, "sortOrder") ?? "0",
       companyVisible: bool(form, "companyVisible"),
+      defaultEditAccess: text(form, "defaultEditAccess") ?? "BOARD",
       keywords: text(form, "keywords"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
@@ -167,6 +168,7 @@ export async function saveCategoryAction(
       folderName: data.folderName ?? null,
       sortOrder: data.sortOrder,
       companyVisible: data.companyVisible,
+      defaultEditAccess: data.defaultEditAccess,
       keywords: data.keywords ?? null,
     };
 
@@ -515,6 +517,7 @@ export async function reapplySharingAction(): Promise<void> {
       docType: true,
       categoryId: true,
       productionId: true,
+      editAccess: true,
     },
     take: 500,
   });

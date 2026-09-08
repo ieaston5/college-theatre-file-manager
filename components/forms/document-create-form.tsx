@@ -23,6 +23,7 @@ import { FilePicker, fileKey, type UploadState } from "./file-picker";
 import {
   CategorySelect,
   DescriptionField,
+  EditAccessPicker,
   ProductionSelect,
   TagsField,
   VisibilityPicker,
@@ -76,6 +77,7 @@ export function DocumentCreateForm({
   canvaMode,
   canvaReady,
   canvaAccountLabel,
+  companyCreatorOnly = false,
   defaultCategoryId,
   defaultProductionId,
 }: {
@@ -89,6 +91,8 @@ export function DocumentCreateForm({
   canvaMode: "canva" | "mock" | "off";
   canvaReady: boolean;
   canvaAccountLabel: string | null;
+  /** True for a company member filing for their own show. */
+  companyCreatorOnly?: boolean;
   defaultCategoryId?: string;
   defaultProductionId?: string;
 }) {
@@ -99,7 +103,8 @@ export function DocumentCreateForm({
   const [categoryId, setCategoryId] = useState(defaultCategoryId ?? "");
   const [productionId, setProductionId] = useState(defaultProductionId ?? "none");
   const [mode, setMode] = useState<CreationMode>("DOC");
-  const [visibility, setVisibility] = useState<string>("BOARD");
+  const [visibility, setVisibility] = useState<string>(companyCreatorOnly ? "COMPANY" : "BOARD");
+  const [editAccess, setEditAccess] = useState<string>("BOARD");
   const [templateId, setTemplateId] = useState("blank");
   const [canvaFormat, setCanvaFormat] = useState<CanvaExportFormat>("pdf");
 
@@ -154,11 +159,13 @@ export function DocumentCreateForm({
       setMode(next.defaultDocType as CreationMode);
     }
     // Never leave "Company" selected on a category that is board-only.
-    setVisibility(
+    const wanted =
       next.defaultVisibility === "COMPANY" && !next.companyVisible
         ? "BOARD"
-        : next.defaultVisibility,
-    );
+        : next.defaultVisibility;
+    // A company member cannot publish to the board, so fall back to Company.
+    setVisibility(companyCreatorOnly && wanted === "BOARD" ? "COMPANY" : wanted);
+    setEditAccess(next.defaultEditAccess);
     if (next.scope === "STANDING") setProductionId("none");
     if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
     setTemplateId("blank");
@@ -510,6 +517,13 @@ export function DocumentCreateForm({
           value={visibility}
           onChange={setVisibility}
           groupEmail={groupEmail}
+          category={category}
+          companyCreatorOnly={companyCreatorOnly}
+        />
+        <EditAccessPicker
+          value={editAccess}
+          onChange={setEditAccess}
+          visibility={visibility}
           category={category}
         />
         <DescriptionField />

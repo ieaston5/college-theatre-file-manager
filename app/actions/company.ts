@@ -264,6 +264,7 @@ export async function saveProductionRoleAction(
       description: text(form, "description"),
       sortOrder: text(form, "sortOrder") ?? "0",
       isDefault: bool(form, "isDefault"),
+      canCreate: bool(form, "canCreate"),
       categoryIds: form.getAll("categoryIds").map(String).filter(Boolean),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
@@ -281,6 +282,7 @@ export async function saveProductionRoleAction(
       description: data.description ?? null,
       sortOrder: data.sortOrder,
       isDefault: data.isDefault,
+      canCreate: data.canCreate,
       categories: { set: allowed.map((category) => ({ id: category.id })) },
     };
 

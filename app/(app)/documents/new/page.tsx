@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { requireUser } from "@/lib/auth";
+import {
+  canCreateDocuments,
+  creatableCategoryIds,
+  creatableProductionIds,
+  getViewerContext,
+} from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { getSetupState } from "@/lib/config";
 import { canvaProvider, canvaReady, getCanvaAccount } from "@/lib/canva";
@@ -13,17 +20,30 @@ export default async function NewDocumentPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireRole("BOARD");
+  const user = await requireUser();
+  const viewer = await getViewerContext(user);
+  if (!canCreateDocuments(viewer)) redirect("/no-access?need=board");
+  const companyCreatorOnly = !viewer.isBoard;
   const params = await searchParams;
   const setup = await getSetupState();
 
   const [categories, productions, templates, canvaConnected, canvaAccount] = await Promise.all([
     prisma.category.findMany({
-      where: { archived: false },
+      where: {
+        archived: false,
+        ...(creatableCategoryIds(viewer) === null
+          ? {}
+          : { id: { in: creatableCategoryIds(viewer)! } }),
+      },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.production.findMany({
-      where: { status: { not: "ARCHIVED" } },
+      where: {
+        status: { not: "ARCHIVED" },
+        ...(creatableProductionIds(viewer) === null
+          ? {}
+          : { id: { in: creatableProductionIds(viewer)! } }),
+      },
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
     }),
     prisma.template.findMany({ where: { archived: false }, orderBy: { name: "asc" } }),
@@ -88,6 +108,7 @@ export default async function NewDocumentPage({
             icon: category.icon,
             description: category.description,
             companyVisible: category.companyVisible,
+            defaultEditAccess: category.defaultEditAccess,
           }))}
           productions={productions.map((production) => ({
             id: production.id,
@@ -107,6 +128,7 @@ export default async function NewDocumentPage({
           currentSeason={setup.config.currentSeason}
           groupEmail={setup.config.groupEmail}
           driveMode={env.driveMode}
+          companyCreatorOnly={companyCreatorOnly}
           canvaMode={env.canvaMode}
           canvaReady={canvaConnected}
           canvaAccountLabel={canvaAccountLabel}

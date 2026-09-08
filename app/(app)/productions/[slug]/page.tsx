@@ -1,8 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { canCreateDocuments, isAdmin, requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { categoryFilterFor, getViewerContext, visibleProductionIds } from "@/lib/access";
+import {
+  canCreateDocuments,
+  categoryFilterFor,
+  getViewerContext,
+  visibleProductionIds,
+} from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
 import { DocumentFilters } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -85,7 +90,7 @@ export default async function ProductionPage({
                 Edit show
               </Link>
             ) : null}
-            {canCreateDocuments(user) ? (
+            {canCreateDocuments(viewer) ? (
               <Link
                 href={`/documents/new?production=${production.slug}`}
                 className={buttonClass("primary")}
@@ -163,7 +168,7 @@ export default async function ProductionPage({
           icon="theater"
           title={filtersActive ? "Nothing matches those filters" : `Nothing filed for ${production.name} yet`}
           action={
-            canCreateDocuments(user) ? (
+            canCreateDocuments(viewer) ? (
               <Link
                 href={`/documents/new?production=${production.slug}`}
                 className={buttonClass("primary")}
@@ -194,7 +199,7 @@ export default async function ProductionPage({
                     "document",
                   )}`}
                   action={
-                    canCreateDocuments(user) ? (
+                    canCreateDocuments(viewer) ? (
                       <Link
                         href={`/documents/new?category=${category.slug}&production=${production.slug}`}
                         className={buttonClass("ghost")}
@@ -215,7 +220,7 @@ export default async function ProductionPage({
         </div>
       )}
 
-      {missing.length > 0 && canCreateDocuments(user) ? (
+      {missing.length > 0 && canCreateDocuments(viewer) ? (
         <Card>
           <SectionHeader
             icon="clipboard"

@@ -99,6 +99,8 @@ model Category {
   /// Off means the category is board-only and never offered as "Company",
   /// which is what keeps budgets and casting away from the cast.
   companyVisible    Boolean  @default(false)
+  /// The edit level new documents here start at: CREATOR_ONLY | BOARD | COMPANY.
+  defaultEditAccess String   @default("BOARD")
   folderName        String? // Drive subfolder name; defaults to `name`
   /// Comma-separated words that suggest a file belongs here, used to guess a
   /// category when importing an existing pile of Drive files.
@@ -162,6 +164,17 @@ model Document {
   visibility  String  @default("BOARD")
   status      String  @default("ACTIVE") // ACTIVE | ARCHIVED
   pinned      Boolean @default(false)
+  /// Who may change the file's *contents* in Google, as opposed to who may see
+  /// it. Always a subset of `visibility`.
+  ///
+  /// CREATOR_ONLY — only the person who filed it (plus anyone named on it).
+  /// BOARD        — the board can edit; a company that can see it still reads.
+  /// COMPANY      — everyone who can see it can edit it.
+  ///
+  /// Hub curation — category, production, visibility, deletion — is not
+  /// governed by this. It stays with the creator and admins, so an editor can
+  /// never widen who sees something.
+  editAccess  String  @default("BOARD")
 
   googleFileId      String?   @unique
   webViewLink       String?
@@ -251,6 +264,12 @@ model ProductionRole {
   description String?
   /// Pre-selected when adding people, so the common case is one click.
   isDefault   Boolean  @default(false)
+  /// Whether this role may file documents on the hub. Off for cast; the case
+  /// it exists for is stage management, who file a rehearsal report nightly
+  /// and should not need a board account to do it. Even when on, they can
+  /// only file into their own categories, on their own shows, and never at
+  /// board visibility.
+  canCreate   Boolean  @default(false)
   sortOrder   Int      @default(0)
   archived    Boolean  @default(false)
   createdAt   DateTime @default(now())

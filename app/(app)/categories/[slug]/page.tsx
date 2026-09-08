@@ -1,8 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { canCreateDocuments, requireUser } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getViewerContext, productionFilterFor, visibleCategoryIds } from "@/lib/access";
+import {
+  canCreateDocuments,
+  getViewerContext,
+  productionFilterFor,
+  visibleCategoryIds,
+} from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
 import { DocumentFilters } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -58,7 +63,7 @@ export default async function CategoryPage({
         }
         description={category.description ?? scope?.blurb}
         action={
-          canCreateDocuments(user) ? (
+          canCreateDocuments(viewer) ? (
             <Link
               href={`/documents/new?category=${category.slug}`}
               className={buttonClass("primary")}
@@ -104,7 +109,7 @@ export default async function CategoryPage({
             icon={category.icon}
             title={`Nothing filed under ${category.name} yet`}
             action={
-              canCreateDocuments(user) ? (
+              canCreateDocuments(viewer) ? (
                 <Link
                   href={`/documents/new?category=${category.slug}`}
                   className={buttonClass("primary")}

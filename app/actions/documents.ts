@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { assertRole, getCurrentUser } from "@/lib/auth";
+import { assertCanCreate, assertRole, getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
   canDeleteDocument,
@@ -12,6 +12,7 @@ import {
   getViewerContext,
 } from "@/lib/access";
 import {
+  assertCreationAllowed,
   createDocument,
   mirrorCanvaDesign,
   registerDocument,
@@ -61,7 +62,7 @@ export async function createDocumentAction(
   form: FormData,
 ): Promise<ActionState> {
   try {
-    const user = await assertRole("BOARD");
+    const { user, viewer } = await assertCanCreate();
 
     // Canva shares the same form: a design is mirrored rather than created,
     // because Canva has no way to let the hub manage who can open it.
@@ -73,11 +74,13 @@ export async function createDocumentAction(
         categoryId: text(form, "categoryId") ?? "",
         productionId: text(form, "productionId"),
         visibility: text(form, "visibility"),
+        editAccess: text(form, "editAccess"),
         tags: text(form, "tags"),
         format: text(form, "canvaFormat") ?? "pdf",
       });
       if (!parsedCanva.success) return { error: firstError(parsedCanva.error) };
 
+      assertCreationAllowed(viewer, parsedCanva.data);
       const mirrored = await mirrorCanvaDesign(user, parsedCanva.data);
       refreshEverywhere();
       return {
@@ -95,10 +98,12 @@ export async function createDocumentAction(
       categoryId: text(form, "categoryId") ?? "",
       productionId: text(form, "productionId"),
       visibility: text(form, "visibility"),
+      editAccess: text(form, "editAccess"),
       templateId: text(form, "templateId"),
       tags: text(form, "tags"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
+    assertCreationAllowed(viewer, parsed.data);
 
     const { document, warnings } = await createDocument(user, parsed.data);
     refreshEverywhere();
@@ -118,7 +123,7 @@ export async function registerDocumentAction(
   form: FormData,
 ): Promise<ActionState> {
   try {
-    const user = await assertRole("BOARD");
+    const { user, viewer } = await assertCanCreate();
     const parsed = registerDocumentSchema.safeParse({
       title: text(form, "title") ?? "",
       description: text(form, "description"),
@@ -126,11 +131,13 @@ export async function registerDocumentAction(
       categoryId: text(form, "categoryId") ?? "",
       productionId: text(form, "productionId"),
       visibility: text(form, "visibility"),
+      editAccess: text(form, "editAccess"),
       tags: text(form, "tags"),
       organize: bool(form, "organize"),
       externalOnly: bool(form, "externalOnly"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
+    assertCreationAllowed(viewer, parsed.data);
 
     const { document, warnings } = await registerDocument(user, parsed.data);
     refreshEverywhere();
@@ -162,6 +169,7 @@ export async function updateDocumentAction(
       categoryId: text(form, "categoryId") ?? "",
       productionId: text(form, "productionId"),
       visibility: text(form, "visibility"),
+      editAccess: text(form, "editAccess"),
       tags: text(form, "tags"),
       pinned: bool(form, "pinned"),
     });

@@ -78,8 +78,21 @@ export async function assertRole(min: Role): Promise<User> {
   return user;
 }
 
-export function canCreateDocuments(user: Pick<User, "role">) {
-  return atLeast(user.role, "BOARD");
+/**
+ * The guard for anything that files a document. Board members always pass; a
+ * company member passes only if one of their production roles allows filing.
+ * The envelope of *what* they may file — which categories, which shows, which
+ * visibility — is enforced by assertCreationAllowed in lib/documents.
+ */
+export async function assertCanCreate() {
+  const { getViewerContext, canCreateDocuments } = await import("./access");
+  const user = await getCurrentUser();
+  if (!user) throw new Error("You are signed out. Reload the page and sign in again.");
+  const viewer = await getViewerContext(user);
+  if (!canCreateDocuments(viewer)) {
+    throw new Error("You do not have permission to add documents to the hub.");
+  }
+  return { user, viewer };
 }
 
 export function isAdmin(user: Pick<User, "role"> | null | undefined) {

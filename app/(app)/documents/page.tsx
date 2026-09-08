@@ -1,7 +1,12 @@
 import Link from "next/link";
-import { canCreateDocuments, requireUser } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { categoryFilterFor, getViewerContext, productionFilterFor } from "@/lib/access";
+import {
+  canCreateDocuments,
+  categoryFilterFor,
+  getViewerContext,
+  productionFilterFor,
+} from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
 import { DocumentFilters } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -40,7 +45,7 @@ export default async function DocumentsPage({
         title={term ? `Results for “${term}”` : "All documents"}
         description={`${total} ${pluralize(total, "document")} you can see.`}
         action={
-          canCreateDocuments(user) ? (
+          canCreateDocuments(viewer) ? (
             <Link href="/documents/new" className={buttonClass("primary")}>
               <Icon name="plus" className="size-4" />
               New document

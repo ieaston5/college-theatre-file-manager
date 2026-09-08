@@ -51,6 +51,7 @@ export default async function AdminCategoriesPage({
                   sortOrder: editing.sortOrder,
                   companyVisible: editing.companyVisible,
                   keywords: editing.keywords,
+                  defaultEditAccess: editing.defaultEditAccess,
                 }
               : undefined
           }
