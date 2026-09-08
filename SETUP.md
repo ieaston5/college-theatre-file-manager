@@ -150,14 +150,51 @@ categories re-shares every affected document across every show.
 > verified — that is the one piece of Google friction for a company, and it is
 > a copy-paste of the same addresses into the Cloud console.
 
-### 2g. Templates (the biggest time-saver)
+### 2g. Canva (optional)
+
+Skip this unless the club designs posters or decks in Canva.
+
+**What you should know first.** Canva's API cannot manage who can open a
+design: there is no design-permission endpoint, the one permission-shaped scope
+(`folder:permission:write`) has no endpoint behind it, and the URLs the API
+returns are single-user and expire after 30 days. So the hub cannot put a Canva
+design itself behind Company/Board/Private. What it does instead is keep an
+exported copy in Drive, which the hub *can* control completely. The design
+stays in Canva for the designers.
+
+1. In the [Canva Developer Portal](https://www.canva.dev/), with MFA enabled on
+   the account, create an integration. Choose **Public** — "Private" needs a
+   Canva Enterprise plan. You do **not** need to submit it for review to use it
+   with your own account; review is only for listing it to all Canva users.
+2. Scopes: `design:meta:read`, `design:content:read`, `profile:read`.
+3. Redirect URL: whatever Admin → Canva connection shows. Canva rejects
+   `localhost`, so locally it is `http://127.0.0.1:3000/api/canva/callback`.
+4. Put the client id and secret in `.env` as `CANVA_CLIENT_ID` and
+   `CANVA_CLIENT_SECRET`, set `CANVA_MODE="canva"`, restart.
+5. **Browse the hub at `http://127.0.0.1:3000` while connecting**, then
+   Admin → Canva connection → Connect. Sign in as the account that can open the
+   club's designs.
+6. Designers share each design with that account (view access is enough), then
+   anybody on the board can paste the link into New document → Canva design.
+
+Notes worth knowing:
+
+- Export needs no paid Canva plan. A *pro-quality* export would, so the hub
+  always asks for regular quality.
+- A design containing purchased-only premium elements will refuse to export;
+  Canva says so and the hub passes the message through.
+- Only PDF and PowerPoint are offered, because other formats come back as one
+  file per page.
+- `CANVA_MODE="off"` hides the feature entirely.
+
+### 2h. Templates (the biggest time-saver)
 
 Make your ideal rehearsal report, budget skeleton and contact sheet in the hub
 account's Drive, then **Admin → Templates → Add a template** with the link. Put
 `{{TITLE}}`, `{{PRODUCTION}}`, `{{CATEGORY}}`, `{{OWNER}}`, `{{DATE}}` anywhere
 in the file and they get filled in on each copy.
 
-### 2h. Check it end to end
+### 2i. Check it end to end
 
 - Create a Board document → it appears in the hub account's Drive in the right
   folder, and a board member on the group can open it.
@@ -170,6 +207,9 @@ in the file and they get filled in on each copy.
   *just save the link*.
 - Upload a PDF, then upload a second version over it. The Drive link should not
   change and Drive's *File → Version history* should show both.
+- Mirror a Canva design, edit it in Canva, and reload the document in the hub:
+  it should say the copy is behind. Re-export and check the Drive file kept its
+  link and gained a revision.
 
 ---
 

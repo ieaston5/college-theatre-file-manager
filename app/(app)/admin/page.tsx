@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/db";
 import { getSetupState } from "@/lib/config";
-import { driveRedirectUri, env, loginRedirectUri } from "@/lib/env";
+import { canvaRedirectUri, driveRedirectUri, env, loginRedirectUri } from "@/lib/env";
+import { canvaProvider, canvaReady, getCanvaAccount } from "@/lib/canva";
+import { disconnectCanvaAction } from "@/app/actions/canva";
+import { CANVA_SCOPES } from "@/lib/constants";
 import {
   bootstrapFoldersAction,
   disconnectDriveAction,
@@ -20,10 +23,22 @@ export default async function AdminSettingsPage({
 }) {
   const params = await searchParams;
   const setup = await getSetupState();
-  const [documentCount, sampleCount] = await Promise.all([
-    prisma.document.count({ where: { googleFileId: { not: null } } }),
-    prisma.document.count({ where: { metadata: { contains: '"sample":true' } } }),
-  ]);
+  const [documentCount, sampleCount, canvaAccount, canvaConnected, canvaMirrorCount] =
+    await Promise.all([
+      prisma.document.count({ where: { googleFileId: { not: null } } }),
+      prisma.document.count({ where: { metadata: { contains: '"sample":true' } } }),
+      getCanvaAccount(),
+      canvaReady(),
+      prisma.document.count({ where: { canvaDesignId: { not: null } } }),
+    ]);
+
+  const canvaLabel =
+    env.canvaMode === "mock"
+      ? await canvaProvider().accountLabel()
+      : (canvaAccount?.displayName ?? null);
+  const canvaCapabilities: string[] = canvaAccount?.capabilities
+    ? (JSON.parse(canvaAccount.capabilities) as string[])
+    : [];
 
   const rootFolderLink = setup.account?.rootFolderId
     ? env.driveMode === "mock"
@@ -42,6 +57,17 @@ export default async function AdminSettingsPage({
         <Banner tone="slate" icon="info" title="Google account disconnected">
           Existing documents keep working in Drive, but the hub can no longer create, move or share
           files until an account is connected again.
+        </Banner>
+      ) : null}
+      {params.canva_connected === "1" ? (
+        <Banner tone="green" icon="check-circle" title="Canva account connected">
+          Canva designs can now be mirrored into the hub.
+        </Banner>
+      ) : null}
+      {params.canva_disconnected === "1" ? (
+        <Banner tone="slate" icon="info" title="Canva account disconnected">
+          Existing mirrored copies stay in Drive and keep working; they just cannot be re-exported
+          until an account is connected again.
         </Banner>
       ) : null}
       {params.sample_removed === "1" ? (
@@ -186,6 +212,116 @@ export default async function AdminSettingsPage({
         ) : null}
       </Card>
 
+      {env.canvaMode !== "off" ? (
+        <Card>
+          <SectionHeader
+            icon="canva"
+            title="Canva connection"
+            description="Optional. Lets the hub keep an exported copy of a Canva design in Drive, so Canva content can follow the hub's own Private / Company / Board rules."
+          />
+
+          <div className="mb-4 rounded-lg border border-ink-200 bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
+            <span className="font-semibold text-ink-800">Why a copy, and not real sharing?</span>{" "}
+            Canva's API has no way to grant a person access to a design — there is no
+            design-permission endpoint, and the links it hands back only work for the account that
+            asked and expire after 30 days. Mirroring is the only way to put Canva content behind
+            the hub's access rules. The design itself stays in Canva, shared however your designers
+            already share it.
+          </div>
+
+          {!env.canvaConfigured ? (
+            <div className="space-y-3 text-sm">
+              <Badge tone="amber" icon="warning">
+                No Canva integration configured
+              </Badge>
+              <p className="text-ink-600">
+                Create an integration in the Canva Developer Portal, then add{" "}
+                <code className="rounded bg-ink-100 px-1">CANVA_CLIENT_ID</code> and{" "}
+                <code className="rounded bg-ink-100 px-1">CANVA_CLIENT_SECRET</code> to{" "}
+                <code className="rounded bg-ink-100 px-1">.env</code>. SETUP.md has the steps.
+              </p>
+              <div className="rounded-lg bg-ink-50 p-3 text-xs">
+                <div className="font-medium text-ink-700">Redirect URL to register with Canva</div>
+                <p className="mt-1 font-mono text-ink-600">{canvaRedirectUri()}</p>
+                <p className="mt-1.5 text-ink-500">
+                  Canva rejects <code>localhost</code>, so the hub uses <code>127.0.0.1</code> for
+                  this one flow. Scopes needed: {CANVA_SCOPES.join(", ")}.
+                </p>
+              </div>
+            </div>
+          ) : canvaConnected && canvaAccount ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge tone="green" icon="check-circle">
+                  Connected
+                </Badge>
+                <span className="text-sm font-medium text-ink-900">
+                  {canvaLabel ?? "Canva account"}
+                </span>
+                <span className="text-xs text-ink-500">
+                  since {formatDateTime(canvaAccount.connectedAt)}
+                </span>
+              </div>
+              <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                <div className="rounded-lg bg-ink-50 p-3">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-ink-500">
+                    Designs mirrored
+                  </dt>
+                  <dd className="mt-1 font-medium">
+                    {canvaMirrorCount} {pluralize(canvaMirrorCount, "design")}
+                  </dd>
+                </div>
+                <div className="rounded-lg bg-ink-50 p-3">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-ink-500">
+                    Canva plan features
+                  </dt>
+                  <dd className="mt-1 text-xs text-ink-600">
+                    {canvaCapabilities.length > 0 ? canvaCapabilities.join(", ") : "standard"}
+                  </dd>
+                </div>
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <a href="/api/canva/connect" className={buttonClass("secondary")}>
+                  <Icon name="refresh" className="size-4" />
+                  Reconnect / switch account
+                </a>
+                <form action={disconnectCanvaAction}>
+                  <button type="submit" className={buttonClass("danger")}>
+                    <Icon name="cloud_off" className="size-4" />
+                    Disconnect
+                  </button>
+                </form>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 text-sm">
+              <Badge tone="amber" icon="warning">
+                Not connected
+              </Badge>
+              <p className="text-ink-600">
+                Connect the Canva account that can open the club's designs — the same dedicated
+                account is ideal. Designers keep using their own Canva accounts; they just need to
+                share each design with this one.
+              </p>
+              <a href="/api/canva/connect" className={buttonClass("primary")}>
+                <Icon name="canva" className="size-4" />
+                Connect the hub's Canva account
+              </a>
+            </div>
+          )}
+
+          {env.canvaMode === "mock" ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+              <span className="font-semibold">Simulated Canva is on.</span> Mirroring works
+              end to end but produces a placeholder PDF. Set{" "}
+              <code className="rounded bg-white/60 px-1">CANVA_MODE=canva</code> once an account is
+              connected, or <code className="rounded bg-white/60 px-1">CANVA_MODE=off</code> to hide
+              the feature.
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
       <FormCard
         title="Hub settings"
         description="Naming, the board group and what new documents look like."
@@ -227,6 +363,7 @@ export default async function AdminSettingsPage({
         <dl className="grid gap-2 text-sm sm:grid-cols-2">
           <Row label="Mode">{env.isProduction ? "production" : "development"}</Row>
           <Row label="Drive">{env.driveMode === "mock" ? "simulated" : "Google Drive"}</Row>
+          <Row label="Canva">{env.canvaMode}</Row>
           <Row label="Local sign-in">{env.allowDevLogin ? "enabled" : "off"}</Row>
           <Row label="App URL">{env.appUrl}</Row>
         </dl>

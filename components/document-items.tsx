@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Category, Document, Production, Tag, User } from "@prisma/client";
 import { DOC_TYPE_META, VISIBILITY_META, type DocType, type Visibility } from "@/lib/constants";
 import { cn, relativeTime } from "@/lib/utils";
+import { canvaMirrorIsStale } from "@/lib/documents";
 import { Icon } from "./icons";
 import { Badge, EmptyState } from "./ui";
 
@@ -58,6 +59,11 @@ export function DocumentRow({
           {document.status === "ARCHIVED" ? (
             <Badge tone="slate" className="shrink-0">
               Archived
+            </Badge>
+          ) : null}
+          {canvaMirrorIsStale(document) ? (
+            <Badge tone="amber" className="shrink-0" icon="alert">
+              Canva newer
             </Badge>
           ) : null}
         </div>

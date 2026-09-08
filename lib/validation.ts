@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ACCESS_LEVELS,
+  CANVA_EXPORT_FORMATS,
   CATEGORY_SCOPES,
   CREATABLE_DOC_TYPES,
   DOC_TYPES,
@@ -72,6 +73,21 @@ export const updateDocumentSchema = z.object({
   visibility: z.enum(VISIBILITIES),
   tags: optionalText(400),
   pinned: z.coerce.boolean().optional().default(false),
+});
+
+/** Mirroring a Canva design: the link, plus the usual filing fields. */
+export const canvaMirrorSchema = z.object({
+  link: z.string().trim().min(8, "Paste the link to the Canva design."),
+  title: optionalText(160),
+  description: optionalText(1000),
+  categoryId: z.string().min(1, "Pick a category."),
+  productionId: z
+    .string()
+    .optional()
+    .transform((value) => (value && value !== "none" ? value : undefined)),
+  visibility: z.enum(VISIBILITIES),
+  tags: optionalText(400),
+  format: z.enum(CANVA_EXPORT_FORMATS).default("pdf"),
 });
 
 /** The metadata the browser sends before it starts pushing bytes. */

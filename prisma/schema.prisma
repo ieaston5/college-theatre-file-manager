@@ -44,6 +44,7 @@ model User {
   uploads        PendingUpload[]
   memberships    ProductionMember[] @relation("MembershipUser")
   addedMembers   ProductionMember[] @relation("MembershipAddedBy")
+  connectedCanva CanvaAccount[]
 
   @@index([role])
   @@index([status])
@@ -159,13 +160,27 @@ model Document {
   webViewLink       String?
   driveFolderId     String?
   driveOwnerEmail   String?
-  /// Bytes, for uploaded files.
+  /// Bytes, for uploaded and mirrored files.
   sizeBytes         Int?
   /// The name of the file as the uploader had it on their machine.
   originalFileName  String?
   mimeType          String?
   googleModifiedAt  DateTime?
   lastSyncedAt      DateTime?
+
+  /// Canva mirrors: the hub keeps an exported copy of a Canva design in Drive
+  /// so the hub's own permission model applies to it. Canva's API cannot set
+  /// per-person access on a design, so mirroring is the only way to put Canva
+  /// content behind Company/Board/Private.
+  canvaDesignId        String?
+  canvaUrl             String?
+  canvaTitle           String?
+  canvaExportFormat    String? // pdf | pptx
+  canvaExportedAt      DateTime?
+  /// `updated_at` from Canva at the last check — compared with canvaExportedAt
+  /// to tell people the copy here is behind the original.
+  canvaDesignUpdatedAt DateTime?
+  canvaCheckedAt       DateTime?
   /// Free-form JSON text of extra fields captured at creation time.
   metadata          String?
 
@@ -189,6 +204,7 @@ model Document {
   @@index([visibility])
   @@index([status])
   @@index([updatedAt])
+  @@index([canvaDesignId])
 }
 
 /// An individual grant on top of a document's visibility. Used to let a
@@ -350,9 +366,37 @@ model PendingUpload {
 }
 
 /// Short-lived OAuth state, so the callback can verify the round trip.
+///
+/// `userId` is recorded for flows whose callback must not depend on a session
+/// cookie: Canva refuses `localhost` redirect URIs, so its callback can land on
+/// 127.0.0.1 where the cookie set on localhost is not sent.
 model OAuthState {
-  state     String   @id
-  purpose   String // "login" | "drive"
-  redirect  String?
-  createdAt DateTime @default(now())
+  state        String   @id
+  purpose      String // "login" | "drive" | "canva"
+  redirect     String?
+  userId       String?
+  /// PKCE code_verifier, required by Canva's OAuth flow.
+  codeVerifier String?
+  createdAt    DateTime @default(now())
+}
+
+/// OAuth credentials for the hub's Canva account, which owns the exports.
+/// Tokens are encrypted at rest (lib/crypto.ts). Exactly one row, id =
+/// "singleton". Canva access tokens last ~4 hours and refresh tokens rotate on
+/// every use, so both are rewritten as they are refreshed.
+model CanvaAccount {
+  id                String    @id @default("singleton")
+  canvaUserId       String?
+  canvaTeamId       String?
+  displayName       String?
+  accessToken       String? // encrypted
+  refreshToken      String? // encrypted
+  expiresAt         DateTime?
+  scope             String?
+  capabilities      String? // JSON array text
+  connectedByUserId String?
+  connectedAt       DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  connectedBy User? @relation(fields: [connectedByUserId], references: [id], onDelete: SetNull)
 }

@@ -5,9 +5,12 @@ import Link from "next/link";
 import { createDocumentAction } from "@/app/actions/documents";
 import { emptyState } from "@/app/actions/shared";
 import {
+  CANVA_EXPORT_FORMATS,
+  CANVA_FORMAT_META,
   CREATION_MODES,
   DOC_TYPE_META,
   docTypeFromMime,
+  type CanvaExportFormat,
   type CreationMode,
   type DocType,
 } from "@/lib/constants";
@@ -54,6 +57,12 @@ const MODE_COPY: Record<CreationMode, { label: string; icon: string; tint: strin
       tint: "#dc2626",
       blurb: "Scripts, scores, PDFs, scans, images",
     },
+    CANVA: {
+      label: "Canva design",
+      icon: "canva",
+      tint: DOC_TYPE_META.CANVA.color,
+      blurb: "Paste a link — the hub keeps a copy people can open",
+    },
   };
 
 export function DocumentCreateForm({
@@ -64,6 +73,9 @@ export function DocumentCreateForm({
   currentSeason,
   groupEmail,
   driveMode,
+  canvaMode,
+  canvaReady,
+  canvaAccountLabel,
   defaultCategoryId,
   defaultProductionId,
 }: {
@@ -74,6 +86,9 @@ export function DocumentCreateForm({
   currentSeason: string | null;
   groupEmail: string | null;
   driveMode: "google" | "mock";
+  canvaMode: "canva" | "mock" | "off";
+  canvaReady: boolean;
+  canvaAccountLabel: string | null;
   defaultCategoryId?: string;
   defaultProductionId?: string;
 }) {
@@ -86,6 +101,7 @@ export function DocumentCreateForm({
   const [mode, setMode] = useState<CreationMode>("DOC");
   const [visibility, setVisibility] = useState<string>("BOARD");
   const [templateId, setTemplateId] = useState("blank");
+  const [canvaFormat, setCanvaFormat] = useState<CanvaExportFormat>("pdf");
 
   // Upload mode
   const [files, setFiles] = useState<File[]>([]);
@@ -97,6 +113,7 @@ export function DocumentCreateForm({
   const category = categories.find((item) => item.id === categoryId);
   const production = productions.find((item) => item.id === productionId);
   const isUpload = mode === "UPLOAD";
+  const isCanva = mode === "CANVA";
 
   const availableTemplates = useMemo(
     () =>
@@ -116,8 +133,11 @@ export function DocumentCreateForm({
     title: effectiveTitle || (isUpload && files.length > 1 ? "each file's own name" : "Untitled"),
     season: production?.season ?? currentSeason,
   });
-  const previewName =
-    isUpload && files.length === 1 ? withExtension(previewBase, files[0].name) : previewBase;
+  const previewName = isCanva
+    ? withExtension(previewBase, CANVA_FORMAT_META[canvaFormat].extension)
+    : isUpload && files.length === 1
+      ? withExtension(previewBase, files[0].name)
+      : previewBase;
 
   const uploadDocType: DocType =
     isUpload && files.length > 0 ? docTypeFromMime(files[0].type) : "OTHER";
@@ -127,7 +147,12 @@ export function DocumentCreateForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
-    if (next.defaultDocType && !isUpload) setMode(next.defaultDocType as CreationMode);
+    // A category's default file type only applies to the Google types. Upload
+    // and Canva are deliberate choices about where the content comes from, so
+    // picking a category must not silently switch back to "Google Doc".
+    if (next.defaultDocType && !isUpload && !isCanva) {
+      setMode(next.defaultDocType as CreationMode);
+    }
     // Never leave "Company" selected on a category that is board-only.
     setVisibility(
       next.defaultVisibility === "COMPANY" && !next.companyVisible
@@ -347,7 +372,9 @@ export function DocumentCreateForm({
               setTemplateId("blank");
               if (next !== "UPLOAD") setFiles([]);
             }}
-            options={CREATION_MODES.map((option) => ({
+            options={CREATION_MODES.filter(
+              (option) => option !== "CANVA" || canvaMode !== "off",
+            ).map((option) => ({
               value: option,
               label: MODE_COPY[option].label,
               icon: MODE_COPY[option].icon,
@@ -374,14 +401,60 @@ export function DocumentCreateForm({
           </Field>
         ) : null}
 
+        {isCanva ? (
+          <>
+            <Field
+              label="Canva link"
+              htmlFor="canvaLink"
+              required
+              hint={
+                canvaMode === "mock"
+                  ? "Any Canva link works while the hub is running on a simulated Canva — you will get a placeholder export so you can see the whole flow."
+                  : canvaReady
+                    ? `Open the design in Canva, copy the URL from the address bar, and make sure it is shared with ${canvaAccountLabel ?? "the hub's Canva account"} so the hub can export it.`
+                    : "The hub's Canva account is not connected yet — an admin needs to do that in Admin before this will work."
+              }
+            >
+              <input
+                id="canvaLink"
+                name="canvaLink"
+                className={inputClass}
+                placeholder="https://www.canva.com/design/DAF.../view"
+                required
+              />
+            </Field>
+
+            <Field
+              label="Keep the copy as"
+              hint="Canva cannot let the hub decide who opens a design, so the hub keeps an exported copy in Drive instead — and that copy follows the hub's own Private / Company / Board rules. Canva stays the place you edit it."
+            >
+              <RadioCards
+                name="canvaFormat"
+                columns={2}
+                value={canvaFormat}
+                onChange={(next) => setCanvaFormat(next as CanvaExportFormat)}
+                options={CANVA_EXPORT_FORMATS.map((format) => ({
+                  value: format,
+                  label: CANVA_FORMAT_META[format].label,
+                  description: CANVA_FORMAT_META[format].blurb,
+                  icon: format === "pdf" ? "pdf" : "slides",
+                  tint: format === "pdf" ? DOC_TYPE_META.PDF.color : DOC_TYPE_META.SLIDES.color,
+                }))}
+              />
+            </Field>
+          </>
+        ) : null}
+
         <Field
           label={multiFile ? "Name" : "Name"}
           htmlFor="title"
-          required={!multiFile}
+          required={!multiFile && !isCanva}
           hint={
             multiFile
               ? "Several files selected — each one keeps its own name. Clear the extra files if you want to name one yourself."
-              : "Plain language, no need to add the show or the date — the hub adds those."
+              : isCanva
+                ? "Leave blank to use the design's own name in Canva."
+                : "Plain language, no need to add the show or the date — the hub adds those."
           }
         >
           <input
@@ -391,7 +464,7 @@ export function DocumentCreateForm({
             onChange={(event) => setTitle(event.target.value)}
             placeholder={multiFile ? "Each file keeps its own name" : "Running budget"}
             className={inputClass}
-            required={!isUpload}
+            required={!isUpload && !isCanva}
             disabled={multiFile}
             autoFocus={!isUpload}
           />
@@ -406,7 +479,7 @@ export function DocumentCreateForm({
           scope={category?.scope}
         />
 
-        {!isUpload && availableTemplates.length > 0 ? (
+        {!isUpload && !isCanva && availableTemplates.length > 0 ? (
           <Field
             label="Start from a template"
             htmlFor="templateId"
@@ -446,7 +519,7 @@ export function DocumentCreateForm({
       <div className="card flex flex-wrap items-center justify-between gap-3 bg-ink-50 p-4">
         <div className="min-w-0 text-sm">
           <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-            Will be {isUpload ? "uploaded as" : "created as"}
+            Will be {isUpload ? "uploaded as" : isCanva ? "kept in Drive as" : "created as"}
           </div>
           <div className="mt-0.5 flex items-center gap-2 font-medium text-ink-800">
             <Icon name={previewIcon} className="size-4 shrink-0" />
@@ -482,8 +555,11 @@ export function DocumentCreateForm({
                   : "Upload"}
             </button>
           ) : (
-            <SubmitButton icon="plus" pendingLabel="Creating in Drive…">
-              Create document
+            <SubmitButton
+              icon={isCanva ? "canva" : "plus"}
+              pendingLabel={isCanva ? "Exporting from Canva…" : "Creating in Drive…"}
+            >
+              {isCanva ? "Mirror this design" : "Create document"}
             </SubmitButton>
           )}
         </div>

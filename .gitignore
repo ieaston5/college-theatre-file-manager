@@ -15,8 +15,9 @@ next-env.d.ts
 prisma/*.db
 prisma/*.db-journal
 
-# Simulated Drive state (DRIVE_MODE=mock)
+# Simulated Drive / Canva state (DRIVE_MODE=mock, CANVA_MODE=mock)
 .mock-drive/
+.mock-canva/
 
 .DS_Store
 *.log

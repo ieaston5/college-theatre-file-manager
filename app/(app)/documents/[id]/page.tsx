@@ -20,6 +20,10 @@ import {
 import { DocTypeIcon } from "@/components/document-items";
 import { ShareForm } from "@/components/forms/share-form";
 import { NewVersionUploader } from "@/components/forms/new-version-uploader";
+import { CanvaReexportForm } from "@/components/forms/canva-panel";
+import { checkCanvaFreshnessAction, simulateCanvaEditAction } from "@/app/actions/canva";
+import { canvaMirrorIsStale } from "@/lib/documents";
+import { CANVA_FORMAT_META, type CanvaExportFormat } from "@/lib/constants";
 import { Icon } from "@/components/icons";
 import { Avatar, Badge, Banner, Card, SectionHeader, buttonClass } from "@/components/ui";
 import {
@@ -65,6 +69,8 @@ export default async function DocumentPage({
   const typeMeta = DOC_TYPE_META[(document.docType as DocType) ?? "OTHER"] ?? DOC_TYPE_META.OTHER;
   const isUploaded =
     Boolean(document.googleFileId) && UPLOADED_DOC_TYPES.includes(document.docType as DocType);
+  const isCanva = Boolean(document.canvaDesignId);
+  const canvaStale = canvaMirrorIsStale(document);
 
   const companyAudience =
     document.visibility === "COMPANY"
@@ -196,7 +202,19 @@ export default async function DocumentPage({
           </a>
         ) : null}
 
-        {isUploaded && env.driveMode === "mock" && document.googleFileId ? (
+        {isCanva && document.canvaUrl ? (
+          <a
+            href={document.canvaUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonClass("secondary")}
+          >
+            <Icon name="canva" className="size-4" />
+            Edit in Canva
+          </a>
+        ) : null}
+
+        {(isUploaded || isCanva) && env.driveMode === "mock" && document.googleFileId ? (
           <a
             href={`/api/uploads/blob/${document.googleFileId}`}
             download={document.originalFileName ?? undefined}
@@ -276,6 +294,18 @@ export default async function DocumentPage({
             <Row label="Hub updated">{relativeTime(document.updatedAt)}</Row>
             {document.googleModifiedAt ? (
               <Row label="Drive changed">{relativeTime(document.googleModifiedAt)}</Row>
+            ) : null}
+            {isCanva ? (
+              <Row label="Copy format">
+                {CANVA_FORMAT_META[(document.canvaExportFormat ?? "pdf") as CanvaExportFormat]
+                  ?.label ?? document.canvaExportFormat}
+              </Row>
+            ) : null}
+            {isCanva && document.canvaExportedAt ? (
+              <Row label="Copy taken">{relativeTime(document.canvaExportedAt)}</Row>
+            ) : null}
+            {isCanva && document.canvaDesignUpdatedAt ? (
+              <Row label="Canva changed">{relativeTime(document.canvaDesignUpdatedAt)}</Row>
             ) : null}
             {document.sizeBytes ? (
               <Row label="Size">{formatBytes(document.sizeBytes)}</Row>
@@ -425,6 +455,69 @@ export default async function DocumentPage({
           )}
         </Card>
       </div>
+
+      {isCanva ? (
+        <Card className={canvaStale ? "border-amber-300" : undefined}>
+          <SectionHeader
+            icon="canva"
+            title="Canva original"
+            description="Canva has no way to let the hub decide who opens a design, so the hub keeps an exported copy in Drive instead — and that copy follows this document's visibility. Canva stays where it is edited."
+          />
+
+          <div className="space-y-3 text-sm">
+            <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
+              {document.canvaExportedAt ? (
+                <>
+                  The {CANVA_FORMAT_META[(document.canvaExportFormat ?? "pdf") as CanvaExportFormat]?.label ?? "copy"}{" "}
+                  in Drive was taken {relativeTime(document.canvaExportedAt)}
+                  {document.canvaDesignUpdatedAt ? (
+                    <>
+                      {" "}
+                      and the design in Canva last changed{" "}
+                      {relativeTime(document.canvaDesignUpdatedAt)}.
+                    </>
+                  ) : (
+                    "."
+                  )}{" "}
+                  {canvaStale
+                    ? "Re-export to bring the copy up to date — same link, same sharing, and Drive keeps the old version."
+                    : "The copy is current."}
+                </>
+              ) : (
+                "No copy has been exported yet, so nobody but the Canva editors can see this. Export one below."
+              )}
+            </div>
+
+            {canEdit ? (
+              <>
+                <CanvaReexportForm documentId={document.id} stale={canvaStale} />
+                <div className="flex flex-wrap gap-2 border-t border-ink-100 pt-3">
+                  <form action={checkCanvaFreshnessAction}>
+                    <input type="hidden" name="id" value={document.id} />
+                    <button type="submit" className={buttonClass("ghost")}>
+                      <Icon name="clock" className="size-4" />
+                      Check Canva for changes
+                    </button>
+                  </form>
+                  {env.canvaMode === "mock" ? (
+                    <form action={simulateCanvaEditAction}>
+                      <input type="hidden" name="id" value={document.id} />
+                      <button
+                        type="submit"
+                        className={buttonClass("ghost")}
+                        title="Simulated Canva only — pretends somebody edited the design so you can see the out-of-date state"
+                      >
+                        <Icon name="sparkles" className="size-4" />
+                        Simulate an edit in Canva
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {canEdit && isUploaded ? (
         <Card>

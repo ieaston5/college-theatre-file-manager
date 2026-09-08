@@ -45,6 +45,18 @@ server opens, so large files are not limited by the host's request-body cap,
 and the file's name, folder and metadata are fixed server-side where the
 browser cannot change them.
 
+**Canva.** Canva's API cannot grant a person access to a design — there is no
+design-permission endpoint, and the links it returns work only for the calling
+account and expire after 30 days. So the hub *mirrors* a design instead: paste
+the Canva link, and the hub exports the design and files the export in Drive,
+where Private / Company / Board already works. Canva stays the place it is
+edited; the hub owns the copy people read.
+
+The hub tracks the design's `updated_at`, so a mirror whose original has moved
+on is flagged "Canva newer" in lists and offers a one-click re-export — which
+replaces the same Drive file, keeping its link, its sharing and its Drive
+revision history.
+
 **Finding.** The dashboard is organised by *type of information* (the sidebar),
 crossed with *production*. Every category and show has its own page; there is
 one search box over titles, descriptions, tags, categories and shows; filters
@@ -76,6 +88,9 @@ Three visibility levels on every document:
 | **Private** | the creator, plus anyone they add by hand |
 | **Company** | the board, plus people on that production whose role covers this category |
 | **Board** | everyone with board access |
+
+Mirrored Canva designs obey the same three levels, because what is being shared
+is the exported copy in Drive rather than the Canva design.
 
 **Privacy.** `PRIVATE` means private, including from admins. A private document
 is never listed for anyone but its creator and the people they add by hand, and
@@ -116,6 +131,7 @@ app/
   api/auth/               Google sign-in, local dev sign-in, sign-out
   api/google/             connecting the hub's document-owning account
   api/uploads/            start · finish · proxy · mock · blob (upload plumbing)
+  api/canva/              connect · callback (the hub's Canva account)
   mock-drive/[id]/        the simulated Drive viewer
   actions/                server actions (every mutation)
 lib/
@@ -124,6 +140,7 @@ lib/
   documents.ts            create / upload / register / update / share, DB + Drive together
   upload-client.ts        browser side of the upload flow
   google/                 oauth.ts · real.ts (Drive API) · mock.ts · upload.ts · index.ts
+  canva/                  oauth.ts (PKCE) · real.ts (Connect API) · mock.ts · index.ts
   constants.ts            roles, doc types, visibilities — the enum vocabulary
 prisma/
   schema.prisma           SQLite now, portable to Postgres

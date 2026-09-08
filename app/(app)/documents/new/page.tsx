@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getSetupState } from "@/lib/config";
+import { canvaProvider, canvaReady, getCanvaAccount } from "@/lib/canva";
 import { env } from "@/lib/env";
 import { DocumentCreateForm } from "@/components/forms/document-create-form";
 import { Banner, PageHeader, buttonClass } from "@/components/ui";
@@ -16,7 +17,7 @@ export default async function NewDocumentPage({
   const params = await searchParams;
   const setup = await getSetupState();
 
-  const [categories, productions, templates] = await Promise.all([
+  const [categories, productions, templates, canvaConnected, canvaAccount] = await Promise.all([
     prisma.category.findMany({
       where: { archived: false },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -26,7 +27,15 @@ export default async function NewDocumentPage({
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
     }),
     prisma.template.findMany({ where: { archived: false }, orderBy: { name: "asc" } }),
+    canvaReady(),
+    getCanvaAccount(),
   ]);
+
+  // In simulated mode this is a label, not a network call.
+  const canvaAccountLabel =
+    env.canvaMode === "mock"
+      ? await canvaProvider().accountLabel()
+      : (canvaAccount?.displayName ?? null);
 
   const categorySlug = typeof params.category === "string" ? params.category : undefined;
   const productionSlug = typeof params.production === "string" ? params.production : undefined;
@@ -98,6 +107,9 @@ export default async function NewDocumentPage({
           currentSeason={setup.config.currentSeason}
           groupEmail={setup.config.groupEmail}
           driveMode={env.driveMode}
+          canvaMode={env.canvaMode}
+          canvaReady={canvaConnected}
+          canvaAccountLabel={canvaAccountLabel}
           defaultCategoryId={categories.find((category) => category.slug === categorySlug)?.id}
           defaultProductionId={
             productions.find((production) => production.slug === productionSlug)?.id

@@ -66,7 +66,7 @@ export const CREATABLE_DOC_TYPES = ["DOC", "SHEET", "SLIDES"] as const;
 export type CreatableDocType = (typeof CREATABLE_DOC_TYPES)[number];
 
 /** What the "What should it be?" picker offers. */
-export const CREATION_MODES = ["DOC", "SHEET", "SLIDES", "UPLOAD"] as const;
+export const CREATION_MODES = ["DOC", "SHEET", "SLIDES", "UPLOAD", "CANVA"] as const;
 export type CreationMode = (typeof CREATION_MODES)[number];
 
 export const DOC_TYPES = [
@@ -81,6 +81,7 @@ export const DOC_TYPES = [
   "ARCHIVE",
   "FOLDER",
   "LINK",
+  "CANVA",
   "OTHER",
 ] as const;
 export type DocType = (typeof DOC_TYPES)[number];
@@ -97,6 +98,39 @@ export const UPLOADED_DOC_TYPES: DocType[] = [
 
 /** Refused above this; Drive itself allows far more but a club does not need it. */
 export const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+// --- Canva ------------------------------------------------------------------
+
+/**
+ * Canva's Connect API has no way to grant a person access to a design — there
+ * is no design-permission scope or endpoint, and the URLs the API returns are
+ * single-user and expire after 30 days. So the hub mirrors a design instead:
+ * it exports the design and files the export in Drive, where the hub's own
+ * Private/Company/Board model already works. Canva stays the editing surface.
+ */
+export const CANVA_EXPORT_FORMATS = ["pdf", "pptx"] as const;
+export type CanvaExportFormat = (typeof CANVA_EXPORT_FORMATS)[number];
+
+export const CANVA_FORMAT_META: Record<
+  CanvaExportFormat,
+  { label: string; blurb: string; mimeType: string; extension: string }
+> = {
+  pdf: {
+    label: "PDF",
+    blurb: "Opens anywhere, on any phone, with no Canva account. Best for scripts, posters and anything the company just needs to read.",
+    mimeType: "application/pdf",
+    extension: ".pdf",
+  },
+  pptx: {
+    label: "PowerPoint",
+    blurb: "Editable slides, for a deck somebody else has to present or rework outside Canva.",
+    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    extension: ".pptx",
+  },
+};
+
+/** The scopes the hub asks of the Canva account that owns the exports. */
+export const CANVA_SCOPES = ["design:meta:read", "design:content:read", "profile:read"];
 
 export const DOC_TYPE_META: Record<
   DocType,
@@ -135,6 +169,7 @@ export const DOC_TYPE_META: Record<
   AUDIO: { label: "Audio", mimeType: null, icon: "music", color: "#7c3aed", short: "Audio" },
   VIDEO: { label: "Video", mimeType: null, icon: "film", color: "#be123c", short: "Video" },
   ARCHIVE: { label: "Archive", mimeType: null, icon: "props", color: "#a16207", short: "Zip" },
+  CANVA: { label: "Canva design", mimeType: null, icon: "canva", color: "#00c4cc", short: "Canva" },
   FOLDER: {
     label: "Drive folder",
     mimeType: "application/vnd.google-apps.folder",
@@ -208,7 +243,7 @@ export const MEMBER_STATUSES = ["ACTIVE", "REMOVED"] as const;
 
 // --- Document source & status ----------------------------------------------
 
-export const DOC_SOURCES = ["CREATED", "REGISTERED", "LINK"] as const;
+export const DOC_SOURCES = ["CREATED", "REGISTERED", "LINK", "CANVA"] as const;
 export type DocSource = (typeof DOC_SOURCES)[number];
 
 export const DOC_STATUSES = ["ACTIVE", "ARCHIVED"] as const;

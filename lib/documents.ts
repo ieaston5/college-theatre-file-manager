@@ -6,18 +6,23 @@ import { recordAudit } from "./audit";
 import { driveProvider, resolveFolder } from "./google";
 import type { DocHeader, SharingPlan, SharingResult } from "./google/types";
 import {
+  CANVA_FORMAT_META,
   DOC_TYPE_META,
   docTypeFromMime,
+  type CanvaExportFormat,
   type CreatableDocType,
   type DocType,
   type Visibility,
 } from "./constants";
+import { canvaProvider, extractCanvaDesignId, getCanvaAccount } from "./canva";
+import { putBytesToDrive } from "./google/upload";
 import {
   applyNamingTemplate,
   driveViewLink,
   extractDriveFileId,
   parseTagInput,
   slugify,
+  withExtension,
 } from "./utils";
 
 export type DocumentServiceResult = {
@@ -110,7 +115,12 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
     groupEmail: config.groupEmail,
     groupCanEdit: config.groupCanEdit,
     extra,
-    strategy: doc.source === "CREATED" ? "reconcile" : "additive",
+    // Anything the hub made in its own Drive — created, uploaded or mirrored
+    // from Canva — is reconciled, so dropping a document's visibility actually
+    // removes the wider access. Only pre-existing files that belong to
+    // somebody else are treated additively, where blindly revoking unknown
+    // permissions would cut off their real collaborators.
+    strategy: doc.source === "REGISTERED" ? "additive" : "reconcile",
   };
 }
 
@@ -460,6 +470,268 @@ export async function recordNewVersion(
   });
 
   return document;
+}
+
+// ---------------------------------------------------------------------------
+// Canva mirrors
+// ---------------------------------------------------------------------------
+
+/**
+ * Canva designs cannot be access-controlled through Canva's API — there is no
+ * design-permission endpoint, and the URLs the API returns are single-user and
+ * expire after 30 days. So a Canva design is *mirrored*: the hub exports it and
+ * files the export in Drive, where Private / Company / Board already works.
+ * Canva stays the place the design is edited; the hub owns the copy people read.
+ */
+export async function mirrorCanvaDesign(
+  actor: User,
+  input: {
+    link: string;
+    title?: string;
+    description?: string;
+    categoryId: string;
+    productionId?: string;
+    visibility: Visibility;
+    tags?: string;
+    format: CanvaExportFormat;
+  },
+): Promise<DocumentServiceResult> {
+  const designId = extractCanvaDesignId(input.link);
+  if (!designId) {
+    throw new Error(
+      "That does not look like a Canva link. Use the design's URL, e.g. https://www.canva.com/design/DAF…/view",
+    );
+  }
+
+  const [config, category, production] = await Promise.all([
+    getConfig(),
+    prisma.category.findUnique({ where: { id: input.categoryId } }),
+    input.productionId
+      ? prisma.production.findUnique({ where: { id: input.productionId } })
+      : Promise.resolve(null),
+  ]);
+  if (!category) throw new Error("That category no longer exists.");
+  if (category.scope === "PRODUCTION" && !production) {
+    throw new Error(`Documents in ${category.name} have to be attached to a production.`);
+  }
+  if (category.scope === "STANDING" && production) {
+    throw new Error(`${category.name} is an organisation-wide category — leave the production blank.`);
+  }
+  assertVisibilityAllowed(category, input.visibility);
+
+  const existing = await prisma.document.findFirst({ where: { canvaDesignId: designId } });
+  if (existing) {
+    throw new Error(
+      `That Canva design is already on the hub as “${existing.title}”. Re-export it from there instead of adding it twice.`,
+    );
+  }
+
+  const provider = canvaProvider();
+  const design = await provider.getDesign(designId);
+  if (!design) {
+    const account = await getCanvaAccount();
+    throw new Error(
+      `The hub's Canva account${account?.displayName ? ` (${account.displayName})` : ""} cannot open that design. Share it with that account in Canva, then try again.`,
+    );
+  }
+
+  const title = (input.title?.trim() || design.title || "Canva design").slice(0, 160);
+  const warnings: string[] = [];
+
+  const document = await prisma.document.create({
+    data: {
+      title,
+      description: input.description ?? null,
+      docType: "CANVA",
+      source: "CANVA",
+      visibility: input.visibility,
+      categoryId: category.id,
+      productionId: production?.id ?? null,
+      creatorId: actor.id,
+      canvaDesignId: design.id,
+      canvaUrl: design.url,
+      canvaTitle: design.title,
+      canvaExportFormat: input.format,
+      canvaDesignUpdatedAt: design.updatedAt,
+      canvaCheckedAt: new Date(),
+      tags: { connect: await tagIds(input.tags) },
+      metadata: JSON.stringify({
+        createdVia: "canva-mirror",
+        canvaMode: env.canvaMode,
+        driveMode: env.driveMode,
+        designTypes: design.designTypes,
+        pageCount: design.pageCount,
+      }),
+    },
+  });
+
+  try {
+    const exported = await exportCanvaMirror(actor, document.id, { silent: true });
+    warnings.push(...exported.warnings);
+  } catch (error) {
+    // The record is still useful — it has the link and the metadata — so keep
+    // it and tell the person the copy is missing.
+    warnings.push(
+      `The design is on the hub, but the first export failed: ${(error as Error).message}`,
+    );
+  }
+
+  if (input.visibility === "BOARD" && !config.groupEmail) {
+    warnings.push(
+      "No board Google Group is configured yet, so the exported copy was not shared in Drive.",
+    );
+  }
+
+  await recordAudit({
+    actor,
+    action: "canva.mirror",
+    targetType: "Document",
+    targetId: document.id,
+    summary:
+      input.visibility === "PRIVATE"
+        ? `Mirrored a private Canva design into ${category.name}`
+        : `Mirrored the Canva design “${title}” into ${category.name}${production ? ` for ${production.name}` : ""}`,
+    metadata: { designId: design.id, format: input.format },
+  });
+
+  const fresh = await prisma.document.findUniqueOrThrow({ where: { id: document.id } });
+  return { document: fresh, warnings };
+}
+
+/**
+ * Export the Canva design and put the result in Drive. The first export
+ * creates the Drive file; later ones replace its contents, so the link and the
+ * sharing never change and Drive keeps the previous version.
+ */
+export async function exportCanvaMirror(
+  actor: User,
+  documentId: string,
+  options?: { silent?: boolean },
+): Promise<{ document: Document; warnings: string[] }> {
+  const document = await prisma.document.findUnique({
+    where: { id: documentId },
+    include: { category: true, production: true },
+  });
+  if (!document) throw new Error("That document no longer exists.");
+  if (!document.canvaDesignId) throw new Error("That document is not a Canva mirror.");
+
+  const config = await getConfig();
+  const format = (document.canvaExportFormat ?? "pdf") as CanvaExportFormat;
+  const warnings: string[] = [];
+
+  const provider = canvaProvider();
+  const design = await provider.getDesign(document.canvaDesignId);
+  const exported = await provider.exportDesign(document.canvaDesignId, format);
+  if (exported.note) warnings.push(exported.note);
+  if (exported.extraFileCount > 0) {
+    warnings.push(
+      `Canva split that export into ${exported.extraFileCount + 1} files; the hub kept the first. Export as PDF to get one file.`,
+    );
+  }
+
+  const meta = CANVA_FORMAT_META[exported.format];
+  const driveName = withExtension(
+    applyNamingTemplate(config.namingTemplate, {
+      production: document.production?.abbreviation || document.production?.name || null,
+      category: document.category.name,
+      title: document.title,
+      season: document.production?.season ?? config.currentSeason,
+    }),
+    meta.extension,
+  );
+
+  const folderId =
+    document.driveFolderId ??
+    (await resolveFolder({ category: document.category, production: document.production }));
+
+  const file = await putBytesToDrive({
+    fileId: document.googleFileId,
+    name: driveName,
+    mimeType: meta.mimeType,
+    parentFolderId: folderId,
+    description: [
+      document.description,
+      `${config.orgName} Hub · ${document.category.name}`,
+      `Exported from Canva — edit the original at ${document.canvaUrl}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    appProperties: {
+      hubDocumentId: document.id,
+      hubCategory: document.category.slug,
+      hubProduction: document.production?.slug ?? "",
+      hubVisibility: document.visibility,
+      hubCanvaDesignId: document.canvaDesignId,
+    },
+    bytes: exported.bytes,
+  });
+
+  const updated = await prisma.document.update({
+    where: { id: document.id },
+    data: {
+      googleFileId: file.id,
+      webViewLink: file.webViewLink || driveViewLink(file.id, "PDF"),
+      driveFolderId: folderId,
+      driveOwnerEmail: file.ownerEmail ?? document.driveOwnerEmail,
+      mimeType: meta.mimeType,
+      sizeBytes: exported.bytes.byteLength,
+      originalFileName: driveName,
+      canvaExportFormat: exported.format,
+      canvaExportedAt: new Date(),
+      canvaTitle: design?.title ?? document.canvaTitle,
+      canvaDesignUpdatedAt: design?.updatedAt ?? document.canvaDesignUpdatedAt,
+      canvaCheckedAt: new Date(),
+      googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
+      lastSyncedAt: new Date(),
+    },
+  });
+
+  const sharing = await syncSharing(updated);
+  warnings.push(...sharing.warnings);
+
+  if (!options?.silent) {
+    await recordAudit({
+      actor,
+      action: "canva.export",
+      targetType: "Document",
+      targetId: document.id,
+      summary:
+        document.visibility === "PRIVATE"
+          ? "Re-exported a private Canva design"
+          : `Re-exported “${document.title}” from Canva`,
+      metadata: { format: exported.format, sizeBytes: exported.bytes.byteLength },
+    });
+  }
+
+  return { document: updated, warnings };
+}
+
+/** Ask Canva whether the design has moved on since the last export. */
+export async function checkCanvaFreshness(documentId: string) {
+  const document = await prisma.document.findUnique({ where: { id: documentId } });
+  if (!document?.canvaDesignId) return null;
+
+  const design = await canvaProvider().getDesign(document.canvaDesignId);
+  if (!design) return null;
+
+  return prisma.document.update({
+    where: { id: document.id },
+    data: {
+      canvaTitle: design.title ?? document.canvaTitle,
+      canvaDesignUpdatedAt: design.updatedAt,
+      canvaCheckedAt: new Date(),
+    },
+  });
+}
+
+/** True when the Canva original has been edited since the hub's copy was made. */
+export function canvaMirrorIsStale(document: {
+  canvaExportedAt: Date | null;
+  canvaDesignUpdatedAt: Date | null;
+}): boolean {
+  if (!document.canvaExportedAt || !document.canvaDesignUpdatedAt) return false;
+  // A minute of slack: Canva's updated_at ticks over as the export is taken.
+  return document.canvaDesignUpdatedAt.getTime() > document.canvaExportedAt.getTime() + 60_000;
 }
 
 // ---------------------------------------------------------------------------

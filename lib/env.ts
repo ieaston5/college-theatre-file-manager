@@ -32,6 +32,24 @@ export const env = {
   get googleClientSecret() {
     return raw("GOOGLE_CLIENT_SECRET");
   },
+  get canvaClientId() {
+    return raw("CANVA_CLIENT_ID");
+  },
+  get canvaClientSecret() {
+    return raw("CANVA_CLIENT_SECRET");
+  },
+  get canvaConfigured() {
+    return Boolean(raw("CANVA_CLIENT_ID") && raw("CANVA_CLIENT_SECRET"));
+  },
+  /**
+   * "canva" talks to the Connect API; "mock" simulates it so the mirroring
+   * flow can be demonstrated without credentials; "off" hides the feature.
+   */
+  get canvaMode(): "canva" | "mock" | "off" {
+    const mode = (raw("CANVA_MODE") ?? "auto").toLowerCase();
+    if (mode === "canva" || mode === "mock" || mode === "off") return mode;
+    return this.canvaConfigured ? "canva" : "mock";
+  },
   get bootstrapAdminEmails(): string[] {
     return (raw("BOOTSTRAP_ADMIN_EMAILS") ?? "")
       .split(",")
@@ -63,4 +81,14 @@ export function loginRedirectUri() {
 
 export function driveRedirectUri() {
   return `${env.appUrl.replace(/\/$/, "")}/api/google/callback`;
+}
+
+/**
+ * Canva rejects `localhost` as a redirect URI but accepts `127.0.0.1`, so the
+ * host is swapped for the Canva flow only. Its callback therefore has to work
+ * without a session cookie — see the userId column on OAuthState.
+ */
+export function canvaRedirectUri() {
+  const base = env.appUrl.replace(/\/$/, "").replace("://localhost", "://127.0.0.1");
+  return `${base}/api/canva/callback`;
 }

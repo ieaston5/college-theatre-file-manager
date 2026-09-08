@@ -13,6 +13,7 @@ import {
 } from "@/lib/access";
 import {
   createDocument,
+  mirrorCanvaDesign,
   registerDocument,
   removeDocument,
   setDocumentStatus,
@@ -22,6 +23,7 @@ import {
   updateDocument,
 } from "@/lib/documents";
 import {
+  canvaMirrorSchema,
   createDocumentSchema,
   firstError,
   registerDocumentSchema,
@@ -60,6 +62,32 @@ export async function createDocumentAction(
 ): Promise<ActionState> {
   try {
     const user = await assertRole("BOARD");
+
+    // Canva shares the same form: a design is mirrored rather than created,
+    // because Canva has no way to let the hub manage who can open it.
+    if (text(form, "docType") === "CANVA") {
+      const parsedCanva = canvaMirrorSchema.safeParse({
+        link: text(form, "canvaLink") ?? "",
+        title: text(form, "title"),
+        description: text(form, "description"),
+        categoryId: text(form, "categoryId") ?? "",
+        productionId: text(form, "productionId"),
+        visibility: text(form, "visibility"),
+        tags: text(form, "tags"),
+        format: text(form, "canvaFormat") ?? "pdf",
+      });
+      if (!parsedCanva.success) return { error: firstError(parsedCanva.error) };
+
+      const mirrored = await mirrorCanvaDesign(user, parsedCanva.data);
+      refreshEverywhere();
+      return {
+        ok: `“${mirrored.document.title}” is mirrored and filed.`,
+        warnings: mirrored.warnings,
+        documentId: mirrored.document.id,
+        openUrl: mirrored.document.webViewLink ?? undefined,
+      };
+    }
+
     const parsed = createDocumentSchema.safeParse({
       title: text(form, "title") ?? "",
       description: text(form, "description"),

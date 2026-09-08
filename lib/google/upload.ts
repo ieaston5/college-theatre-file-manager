@@ -1,6 +1,6 @@
 import { env } from "../env";
 import { driveClient } from "./oauth";
-import { GoogleCallError } from "./types";
+import { GoogleCallError, type DriveFileInfo } from "./types";
 
 /**
  * Uploads go straight from the member's browser to Google, using a resumable
@@ -141,4 +141,63 @@ export async function pushToSession(
 
 export function uploadsGoDirectToGoogle() {
   return env.driveMode === "google";
+}
+
+/**
+ * Put bytes the server already holds into Drive — used by the Canva mirror,
+ * where the file comes from Canva rather than from somebody's browser.
+ * Pass `fileId` to replace the contents of an existing file, which keeps its
+ * link, its sharing and its Drive revision history.
+ */
+export async function putBytesToDrive(input: {
+  fileId?: string | null;
+  name: string;
+  mimeType: string;
+  parentFolderId: string | null;
+  description?: string | null;
+  appProperties?: Record<string, string>;
+  bytes: Buffer;
+}): Promise<DriveFileInfo> {
+  const { driveProvider } = await import("./index");
+
+  if (env.driveMode === "mock") {
+    const { writeMockUpload } = await import("./mock");
+    return writeMockUpload({
+      fileId: input.fileId ?? undefined,
+      name: input.name,
+      mimeType: input.mimeType,
+      parentFolderId: input.parentFolderId,
+      description: input.description,
+      appProperties: input.appProperties,
+      bytes: input.bytes,
+    });
+  }
+
+  const body = input.bytes.buffer.slice(
+    input.bytes.byteOffset,
+    input.bytes.byteOffset + input.bytes.byteLength,
+  ) as ArrayBuffer;
+
+  const sessionUrl = input.fileId
+    ? await openResumableUpdate({
+        fileId: input.fileId,
+        mimeType: input.mimeType,
+        sizeBytes: input.bytes.byteLength,
+        name: input.name,
+      })
+    : await openResumableCreate({
+        name: input.name,
+        mimeType: input.mimeType,
+        parentFolderId: input.parentFolderId,
+        description: input.description,
+        appProperties: input.appProperties,
+        sizeBytes: input.bytes.byteLength,
+      });
+
+  const fileId = await pushToSession(sessionUrl, body, input.mimeType);
+  const file = await driveProvider().getFile(fileId);
+  if (!file) {
+    throw new GoogleCallError("Drive accepted the upload but will not return the file.");
+  }
+  return file;
 }

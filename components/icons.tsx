@@ -3,6 +3,7 @@ import {
   Banknote,
   BookOpen,
   Boxes,
+  Brush,
   Building2,
   CalendarDays,
   Check,
@@ -75,6 +76,7 @@ import {
 export const ICONS: Record<string, LucideIcon> = {
   archive: Archive,
   budget: Banknote,
+  canva: Brush,
   building: Building2,
   calendar: CalendarDays,
   check: Check,
