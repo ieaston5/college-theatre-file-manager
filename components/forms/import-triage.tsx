@@ -7,7 +7,7 @@ import { DOC_TYPE_META, VISIBILITIES, VISIBILITY_META, docTypeFromMime } from "@
 import { cn, formatBytes, relativeTime } from "@/lib/utils";
 import { Icon } from "../icons";
 import { Badge, buttonClass, selectClass } from "../ui";
-import { FormBanner, SubmitButton } from "./form-bits";
+import { FormBanner, SubmitButton, Toggle } from "./form-bits";
 
 export type TriageItem = {
   id: string;
@@ -340,6 +340,14 @@ export function ImportTriage({
           );
         })}
       </ul>
+
+      <div className="rounded-xl border border-ink-200 bg-white p-3">
+        <Toggle
+          name="renameInDrive"
+          label="Rename these in Drive to match the hub's naming rule"
+          hint="Turns “urinetown light plot v2” into “[URINETOWN] urinetown light plot — Design & tech”, keeping any file extension. Needs edit access, which the hub only has on files it owns or has been given — anything it cannot rename keeps its current name and is listed afterwards. The file does not move folders either way."
+        />
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-ink-500">

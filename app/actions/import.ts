@@ -99,10 +99,25 @@ export async function fileItemsAction(_prev: ActionState, form: FormData): Promi
       });
     }
 
-    const { filed, failures } = await fileImportItems(actor, decisions);
+    const renameInDrive = form.get("renameInDrive") !== null;
+    const { filed, renamed, failures, renameFailures } = await fileImportItems(
+      actor,
+      decisions,
+      { renameInDrive },
+    );
     refreshEverywhere();
 
     const warnings = failures.map((failure) => `${failure.name}: ${failure.reason}`);
+    if (renameFailures.length > 0) {
+      warnings.push(
+        `${renameFailures.length} ${
+          renameFailures.length === 1 ? "file was" : "files were"
+        } filed but not renamed in Drive: ${renameFailures
+          .slice(0, 4)
+          .map((failure) => `${failure.name} (${failure.reason})`)
+          .join("; ")}${renameFailures.length > 4 ? "…" : ""}. They keep their current names.`,
+      );
+    }
     if (missing.length > 0) {
       warnings.push(
         `${missing.length} ${missing.length === 1 ? "file was" : "files were"} skipped because no category was picked for them.`,
@@ -113,7 +128,11 @@ export async function fileItemsAction(_prev: ActionState, form: FormData): Promi
       return { error: "Nothing was filed.", warnings };
     }
     return {
-      ok: `Filed ${filed} ${filed === 1 ? "file" : "files"}. They are on the dashboard now.`,
+      ok: `Filed ${filed} ${filed === 1 ? "file" : "files"}${
+        renameInDrive && renamed > 0
+          ? `, and renamed ${renamed} in Drive to match the hub's rule`
+          : ""
+      }. They are on the dashboard now.`,
       warnings,
     };
   } catch (error) {

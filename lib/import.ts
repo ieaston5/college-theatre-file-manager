@@ -4,7 +4,8 @@ import { driveProvider } from "./google";
 import { docTypeFromMime, type Visibility } from "./constants";
 import { recordAudit } from "./audit";
 import { syncSharing } from "./documents";
-import { driveViewLink } from "./utils";
+import { getConfig } from "./config";
+import { applyNamingTemplate, driveViewLink, withExtension } from "./utils";
 
 /**
  * Bringing the existing pile in.
@@ -234,6 +235,28 @@ export type FileDecision = {
 };
 
 /**
+ * The canonical Drive name for an imported file: the hub's naming rule, with
+ * the original file's extension kept so operating systems still recognise it.
+ */
+async function canonicalDriveName(input: {
+  title: string;
+  originalName: string;
+  category: { name: string };
+  production: { name: string; abbreviation: string | null; season: string | null } | null;
+}): Promise<string> {
+  const config = await getConfig();
+  return withExtension(
+    applyNamingTemplate(config.namingTemplate, {
+      production: input.production?.abbreviation || input.production?.name || null,
+      category: input.category.name,
+      title: input.title,
+      season: input.production?.season ?? config.currentSeason,
+    }),
+    input.originalName,
+  );
+}
+
+/**
  * File a batch of triaged items. Registers each one — the file keeps its
  * current owner and location in Drive; the hub records where it belongs and
  * shares it according to the visibility chosen.
@@ -241,9 +264,18 @@ export type FileDecision = {
 export async function fileImportItems(
   actor: User,
   decisions: FileDecision[],
-): Promise<{ filed: number; failures: Array<{ name: string; reason: string }> }> {
+  options?: { renameInDrive?: boolean },
+): Promise<{
+  filed: number;
+  renamed: number;
+  failures: Array<{ name: string; reason: string }>;
+  renameFailures: Array<{ name: string; reason: string }>;
+}> {
   const failures: Array<{ name: string; reason: string }> = [];
+  const renameFailures: Array<{ name: string; reason: string }> = [];
   let filed = 0;
+  let renamed = 0;
+  const provider = driveProvider();
 
   for (const decision of decisions) {
     const item = await prisma.importItem.findUnique({ where: { id: decision.itemId } });
@@ -274,9 +306,14 @@ export async function fileImportItems(
         continue;
       }
 
+      const production = decision.productionId
+        ? await prisma.production.findUnique({ where: { id: decision.productionId } })
+        : null;
+      const title = cleanTitle(item.name);
+
       const document = await prisma.document.create({
         data: {
-          title: cleanTitle(item.name),
+          title,
           docType: docTypeFromMime(item.mimeType),
           source: "REGISTERED",
           visibility: decision.visibility,
@@ -303,6 +340,37 @@ export async function fileImportItems(
       // adds access without touching anybody else's.
       await syncSharing(document);
 
+      // Optionally bring the Drive name into line with the hub's rule. This
+      // needs edit access on a file the hub usually does not own, so a refusal
+      // is reported rather than treated as a failure to file.
+      if (options?.renameInDrive) {
+        const driveName = await canonicalDriveName({
+          title,
+          originalName: item.name,
+          category,
+          production,
+        });
+        if (driveName !== item.name) {
+          try {
+            await provider.renameFile(item.googleFileId, driveName);
+            await prisma.document.update({
+              where: { id: document.id },
+              data: { originalFileName: item.name, lastSyncedAt: new Date() },
+            });
+            renamed += 1;
+          } catch (error) {
+            renameFailures.push({
+              name: item.name,
+              reason:
+                (error as Error).message.includes("insufficient") ||
+                (error as Error).message.includes("permission")
+                  ? "the hub's account cannot edit it"
+                  : (error as Error).message,
+            });
+          }
+        }
+      }
+
       await prisma.importItem.update({
         where: { id: item.id },
         data: { decision: "FILED", documentId: document.id },
@@ -321,7 +389,7 @@ export async function fileImportItems(
     });
   }
 
-  return { filed, failures };
+  return { filed, renamed, failures, renameFailures };
 }
 
 /** Strip the noise people put in filenames so hub titles read cleanly. */

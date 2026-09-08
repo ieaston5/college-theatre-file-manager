@@ -1,7 +1,7 @@
 import type { Document, User } from "@prisma/client";
 import { prisma } from "./db";
 import { env } from "./env";
-import { getConfig } from "./config";
+import { getConfig, getDriveAccount } from "./config";
 import { recordAudit } from "./audit";
 import { driveProvider, resolveFolder } from "./google";
 import type { DocHeader, SharingPlan, SharingResult } from "./google/types";
@@ -1048,7 +1048,15 @@ export async function updateDocument(
   });
 
   // Keep Drive in step: rename and re-file when the hub metadata changed.
-  if (document.googleFileId && document.source === "CREATED") {
+  // Files the hub owns are fair game even if they arrived by import — that is
+  // the point of transferring ownership. Files somebody else owns are left
+  // alone, since renaming them would change what they see in their own Drive.
+  const driveAccount = await getDriveAccount();
+  const hubOwnsFile =
+    document.source === "CREATED" ||
+    (Boolean(driveAccount?.email) && document.driveOwnerEmail === driveAccount?.email);
+
+  if (document.googleFileId && hubOwnsFile) {
     const provider = driveProvider();
     if (renamed || movedShelf) {
       const fileName = applyNamingTemplate(config.namingTemplate, {
