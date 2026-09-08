@@ -10,6 +10,7 @@ const TABS = [
   { href: "/admin/members", label: "Members", icon: "users" },
   { href: "/admin/roles", label: "Production roles", icon: "user-cog" },
   { href: "/admin/categories", label: "Categories", icon: "grid" },
+  { href: "/admin/import", label: "Import", icon: "download" },
   { href: "/admin/productions", label: "Productions", icon: "theater" },
   { href: "/admin/templates", label: "Templates", icon: "copy" },
   { href: "/admin/activity", label: "Activity", icon: "clock" },

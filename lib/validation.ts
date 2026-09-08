@@ -147,6 +147,7 @@ export const categorySchema = z.object({
   folderName: optionalText(120),
   sortOrder: z.coerce.number().int().min(0).max(999).default(0),
   companyVisible: z.coerce.boolean().optional().default(false),
+  keywords: optionalText(400),
 });
 
 export const templateSchema = z.object({

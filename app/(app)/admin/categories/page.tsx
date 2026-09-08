@@ -50,6 +50,7 @@ export default async function AdminCategoriesPage({
                   folderName: editing.folderName,
                   sortOrder: editing.sortOrder,
                   companyVisible: editing.companyVisible,
+                  keywords: editing.keywords,
                 }
               : undefined
           }

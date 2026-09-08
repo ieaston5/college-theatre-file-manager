@@ -247,6 +247,7 @@ export function CategoryForm({
     folderName: string | null;
     sortOrder: number;
     companyVisible: boolean;
+    keywords: string | null;
   };
 }) {
   const [state, formAction] = useActionState(saveCategoryAction, emptyState);
@@ -304,6 +305,20 @@ export function CategoryForm({
         hint="Turn this on for the things a cast or crew legitimately needs — schedules, scripts, contact sheets. Leave it off for budgets, casting and governance: those categories are then never offered as “Company” and never appear to company members."
         defaultChecked={category?.companyVisible ?? false}
       />
+
+      <Field
+        label="Words that suggest this category"
+        htmlFor="keywords"
+        hint="Comma separated. Used when importing an existing pile of Drive files to guess where each one belongs — “budget, receipts, reimbursement, invoice”. Nothing is filed without you confirming it."
+      >
+        <input
+          id="keywords"
+          name="keywords"
+          defaultValue={category?.keywords ?? ""}
+          placeholder="budget, receipts, reimbursement"
+          className={inputClass}
+        />
+      </Field>
 
       <Field label="Scope" required>
         <RadioCards

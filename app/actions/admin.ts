@@ -148,6 +148,7 @@ export async function saveCategoryAction(
       folderName: text(form, "folderName"),
       sortOrder: text(form, "sortOrder") ?? "0",
       companyVisible: bool(form, "companyVisible"),
+      keywords: text(form, "keywords"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
     const data = parsed.data;
@@ -163,6 +164,7 @@ export async function saveCategoryAction(
       folderName: data.folderName ?? null,
       sortOrder: data.sortOrder,
       companyVisible: data.companyVisible,
+      keywords: data.keywords ?? null,
     };
 
     const category = data.id

@@ -101,6 +101,8 @@ export function writeMockUpload(input: {
   appProperties?: Record<string, string>;
   description?: string | null;
   bytes: Buffer;
+  /** Lets simulated pre-existing files look owned by other people. */
+  ownerEmail?: string;
 }): DriveFileInfo {
   const state = load();
   const now = new Date().toISOString();
@@ -125,7 +127,14 @@ export function writeMockUpload(input: {
     trashed: false,
     permissions:
       existing?.permissions ??
-      [{ id: newId("perm"), email: MOCK_ACCOUNT, role: "owner", type: "user" }],
+      [
+        {
+          id: newId("perm"),
+          email: input.ownerEmail ?? MOCK_ACCOUNT,
+          role: "owner",
+          type: "user",
+        },
+      ],
     sizeBytes: input.bytes.byteLength,
     blobFile,
     revisions: (existing?.revisions ?? 0) + 1,

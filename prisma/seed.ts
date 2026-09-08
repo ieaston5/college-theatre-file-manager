@@ -40,6 +40,8 @@ const SAMPLE_DOMAIN = "pennplayers.example";
 const CATEGORIES = [
   {
     name: "Budgets & finance",
+    keywords:
+      "budget, receipts, reimbursement, invoice, expenses, spend, finance, deposit, petty cash, treasurer",
     icon: "budget",
     color: "#16a34a",
     scope: "BOTH",
@@ -49,6 +51,8 @@ const CATEGORIES = [
   },
   {
     name: "Schedules & calendars",
+    keywords:
+      "schedule, calendar, rehearsal schedule, call, tech week, timeline, dates, availability, when2meet",
     companyVisible: true,
     icon: "calendar",
     color: "#0ea5e9",
@@ -59,6 +63,8 @@ const CATEGORIES = [
   },
   {
     name: "Rehearsal reports",
+    keywords:
+      "rehearsal report, report, nightly, notes, sm report",
     companyVisible: true,
     icon: "clipboard",
     color: "#6366f1",
@@ -69,6 +75,8 @@ const CATEGORIES = [
   },
   {
     name: "Contact sheets",
+    keywords:
+      "contact, contacts, phone, roster, emergency, directory, cast list, crew list",
     companyVisible: true,
     icon: "users",
     color: "#7c3aed",
@@ -79,6 +87,8 @@ const CATEGORIES = [
   },
   {
     name: "Scripts & scores",
+    keywords:
+      "script, score, libretto, book, cuts, sides, monologue, vocal, sheet music, perusal",
     companyVisible: true,
     icon: "script",
     color: "#b45309",
@@ -89,6 +99,8 @@ const CATEGORIES = [
   },
   {
     name: "Casting & auditions",
+    keywords:
+      "audition, callback, casting, headshot, sign-up, signup, resume, tape",
     icon: "mic",
     color: "#db2777",
     scope: "PRODUCTION",
@@ -99,6 +111,8 @@ const CATEGORIES = [
   },
   {
     name: "Design & tech",
+    keywords:
+      "light plot, lighting, sound, cue, plot, rider, tech, channel, hookup, projection, set, drawing, ground plan",
     companyVisible: true,
     icon: "palette",
     color: "#ea580c",
@@ -109,6 +123,8 @@ const CATEGORIES = [
   },
   {
     name: "Costumes & props",
+    keywords:
+      "costume, props, wardrobe, measurements, piece list, fitting, borrow, return, pull",
     companyVisible: true,
     icon: "costume",
     color: "#0d9488",
@@ -119,6 +135,8 @@ const CATEGORIES = [
   },
   {
     name: "Marketing & publicity",
+    keywords:
+      "poster, publicity, marketing, social, press, promo, flyer, photo call, program, programme",
     icon: "marketing",
     color: "#e11d48",
     scope: "BOTH",
@@ -128,6 +146,8 @@ const CATEGORIES = [
   },
   {
     name: "Box office & house",
+    keywords:
+      "box office, tickets, ticket sales, comp, house, front of house, usher, settlement, attendance",
     icon: "ticket",
     color: "#f59e0b",
     scope: "PRODUCTION",
@@ -137,6 +157,8 @@ const CATEGORIES = [
   },
   {
     name: "Board & governance",
+    keywords:
+      "minutes, agenda, constitution, bylaws, board, election, policy, vote",
     icon: "gavel",
     color: "#475569",
     scope: "STANDING",
@@ -146,6 +168,8 @@ const CATEGORIES = [
   },
   {
     name: "Venue & facilities",
+    keywords:
+      "venue, space request, room, key, access, safety, facilities, load-in, booking",
     icon: "venue",
     color: "#334155",
     scope: "STANDING",
@@ -155,6 +179,8 @@ const CATEGORIES = [
   },
   {
     name: "Handbooks & onboarding",
+    keywords:
+      "handbook, onboarding, how to, guide, handover, transition, role description, training",
     companyVisible: true,
     icon: "script",
     color: "#4f46e5",
@@ -165,6 +191,8 @@ const CATEGORIES = [
   },
   {
     name: "Grants & sponsorship",
+    keywords:
+      "grant, sac, funding, sponsor, sponsorship, application, donation, fundraising",
     icon: "sparkles",
     color: "#9333ea",
     scope: "STANDING",
@@ -613,6 +641,7 @@ async function main() {
         defaultDocType: category.defaultDocType,
         defaultVisibility: category.defaultVisibility ?? "BOARD",
         companyVisible: category.companyVisible ?? false,
+        keywords: category.keywords ?? null,
         sortOrder: category.sortOrder,
       },
       update: {
@@ -624,6 +653,7 @@ async function main() {
         defaultDocType: category.defaultDocType,
         defaultVisibility: category.defaultVisibility ?? "BOARD",
         companyVisible: category.companyVisible ?? false,
+        keywords: category.keywords ?? null,
         sortOrder: category.sortOrder,
       },
     });

@@ -45,6 +45,7 @@ model User {
   memberships    ProductionMember[] @relation("MembershipUser")
   addedMembers   ProductionMember[] @relation("MembershipAddedBy")
   connectedCanva CanvaAccount[]
+  importBatches  ImportBatch[]
 
   @@index([role])
   @@index([status])
@@ -96,6 +97,9 @@ model Category {
   /// which is what keeps budgets and casting away from the cast.
   companyVisible    Boolean  @default(false)
   folderName        String? // Drive subfolder name; defaults to `name`
+  /// Comma-separated words that suggest a file belongs here, used to guess a
+  /// category when importing an existing pile of Drive files.
+  keywords          String?
   sortOrder         Int      @default(0)
   archived          Boolean  @default(false)
   createdAt         DateTime @default(now())
@@ -194,9 +198,10 @@ model Document {
   category   Category        @relation(fields: [categoryId], references: [id])
   production Production?     @relation(fields: [productionId], references: [id], onDelete: SetNull)
   creator    User            @relation("DocumentCreator", fields: [creatorId], references: [id])
-  tags       Tag[]
-  shares     DocumentShare[]
-  uploads    PendingUpload[]
+  tags        Tag[]
+  shares      DocumentShare[]
+  uploads     PendingUpload[]
+  importItems ImportItem[]
 
   @@index([categoryId])
   @@index([productionId])
@@ -274,6 +279,60 @@ model ProductionMember {
   @@index([userId])
   @@index([productionId])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Importing what already exists
+// ---------------------------------------------------------------------------
+
+/// One sweep of an existing Drive folder. Kept as a row because triaging a
+/// couple of hundred files is an hour of work done across several sittings —
+/// it has to survive a reload.
+model ImportBatch {
+  id                String   @id @default(cuid())
+  sourceFolderId    String
+  sourceFolderName  String?
+  includeSubfolders Boolean  @default(true)
+  fileCount         Int      @default(0)
+  status            String   @default("READY") // READY | DONE
+  startedById       String?
+  scannedAt         DateTime @default(now())
+
+  startedBy User?        @relation(fields: [startedById], references: [id], onDelete: SetNull)
+  items     ImportItem[]
+
+  @@index([status])
+}
+
+/// A single file found by a scan, with the hub's guess at where it belongs.
+model ImportItem {
+  id           String    @id @default(cuid())
+  batchId      String
+  googleFileId String
+  name         String
+  mimeType     String?
+  ownerEmail   String?
+  webViewLink  String?
+  folderPath   String?
+  sizeBytes    Int?
+  modifiedAt   DateTime?
+
+  guessedCategoryId   String?
+  guessedProductionId String?
+  /// 0–100. Only ever a hint; a human confirms before anything is filed.
+  confidence          Int     @default(0)
+
+  /// PENDING | FILED | SKIPPED | DUPLICATE
+  decision   String  @default("PENDING")
+  documentId String?
+  createdAt  DateTime @default(now())
+
+  batch    ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  document Document?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@unique([batchId, googleFileId])
+  @@index([decision])
+  @@index([batchId])
 }
 
 // ---------------------------------------------------------------------------
