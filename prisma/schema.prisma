@@ -49,6 +49,9 @@ model User {
   addedMembers   ProductionMember[] @relation("MembershipAddedBy")
   connectedCanva CanvaAccount[]
   importBatches  ImportBatch[]
+  accessRequests AccessRequest[] @relation("AccessRequester")
+  accessDecisions AccessRequest[] @relation("AccessDecider")
+  checklistTicks ChecklistItem[]
 
   @@index([role])
   @@index([status])
@@ -78,6 +81,7 @@ model Production {
 
   documents Document[]
   members   ProductionMember[]
+  checklist ChecklistItem[]
 
   @@index([status])
 }
@@ -110,9 +114,11 @@ model Category {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  documents       Document[]
-  templates       Template[]
-  productionRoles ProductionRole[]
+  documents        Document[]
+  templates        Template[]
+  productionRoles  ProductionRole[]
+  checklistItems   ChecklistItem[]
+  checklistTemplates ChecklistTemplateItem[]
 
   @@index([archived])
 }
@@ -216,10 +222,11 @@ model Document {
   category   Category        @relation(fields: [categoryId], references: [id])
   production Production?     @relation(fields: [productionId], references: [id], onDelete: SetNull)
   creator    User            @relation("DocumentCreator", fields: [creatorId], references: [id])
-  tags        Tag[]
-  shares      DocumentShare[]
-  uploads     PendingUpload[]
-  importItems ImportItem[]
+  tags           Tag[]
+  shares         DocumentShare[]
+  uploads        PendingUpload[]
+  importItems    ImportItem[]
+  accessRequests AccessRequest[]
 
   @@index([categoryId])
   @@index([productionId])
@@ -303,6 +310,74 @@ model ProductionMember {
   @@index([userId])
   @@index([productionId])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Asking for access
+// ---------------------------------------------------------------------------
+
+/// Somebody asking to be let into a document they cannot see.
+///
+/// The requester is never told anything about the document — the page they
+/// land on is identical whether the id exists or not — but the owner gets a
+/// request they can grant in one click.
+model AccessRequest {
+  id           String   @id @default(cuid())
+  documentId   String
+  userId       String
+  message      String?
+  status       String   @default("PENDING") // PENDING | GRANTED | DECLINED
+  decidedById  String?
+  decidedAt    DateTime?
+  createdAt    DateTime @default(now())
+
+  document  Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user      User     @relation("AccessRequester", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User?    @relation("AccessDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@unique([documentId, userId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Per-show checklists
+// ---------------------------------------------------------------------------
+
+/// The standard list of things every show needs, editable by admins. Copied
+/// onto a production when it is created, so changing the template never
+/// rewrites a show already in progress.
+model ChecklistTemplateItem {
+  id         String   @id @default(cuid())
+  label      String
+  /// When set, the item completes itself as soon as anything is filed in that
+  /// category for the show — the checklist tracks the work, not the ticking.
+  categoryId String?
+  hint       String?
+  sortOrder  Int      @default(0)
+  archived   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+}
+
+model ChecklistItem {
+  id           String    @id @default(cuid())
+  productionId String
+  label        String
+  categoryId   String?
+  hint         String?
+  sortOrder    Int       @default(0)
+  /// Manual completion. Category-linked items also complete on their own.
+  done         Boolean   @default(false)
+  doneAt       DateTime?
+  doneById     String?
+  createdAt    DateTime  @default(now())
+
+  production Production @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  category   Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  doneBy     User?      @relation(fields: [doneById], references: [id], onDelete: SetNull)
+
+  @@index([productionId])
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +516,9 @@ model OrgConfig {
   /// nothing is ever emailed by surprise.
   emailEnabled   Boolean  @default(false)
   lastDigestAt   DateTime?
+  /// Where archived shows' folders are moved at season rollover.
+  archiveFolderId String?
+  lastRolloverAt  DateTime?
   updatedAt      DateTime @updatedAt
 }
 

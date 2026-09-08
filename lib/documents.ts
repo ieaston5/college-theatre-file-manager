@@ -65,6 +65,10 @@ async function companyRecipients(doc: {
     where: {
       status: "ACTIVE",
       user: { status: { not: "DISABLED" } },
+      // An archived show ends its company's access. getViewerContext already
+      // ignores archived productions, so without this Drive would keep
+      // granting access the hub had stopped showing.
+      production: { status: { not: "ARCHIVED" } },
       ...(doc.productionId ? { productionId: doc.productionId } : {}),
       role: { archived: false, categories: { some: { id: doc.categoryId } } },
     },

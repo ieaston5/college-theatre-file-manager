@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
@@ -18,6 +17,8 @@ import {
   unshareDocumentAction,
 } from "@/app/actions/documents";
 import { DocTypeIcon } from "@/components/document-items";
+import { RequestAccessForm } from "@/components/forms/access-and-checklist";
+import { decideAccessRequestAction } from "@/app/actions/rollover";
 import { ShareForm } from "@/components/forms/share-form";
 import { NewVersionUploader } from "@/components/forms/new-version-uploader";
 import { CanvaReexportForm } from "@/components/forms/canva-panel";
@@ -62,7 +63,33 @@ export default async function DocumentPage({
   });
 
   const viewer = await getViewerContext(user);
-  if (!document || !canViewDocument(viewer, document)) notFound();
+
+  // Deliberately identical whether the id is unknown or simply not yours: the
+  // page reveals nothing, and asking is one click. Google Drive behaves the
+  // same way, and a 404 would be no more private while being less useful to
+  // somebody who was legitimately sent the link.
+  if (!document || !canViewDocument(viewer, document)) {
+    return (
+      <div className="mx-auto max-w-lg py-8">
+        <Card className="text-center">
+          <span className="mx-auto mb-4 grid size-12 place-items-center rounded-full bg-amber-50 text-amber-700">
+            <Icon name="lock" className="size-6" />
+          </span>
+          <h1 className="text-lg font-semibold tracking-tight">You do not have access to this</h1>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-ink-500">
+            Either it is private, it belongs to a show you are not on, or it is not on the hub at
+            all. The hub will not say which.
+          </p>
+          <div className="mt-6 border-t border-ink-100 pt-5">
+            <RequestAccessForm documentId={id} />
+          </div>
+          <Link href="/" className="mt-5 inline-block text-xs text-ink-500 hover:text-ink-800">
+            Back to the dashboard
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
   const config = await getConfig();
   const canEdit = canEditDocument(viewer, document);
@@ -91,6 +118,14 @@ export default async function DocumentPage({
           orderBy: [{ role: { sortOrder: "asc" } }, { createdAt: "asc" }],
         })
       : [];
+
+  const pendingRequests = canEdit
+    ? await prisma.accessRequest.findMany({
+        where: { documentId: document.id, status: "PENDING" },
+        include: { user: { select: { name: true, email: true } } },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
 
   const [shareableMembers, activity] = await Promise.all([
     canEdit
@@ -297,7 +332,52 @@ export default async function DocumentPage({
             {document.googleModifiedAt ? (
               <Row label="Drive changed">{relativeTime(document.googleModifiedAt)}</Row>
             ) : null}
-            {isCanva ? (
+            {canEdit && pendingRequests.length > 0 ? (
+        <Card className="border-amber-300">
+          <SectionHeader
+            icon="user-plus"
+            title={`${pendingRequests.length} ${
+              pendingRequests.length === 1 ? "person is" : "people are"
+            } asking for access`}
+            description="Granting adds them by name, here and in Drive."
+          />
+          <ul className="space-y-2">
+            {pendingRequests.map((request) => (
+              <li
+                key={request.id}
+                className="flex flex-wrap items-center gap-2 rounded-lg bg-ink-50 p-2.5"
+              >
+                <Avatar name={request.user.name} email={request.user.email} size={28} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-ink-900">
+                    {request.user.name ?? request.user.email}
+                  </span>
+                  <span className="block truncate text-xs text-ink-500">
+                    {request.message ?? request.user.email} · {relativeTime(request.createdAt)}
+                  </span>
+                </span>
+                <form action={decideAccessRequestAction}>
+                  <input type="hidden" name="id" value={request.id} />
+                  <input type="hidden" name="grant" value="true" />
+                  <button type="submit" className={buttonClass("primary", "text-xs")}>
+                    <Icon name="check" className="size-3.5" />
+                    Grant
+                  </button>
+                </form>
+                <form action={decideAccessRequestAction}>
+                  <input type="hidden" name="id" value={request.id} />
+                  <input type="hidden" name="grant" value="false" />
+                  <button type="submit" className={buttonClass("ghost", "text-xs")}>
+                    Decline
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+
+      {isCanva ? (
               <Row label="Copy format">
                 {CANVA_FORMAT_META[(document.canvaExportFormat ?? "pdf") as CanvaExportFormat]
                   ?.label ?? document.canvaExportFormat}
@@ -460,6 +540,51 @@ export default async function DocumentPage({
           )}
         </Card>
       </div>
+
+      {canEdit && pendingRequests.length > 0 ? (
+        <Card className="border-amber-300">
+          <SectionHeader
+            icon="user-plus"
+            title={`${pendingRequests.length} ${
+              pendingRequests.length === 1 ? "person is" : "people are"
+            } asking for access`}
+            description="Granting adds them by name, here and in Drive."
+          />
+          <ul className="space-y-2">
+            {pendingRequests.map((request) => (
+              <li
+                key={request.id}
+                className="flex flex-wrap items-center gap-2 rounded-lg bg-ink-50 p-2.5"
+              >
+                <Avatar name={request.user.name} email={request.user.email} size={28} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-ink-900">
+                    {request.user.name ?? request.user.email}
+                  </span>
+                  <span className="block truncate text-xs text-ink-500">
+                    {request.message ?? request.user.email} · {relativeTime(request.createdAt)}
+                  </span>
+                </span>
+                <form action={decideAccessRequestAction}>
+                  <input type="hidden" name="id" value={request.id} />
+                  <input type="hidden" name="grant" value="true" />
+                  <button type="submit" className={buttonClass("primary", "text-xs")}>
+                    <Icon name="check" className="size-3.5" />
+                    Grant
+                  </button>
+                </form>
+                <form action={decideAccessRequestAction}>
+                  <input type="hidden" name="id" value={request.id} />
+                  <input type="hidden" name="grant" value="false" />
+                  <button type="submit" className={buttonClass("ghost", "text-xs")}>
+                    Decline
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       {isCanva ? (
         <Card className={canvaStale ? "border-amber-300" : undefined}>

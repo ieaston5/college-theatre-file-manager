@@ -9,6 +9,13 @@ import {
   visibleProductionIds,
 } from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
+import { checklistFor, checklistProgress } from "@/lib/checklist";
+import {
+  removeChecklistItemAction,
+  seedChecklistAction,
+  toggleChecklistItemAction,
+} from "@/app/actions/rollover";
+import { AddChecklistItemForm } from "@/components/forms/access-and-checklist";
 import { DocumentFilters } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
 import { Icon } from "@/components/icons";
@@ -35,7 +42,7 @@ export default async function ProductionPage({
   const allowedProductions = visibleProductionIds(viewer);
   if (allowedProductions !== null && !allowedProductions.includes(production.id)) notFound();
 
-  const [{ documents, total }, categories, companyCount, companyByRole] = await Promise.all([
+  const [{ documents, total }, categories, companyCount, companyByRole, checklist] = await Promise.all([
     queryDocuments(viewer, query, { extra: { productionId: production.id }, take: 200 }),
     prisma.category.findMany({
       where: { ...categoryFilterFor(viewer), scope: { in: ["PRODUCTION", "BOTH"] } },
@@ -47,7 +54,11 @@ export default async function ProductionPage({
       where: { productionId: production.id, status: "ACTIVE" },
       _count: { _all: true },
     }),
+    checklistFor(production.id),
   ]);
+
+  const progress = checklistProgress(checklist);
+  const canManage = canCreateDocuments(viewer);
 
   const roleNames = await prisma.productionRole.findMany({
     where: { id: { in: companyByRole.map((row) => row.roleId).filter((id): id is string => Boolean(id)) } },
@@ -220,26 +231,133 @@ export default async function ProductionPage({
         </div>
       )}
 
-      {missing.length > 0 && canCreateDocuments(viewer) ? (
+      {checklist.length > 0 ? (
         <Card>
           <SectionHeader
             icon="clipboard"
-            title="Nothing filed yet"
-            description="Categories this show has no paperwork in. Handy as a checklist."
+            title="Checklist"
+            description={`${progress.complete} of ${progress.total} done. Items tied to a category tick themselves as soon as something is filed there.`}
+            action={
+              canManage ? (
+                <AddChecklistItemForm
+                  productionId={production.id}
+                  categories={categories.map((category) => ({
+                    id: category.id,
+                    name: category.name,
+                  }))}
+                />
+              ) : null
+            }
           />
-          <ul className="flex flex-wrap gap-2">
-            {missing.map((category) => (
-              <li key={category.id}>
-                <Link
-                  href={`/documents/new?category=${category.slug}&production=${production.slug}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-ink-300 px-2.5 py-1.5 text-xs text-ink-600 transition hover:border-brand-400 hover:text-brand-700"
-                >
-                  <Icon name="plus" className="size-3" />
-                  {category.name}
-                </Link>
-              </li>
-            ))}
+
+          <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-ink-100">
+            <div
+              className={
+                progress.percent === 100
+                  ? "h-full rounded-full bg-emerald-500 transition-all"
+                  : "h-full rounded-full bg-brand-500 transition-all"
+              }
+              style={{ width: `${Math.max(progress.percent, 2)}%` }}
+            />
+          </div>
+
+          <ul className="divide-y divide-ink-100">
+            {checklist.map((item) => {
+              const complete = item.done || item.autoDone;
+              return (
+                <li key={item.id} className="flex flex-wrap items-center gap-2.5 py-2">
+                  {canManage && !item.autoDone ? (
+                    <form action={toggleChecklistItemAction}>
+                      <input type="hidden" name="id" value={item.id} />
+                      <button
+                        type="submit"
+                        className={
+                          complete
+                            ? "grid size-5 place-items-center rounded border-2 border-emerald-500 bg-emerald-500 text-white"
+                            : "grid size-5 place-items-center rounded border-2 border-ink-300 text-transparent hover:border-brand-400"
+                        }
+                        aria-label={complete ? `Untick ${item.label}` : `Tick ${item.label}`}
+                      >
+                        <Icon name="check" className="size-3" />
+                      </button>
+                    </form>
+                  ) : (
+                    <span
+                      className={
+                        complete
+                          ? "grid size-5 place-items-center rounded border-2 border-emerald-500 bg-emerald-500 text-white"
+                          : "grid size-5 place-items-center rounded border-2 border-ink-200 text-transparent"
+                      }
+                      title={item.autoDone ? "Ticked itself — something is filed" : undefined}
+                    >
+                      <Icon name="check" className="size-3" />
+                    </span>
+                  )}
+
+                  <span className="min-w-40 flex-1">
+                    <span
+                      className={
+                        complete
+                          ? "block text-sm text-ink-500 line-through"
+                          : "block text-sm text-ink-900"
+                      }
+                    >
+                      {item.label}
+                    </span>
+                    {item.hint ? (
+                      <span className="block text-xs text-ink-400">{item.hint}</span>
+                    ) : null}
+                  </span>
+
+                  {item.categorySlug ? (
+                    item.autoDone ? (
+                      <Link
+                        href={`/categories/${item.categorySlug}?production=${production.slug}`}
+                        className="shrink-0 text-xs text-emerald-700 hover:underline"
+                      >
+                        {item.documentCount} filed
+                      </Link>
+                    ) : canCreateDocuments(viewer) ? (
+                      <Link
+                        href={`/documents/new?category=${item.categorySlug}&production=${production.slug}`}
+                        className="shrink-0 rounded-lg border border-dashed border-ink-300 px-2 py-1 text-xs text-ink-600 hover:border-brand-400 hover:text-brand-700"
+                      >
+                        File one
+                      </Link>
+                    ) : null
+                  ) : null}
+
+                  {canManage ? (
+                    <form action={removeChecklistItemAction}>
+                      <input type="hidden" name="id" value={item.id} />
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded p-1 text-ink-300 hover:bg-ink-100 hover:text-rose-600"
+                        aria-label={`Remove ${item.label}`}
+                      >
+                        <Icon name="x" className="size-3.5" />
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
+        </Card>
+      ) : canManage ? (
+        <Card>
+          <SectionHeader
+            icon="clipboard"
+            title="No checklist yet"
+            description="The standard list of what a show needs, with the document-shaped items ticking themselves as you file."
+          />
+          <form action={seedChecklistAction}>
+            <input type="hidden" name="productionId" value={production.id} />
+            <button type="submit" className={buttonClass("secondary")}>
+              <Icon name="clipboard" className="size-4" />
+              Add the standard checklist
+            </button>
+          </form>
         </Card>
       ) : null}
     </div>

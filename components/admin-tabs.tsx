@@ -14,6 +14,7 @@ const TABS = [
   { href: "/admin/categories", label: "Categories", icon: "grid" },
   { href: "/admin/import", label: "Import", icon: "download" },
   { href: "/admin/productions", label: "Productions", icon: "theater" },
+  { href: "/admin/rollover", label: "Rollover", icon: "refresh" },
   { href: "/admin/templates", label: "Templates", icon: "copy" },
   { href: "/admin/activity", label: "Activity", icon: "clock" },
 ];

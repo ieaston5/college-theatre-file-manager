@@ -740,6 +740,33 @@ async function main() {
     }
   }
 
+  console.log("→ checklist template");
+  const { DEFAULT_CHECKLIST } = await import("../lib/checklist");
+  const existingTemplate = await prisma.checklistTemplateItem.count();
+  if (existingTemplate === 0) {
+    let order = 0;
+    for (const item of DEFAULT_CHECKLIST) {
+      order += 10;
+      await prisma.checklistTemplateItem.create({
+        data: {
+          label: item.label,
+          hint: item.hint ?? null,
+          sortOrder: order,
+          categoryId: item.categorySlug
+            ? ((await prisma.category.findUnique({ where: { slug: item.categorySlug } }))?.id ??
+              null)
+            : null,
+        },
+      });
+    }
+  }
+
+  console.log("→ checklists for each show");
+  const { seedChecklistFor } = await import("../lib/checklist");
+  for (const production of productions.values()) {
+    await seedChecklistFor(production.id);
+  }
+
   console.log("→ drive folders (simulated)");
   await ensureRootFolders();
 
