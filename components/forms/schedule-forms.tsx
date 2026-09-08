@@ -69,7 +69,7 @@ export function ScheduleForm({
           <Toggle
             name="canvaAutoRefresh"
             label="Keep Canva copies up to date on their own"
-            hint="Checks each mirrored design hourly and re-exports the ones that have changed and then gone quiet for half an hour. Without this, somebody has to press the button on each document."
+            hint="Checks each mirrored design on every scheduled run and re-exports the ones that have changed and then gone quiet for half an hour. Without this, somebody has to press the button on each document."
             defaultChecked={canvaAutoRefresh}
           />
         ) : null}
@@ -100,7 +100,7 @@ export function ScheduleForm({
           </Link>
         </div>
         <p className="text-xs text-ink-500">
-          “Run everything now” does exactly what the hourly job does and nothing more — so a design
+          “Run everything now” does exactly what the scheduled job does and nothing more — so a design
           somebody edited a minute ago is noticed but left alone until they stop typing. Use “Refresh
           Canva copies now” to skip that wait.
         </p>

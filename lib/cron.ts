@@ -16,10 +16,27 @@ import { sendDigests } from "./email/digest";
 
 /** Don't re-export a design somebody is still working in. */
 const CANVA_QUIET_MINUTES = 30;
-const CANVA_PER_RUN = 5;
+const CANVA_PER_RUN = 25;
+
+/**
+ * How long a run may take before it stops and leaves the rest for next time.
+ *
+ * Bounded by wall clock rather than a fixed number of documents, because how
+ * often the host calls is not up to the app: Vercel's free plan will only run
+ * a cron job once a day, so a run that did a token twelve documents would take
+ * a fortnight to finish a sweep of a real hub. A run therefore does as much as
+ * it safely can inside the function's 60-second ceiling (see maxDuration in
+ * app/api/cron/route.ts) and stops with work left over rather than being
+ * killed mid-document.
+ */
+const BUDGET_MS = 40_000;
+/** Sharing first, but never more than this share of the budget. */
+const SHARING_BUDGET_FRACTION = 0.45;
+/** A slice of a sweep is 12 documents, each a few Drive permission calls. */
+const SWEEP_CHUNK = 12;
 
 export type CronReport = {
-  sharing: { processed: number; remaining: number } | null;
+  sharing: { processed: number; remaining: number; slices: number } | null;
   canva: { checked: number; refreshed: number; failures: number } | null;
   digest: { sent: number; skipped: number; failed: number } | null
   skipped: string[];
@@ -38,11 +55,14 @@ export async function refreshStaleCanvaMirrors(options?: {
   limit?: number;
   quietMinutes?: number;
   force?: boolean;
+  /** Wall-clock cutoff; the loop stops cleanly rather than being killed. */
+  deadline?: number;
 }): Promise<{ checked: number; refreshed: number; failures: number; stale: string[] }> {
   if (!canvaEnabled()) return { checked: 0, refreshed: 0, failures: 0, stale: [] };
 
   const limit = options?.limit ?? CANVA_PER_RUN;
   const quietMinutes = options?.quietMinutes ?? CANVA_QUIET_MINUTES;
+  const deadline = options?.deadline ?? Number.POSITIVE_INFINITY;
 
   const mirrors = await prisma.document.findMany({
     where: { canvaDesignId: { not: null }, status: "ACTIVE" },
@@ -66,6 +86,7 @@ export async function refreshStaleCanvaMirrors(options?: {
 
   for (const mirror of mirrors) {
     if (!mirror.canvaDesignId) continue;
+    if (Date.now() > deadline) break;
     checked += 1;
 
     let designUpdatedAt = mirror.canvaDesignUpdatedAt;
@@ -131,29 +152,41 @@ export function digestIsDue(config: {
 
 export async function runScheduledJobs(options?: {
   force?: { sharing?: boolean; canva?: boolean; digest?: boolean };
+  /** Override the wall-clock budget, e.g. from a longer-lived host. */
+  budgetMs?: number;
 }): Promise<CronReport> {
   const config = await getConfig();
   const report: CronReport = { sharing: null, canva: null, digest: null, skipped: [] };
 
-  // 1. Finish any re-share sweep that is mid-flight. Two slices per run keeps
-  //    each invocation short; the next run picks up where this one stopped.
+  const startedAt = Date.now();
+  const budget = options?.budgetMs ?? BUDGET_MS;
+
+  // 1. Finish any re-share sweep that is mid-flight, a slice at a time until
+  //    the sweep is done or this run's share of the budget is spent. Whatever
+  //    is left is still marked stale, so the next run continues from there.
   if (config.sharingSweepStartedAt || options?.force?.sharing) {
+    const sharingDeadline = startedAt + budget * SHARING_BUDGET_FRACTION;
     let processed = 0;
     let remaining = 0;
-    for (let slice = 0; slice < 2; slice += 1) {
-      const result = await runSharingSweep({ chunk: 12 });
+    let slices = 0;
+    while (Date.now() < sharingDeadline) {
+      const result = await runSharingSweep({ chunk: SWEEP_CHUNK });
       processed += result.processed;
       remaining = result.remaining;
+      slices += 1;
       if (remaining === 0 || result.processed === 0) break;
     }
-    report.sharing = { processed, remaining };
+    report.sharing = { processed, remaining, slices };
   } else {
     report.skipped.push("sharing (nothing stale)");
   }
 
-  // 2. Canva mirrors.
+  // 2. Canva mirrors, with whatever is left of the budget.
   if (config.canvaAutoRefresh || options?.force?.canva) {
-    const result = await refreshStaleCanvaMirrors({ force: options?.force?.canva });
+    const result = await refreshStaleCanvaMirrors({
+      force: options?.force?.canva,
+      deadline: startedAt + budget,
+    });
     report.canva = { checked: result.checked, refreshed: result.refreshed, failures: result.failures };
   } else {
     report.skipped.push("canva (auto-refresh off)");

@@ -13,7 +13,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 
 /**
  * What the hub does on its own. Three jobs, all of them safe to run twice and
- * cheap to skip, driven by one hourly request from the host.
+ * cheap to skip, driven by one scheduled request from the host.
  */
 export default async function AdminScheduledPage() {
   const config = await getConfig();
@@ -55,13 +55,15 @@ export default async function AdminScheduledPage() {
       <Banner
         tone={cronConfigured ? "sky" : "amber"}
         icon={cronConfigured ? "clock" : "warning"}
-        title={cronConfigured ? "One request an hour does all of this" : "Scheduled jobs are off"}
+        title={cronConfigured ? "One request does all of this" : "Scheduled jobs are off"}
       >
         {cronConfigured ? (
           <>
-            The host calls <code>/api/cron</code> hourly (see <code>vercel.json</code>) and each job
-            decides for itself whether there is anything to do. A missed run costs nothing and a
-            double run does nothing twice, so nothing here needs babysitting.
+            The host calls <code>/api/cron</code> on a schedule (see <code>vercel.json</code>, which
+            ships set to once a day — Vercel&rsquo;s free plan allows no more often than that) and
+            each job decides for itself whether there is anything to do. A missed run costs nothing
+            and a double run does nothing twice, so nothing here needs babysitting. The buttons
+            below do the same work immediately when you cannot wait for the next run.
           </>
         ) : (
           <>
@@ -119,8 +121,9 @@ export default async function AdminScheduledPage() {
             <span>
               <span className="font-medium text-ink-900">Finish any re-share sweep.</span>{" "}
               <span className="text-ink-600">
-                Two slices of twelve documents per run, so a sweep started by changing the sharing
-                mode completes on its own instead of needing somebody to sit on the button.
+                Twelve documents at a time for as long as the run has left, so a sweep started by
+                changing the sharing mode completes on its own instead of needing somebody to sit on
+                the button. Whatever is left over is picked up by the next run.
               </span>{" "}
               {staleShare > 0 ? (
                 <Badge tone="amber">{staleShare} waiting</Badge>
@@ -185,8 +188,10 @@ export default async function AdminScheduledPage() {
           The endpoint is <code className="rounded bg-white px-1">GET /api/cron</code> with{" "}
           <code className="rounded bg-white px-1">Authorization: Bearer $CRON_SECRET</code>, or{" "}
           <code className="rounded bg-white px-1">?key=$CRON_SECRET</code> if headers are awkward.
-          Any scheduler can call it — Vercel Cron, GitHub Actions, or a cron line on a machine that
-          is always on. It is idempotent, so calling it more often than hourly is harmless.
+          Any scheduler can call it — Vercel Cron, GitHub Actions, cron-job.org, or a cron line on a
+          machine that is always on. It is idempotent, so calling it more often than the host does
+          is harmless, and that is the free way to get hourly runs on a plan that only allows a
+          daily one (SETUP.md, step 3d).
         </p>
         <p className="mt-2 text-xs text-ink-500">
           Environment: {env.isProduction ? "production" : "development"} ·{" "}

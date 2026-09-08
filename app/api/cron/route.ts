@@ -3,7 +3,9 @@ import { runScheduledJobs } from "@/lib/cron";
 import { callerKey, rateLimit } from "@/lib/rate-limit";
 
 /**
- * The scheduled entry point, called hourly by the host (see vercel.json).
+ * The scheduled entry point, called on a timer by the host (see vercel.json,
+ * which ships daily because that is all Vercel's free plan allows; SETUP.md
+ * step 3d covers getting hourly runs from something else).
  *
  * Guarded by CRON_SECRET rather than a session, because there is no user
  * behind it. Vercel Cron sends the secret as a bearer token; a query parameter

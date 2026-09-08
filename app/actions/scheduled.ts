@@ -36,7 +36,7 @@ export async function saveScheduleAction(_prev: ActionState, form: FormData): Pr
   }
 }
 
-/** Run everything now, as the hourly job would. */
+/** Run everything now, exactly as the scheduled job would. */
 export async function runNowAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   try {
     const actor = await assertRole("ADMIN");

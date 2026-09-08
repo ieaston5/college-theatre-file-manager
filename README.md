@@ -102,12 +102,14 @@ the titles of private documents.
 hub creates, so nothing disappears when a board member graduates. Existing
 files can be registered (link + metadata) without changing their ownership.
 
-**On its own.** One request an hour to `/api/cron` (Vercel Cron, or anything
-else that can call a URL) finishes re-share sweeps, re-exports Canva copies
-whose originals have moved on and gone quiet, and sends the weekly digest on
-the chosen day. Every job decides for itself whether there is anything to do,
-so a missed run costs nothing and a double run does nothing twice. Admin →
-Scheduled shows what ran and lets you trigger it by hand.
+**On its own.** One scheduled request to `/api/cron` (Vercel Cron, or anything
+else that can call a URL on a timer) finishes re-share sweeps, re-exports Canva
+copies whose originals have moved on and gone quiet, and sends the weekly
+digest on the chosen day. Every job decides for itself whether there is
+anything to do, so a missed run costs nothing and a double run does nothing
+twice. `vercel.json` ships daily, because Vercel's free plan rejects anything
+more frequent; SETUP.md step 3d covers hourly. Admin → Scheduled shows what ran
+and lets you trigger it by hand.
 
 **If it all goes wrong.** `npm run backup` writes the whole index — categories,
 shows, members, documents, who may see what — to one JSON file with no
@@ -156,7 +158,7 @@ lib/
   google/                 oauth.ts · real.ts (Drive API) · mock.ts · upload.ts · index.ts
   canva/                  oauth.ts (PKCE) · real.ts (Connect API) · mock.ts · index.ts
   constants.ts            roles, doc types, visibilities — the enum vocabulary
-  cron.ts                 the hourly jobs; each one decides if it has work
+  cron.ts                 the scheduled jobs; each one decides if it has work
   rate-limit.ts           database-backed fixed-window limits
   db-portability.ts       the SQLite/Postgres differences, in one place
 prisma/

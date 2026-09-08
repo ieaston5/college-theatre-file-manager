@@ -313,18 +313,66 @@ verification.
 
 ### 3d. Switch the schedule on
 
-`vercel.json` already asks Vercel to call `/api/cron` hourly; it starts working
-as soon as `CRON_SECRET` is set. Check *Admin → Scheduled* an hour after the
-first deploy: "last scheduled run" should be recent. Anything else that can
-make an HTTPS request will do the same job if you are not on Vercel —
+`vercel.json` asks Vercel to call `/api/cron` once a day, at 08:00 UTC, and it
+starts working as soon as `CRON_SECRET` is set. Check *Admin → Scheduled* the
+day after the first deploy: "last scheduled run" should be recent.
 
-```
-curl -H "Authorization: Bearer $CRON_SECRET" https://<your-domain>/api/cron
-```
+**Daily is deliberate: Vercel's free Hobby plan allows cron jobs, but only at
+daily granularity.** A more frequent expression such as `0 * * * *` is not
+downgraded — it fails the build with *"Hobby accounts are limited to daily cron
+jobs"*. Vercel also runs the job at any point inside the chosen hour, to spread
+load, so 08:00 means "some time between 08:00 and 08:59".
 
-Vercel's Hobby plan runs cron jobs once a day rather than hourly. That is
-enough for the digest, and it means Canva copies may sit up to a day behind;
-the button on each document still re-exports on demand.
+Once a day is fine for the digest, which goes out weekly anyway. What it costs
+is freshness: a Canva copy can sit up to a day behind its original, and a
+re-share sweep started by changing the sharing mode makes 24 documents of
+progress per day rather than per hour. Both have buttons — *Admin → Scheduled*
+and *Refresh Canva copies now* on each document — so nothing is stuck, it just
+needs a person.
+
+Three ways to get hourly:
+
+1. **Vercel Pro.** Change the schedule in `vercel.json` to `0 * * * *` and
+   redeploy. Nothing in the app changes.
+2. **Any external scheduler**, free, and my recommendation while you are on
+   Hobby. The endpoint is a plain authenticated GET, so anything that can make
+   an HTTPS request on a timer works — GitHub Actions, cron-job.org, a Raspberry
+   Pi, another always-on machine:
+
+   ```
+   curl -H "Authorization: Bearer $CRON_SECRET" https://<your-domain>/api/cron
+   ```
+
+   As a GitHub Actions workflow, with `HUB_URL` and `CRON_SECRET` set under
+   *Settings → Secrets and variables → Actions*:
+
+   ```yaml
+   # .github/workflows/hub-cron.yml
+   name: Hub scheduled jobs
+   on:
+     schedule:
+       - cron: "0 * * * *"
+     workflow_dispatch:
+   jobs:
+     run:
+       runs-on: ubuntu-latest
+       steps:
+         - run: |
+             curl -sS --fail-with-body \
+               -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+               "${{ secrets.HUB_URL }}/api/cron"
+   ```
+
+   GitHub throttles scheduled workflows under load and skips them entirely on
+   repositories with no activity for 60 days, so it is not a precision
+   instrument either — which is exactly why every job here is idempotent and
+   cheap to skip.
+3. **Leave it daily.** For a club of this size this is a perfectly reasonable
+   answer; press the buttons when you need something now.
+
+Calling `/api/cron` more often than needed is harmless: each job checks whether
+it has anything to do, and the Canva refresh will not re-export a design
+somebody is still editing.
 
 ### 3e. First sign-in on the real thing
 
