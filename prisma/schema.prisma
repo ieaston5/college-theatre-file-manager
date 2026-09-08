@@ -171,6 +171,8 @@ model Document {
   mimeType          String?
   googleModifiedAt  DateTime?
   lastSyncedAt      DateTime?
+  /// When the hub last pushed this document's permissions to Drive.
+  sharingSyncedAt   DateTime?
 
   /// Canva mirrors: the hub keeps an exported copy of a Canva design in Drive
   /// so the hub's own permission model applies to it. Canva's API cannot set
@@ -366,6 +368,18 @@ model OrgConfig {
   orgName        String   @default("Penn Players")
   groupEmail     String? // the Google Group that "public" documents are shared with
   groupCanEdit   Boolean  @default(true)
+  /// How board documents reach the board in Drive.
+  ///
+  /// GROUP   — shared with `groupEmail`. One permission per file, but the hub
+  ///           cannot see who is in a consumer Google Group, so access does
+  ///           not follow the hub's member list.
+  /// MEMBERS — shared with each active board member by name. Exactly matches
+  ///           the member list, so disabling somebody removes their Drive
+  ///           access too. Costs one permission per person per file.
+  shareMode      String   @default("GROUP")
+  /// Marks the start of a re-share sweep; documents shared before this are
+  /// still stale. Lets a long sweep resume instead of timing out.
+  sharingSweepStartedAt DateTime?
   /// Tokens: {production} {category} {title} {date} {season}
   namingTemplate String   @default("[{production}] {title} — {category}")
   driveRootName  String   @default("Penn Players Hub")

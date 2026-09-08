@@ -76,6 +76,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "import.file": "Filed imported files",
   "import.discard": "Discarded a scan",
   "import.sample": "Created sample files to import",
+  "sharing.sweep": "Re-shared documents in Drive",
   "config.update": "Updated settings",
   "drive.connect": "Connected the Google account",
   "drive.disconnect": "Disconnected the Google account",

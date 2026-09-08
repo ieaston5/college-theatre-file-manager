@@ -390,6 +390,7 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
     const actor = await assertRole("ADMIN");
     const parsed = configSchema.safeParse({
       orgName: text(form, "orgName") ?? "",
+      shareMode: text(form, "shareMode") ?? "GROUP",
       groupEmail: text(form, "groupEmail") ?? "",
       groupCanEdit: bool(form, "groupCanEdit"),
       namingTemplate: text(form, "namingTemplate") ?? "",
@@ -404,6 +405,7 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
       where: { id: "singleton" },
       data: {
         orgName: parsed.data.orgName,
+        shareMode: parsed.data.shareMode,
         groupEmail: parsed.data.groupEmail ?? null,
         groupCanEdit: parsed.data.groupCanEdit,
         namingTemplate: parsed.data.namingTemplate,
@@ -414,13 +416,26 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
     });
 
     const warnings: string[] = [];
-    if (before.groupEmail !== (parsed.data.groupEmail ?? null)) {
-      const affected = await prisma.document.count({ where: { visibility: "BOARD" } });
+    const sharingChanged =
+      before.groupEmail !== (parsed.data.groupEmail ?? null) ||
+      before.shareMode !== parsed.data.shareMode ||
+      before.groupCanEdit !== parsed.data.groupCanEdit;
+
+    if (sharingChanged) {
+      const affected = await prisma.document.count({
+        where: { visibility: { not: "PRIVATE" }, googleFileId: { not: null }, status: "ACTIVE" },
+      });
       if (affected > 0) {
+        // Start a sweep rather than trying to re-share everything inline:
+        // per-member sharing is one Google call per person per file.
+        await prisma.orgConfig.update({
+          where: { id: "singleton" },
+          data: { sharingSweepStartedAt: new Date() },
+        });
         warnings.push(
-          `The board group changed. ${affected} existing board document${
+          `Who can reach documents in Drive has changed, so ${affected} existing document${
             affected === 1 ? "" : "s"
-          } are still shared with the old address — use “Re-apply sharing” below to fix them.`,
+          } need re-sharing. Run the sweep in “Sharing in Drive” below — it can be stopped and resumed.`,
         );
       }
     }

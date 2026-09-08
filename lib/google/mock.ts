@@ -59,7 +59,12 @@ function load(): MockState {
 
 function save(state: MockState) {
   fs.mkdirSync(STORE_DIR, { recursive: true });
-  fs.writeFileSync(STORE_FILE, JSON.stringify(state, null, 2));
+  // Write-then-rename: several requests can be mutating this store at once,
+  // and a reader must never catch a half-written file — a truncated read would
+  // look like an empty store and silently wipe the simulation.
+  const temporary = `${STORE_FILE}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
+  fs.renameSync(temporary, STORE_FILE);
 }
 
 function newId(prefix: string) {

@@ -7,6 +7,7 @@ import {
   DOC_TYPES,
   PRODUCTION_STATUSES,
   ROLES,
+  SHARE_MODES,
   UPLOAD_MAX_BYTES,
   VISIBILITIES,
 } from "./constants";
@@ -195,6 +196,7 @@ export const productionRoleSchema = z.object({
 
 export const configSchema = z.object({
   orgName: z.string().trim().min(2).max(120),
+  shareMode: z.enum(SHARE_MODES).default("GROUP"),
   groupEmail: z
     .union([z.string().trim().toLowerCase().email("That does not look like an email address."), z.literal("")])
     .optional()
@@ -204,6 +206,10 @@ export const configSchema = z.object({
   driveRootName: z.string().trim().min(2).max(120),
   currentSeason: optionalText(60),
   stampDocHeader: z.coerce.boolean().optional().default(false),
+});
+
+export const groupAuditSchema = z.object({
+  members: z.string().trim().min(3, "Paste the group's member list."),
 });
 
 export const shareSchema = z.object({

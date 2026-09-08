@@ -241,6 +241,31 @@ export const VISIBILITY_META: Record<
 
 export const MEMBER_STATUSES = ["ACTIVE", "REMOVED"] as const;
 
+// --- how board documents reach the board ------------------------------------
+
+export const SHARE_MODES = ["GROUP", "MEMBERS"] as const;
+export type ShareMode = (typeof SHARE_MODES)[number];
+
+export const SHARE_MODE_META: Record<
+  ShareMode,
+  { label: string; blurb: string; icon: string; tint: string }
+> = {
+  GROUP: {
+    label: "The board's Google Group",
+    blurb:
+      "One permission per file. Simple, but the hub cannot see who is in the group, so disabling someone here does not remove their access in Drive.",
+    icon: "users",
+    tint: "#5b3de0",
+  },
+  MEMBERS: {
+    label: "Each board member by name",
+    blurb:
+      "One permission per person per file. Drive access matches the member list exactly, so disabling someone removes their access everywhere on the next sweep.",
+    icon: "user-cog",
+    tint: "#16a34a",
+  },
+};
+
 // --- Document source & status ----------------------------------------------
 
 export const DOC_SOURCES = ["CREATED", "REGISTERED", "LINK", "CANVA"] as const;

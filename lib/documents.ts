@@ -92,27 +92,65 @@ type SharableDocument = Pick<
   "id" | "visibility" | "source" | "creatorId" | "categoryId" | "productionId"
 >;
 
+/**
+ * Every board member who should be able to reach a document, used when the
+ * hub shares with people by name instead of with the Google Group. The point
+ * of that mode: the hub cannot read a consumer Google Group's membership, so
+ * with GROUP sharing "disable this member" leaves their Drive access intact.
+ * Naming everybody costs more permissions but makes offboarding real.
+ */
+async function boardRecipients(
+  groupCanEdit: boolean,
+): Promise<Array<{ email: string; level: "READER" | "WRITER" }>> {
+  const members = await prisma.user.findMany({
+    where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
+    select: { email: true, role: true },
+  });
+  return members.map((member) => ({
+    email: member.email,
+    // A hub MEMBER is read-only, so they must not get Drive edit access even
+    // when the board as a whole can edit.
+    level: member.role === "MEMBER" || !groupCanEdit ? "READER" : "WRITER",
+  }));
+}
+
 async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   const config = await getConfig();
-  const [creator, shares, company] = await Promise.all([
+  const perMember = config.shareMode === "MEMBERS";
+
+  const [creator, shares, company, board] = await Promise.all([
     prisma.user.findUnique({ where: { id: doc.creatorId } }),
     prisma.documentShare.findMany({ where: { documentId: doc.id }, include: { user: true } }),
     companyRecipients(doc),
+    doc.visibility === "PRIVATE" || !perMember
+      ? Promise.resolve([])
+      : boardRecipients(config.groupCanEdit),
   ]);
 
   const extra = shares.map((share) => ({
     email: share.user.email,
     level: share.accessLevel as "READER" | "WRITER",
   }));
-  for (const email of company) {
-    if (extra.some((entry) => entry.email.toLowerCase() === email.toLowerCase())) continue;
-    extra.push({ email, level: "READER" });
-  }
+
+  const seen = new Set(extra.map((entry) => entry.email.toLowerCase()));
+  const add = (email: string, level: "READER" | "WRITER") => {
+    if (seen.has(email.toLowerCase())) return;
+    seen.add(email.toLowerCase());
+    extra.push({ email, level });
+  };
+
+  // The board first: they can see everything that is not private, at the level
+  // their hub role allows.
+  for (const member of board) add(member.email, member.level);
+  // Then the company, who only ever read.
+  for (const email of company) add(email, "READER");
 
   return {
     visibility: doc.visibility as Visibility,
     creatorEmail: creator?.email ?? "",
-    groupEmail: config.groupEmail,
+    // In per-member mode the group is deliberately left out of the plan, so a
+    // reconciling pass removes it from files that used to be shared with it.
+    groupEmail: perMember ? null : config.groupEmail,
     groupCanEdit: config.groupCanEdit,
     extra,
     // Anything the hub made in its own Drive — created, uploaded or mirrored
@@ -136,6 +174,9 @@ export async function syncSharing(
     return { granted: [], revoked: [], warnings: ["Could not find the creator's email address."] };
   }
   const result = await driveProvider().applySharing(doc.googleFileId, plan);
+  await prisma.document
+    .update({ where: { id: doc.id }, data: { sharingSyncedAt: new Date() } })
+    .catch(() => {});
 
   // Keep the recorded permission ids in step with Drive.
   for (const grant of result.granted) {
@@ -470,6 +511,105 @@ export async function recordNewVersion(
   });
 
   return document;
+}
+
+/**
+ * Re-share a chunk of documents, resumably.
+ *
+ * Per-member sharing turns one permission per file into one per person per
+ * file, so re-sharing a season's worth of documents is hundreds of Google
+ * calls — far more than a single request should attempt. This does a bounded
+ * slice and reports what is left, so the caller can keep going until done and
+ * nothing times out half-way.
+ */
+export async function runSharingSweep(options?: { chunk?: number }): Promise<{
+  processed: number;
+  remaining: number;
+  total: number;
+  failures: number;
+}> {
+  const chunk = options?.chunk ?? 12;
+  const config = await getConfig();
+
+  const startedAt =
+    config.sharingSweepStartedAt ??
+    (await prisma.orgConfig.update({
+      where: { id: "singleton" },
+      data: { sharingSweepStartedAt: new Date() },
+    })).sharingSweepStartedAt!;
+
+  const scope = {
+    status: "ACTIVE" as const,
+    googleFileId: { not: null },
+    visibility: { not: "PRIVATE" as const },
+  };
+  const staleWhere = {
+    ...scope,
+    OR: [{ sharingSyncedAt: null }, { sharingSyncedAt: { lt: startedAt } }],
+  };
+
+  const [total, batch] = await Promise.all([
+    prisma.document.count({ where: scope }),
+    prisma.document.findMany({
+      where: staleWhere,
+      select: {
+        id: true,
+        visibility: true,
+        source: true,
+        creatorId: true,
+        categoryId: true,
+        productionId: true,
+        googleFileId: true,
+        docType: true,
+      },
+      take: chunk,
+    }),
+  ]);
+
+  let failures = 0;
+  for (const document of batch) {
+    try {
+      await syncSharing(document);
+    } catch (error) {
+      failures += 1;
+      console.error("[sharing] sweep failed for", document.id, error);
+      // Mark it done anyway so one broken file cannot stall the sweep.
+      await prisma.document
+        .update({ where: { id: document.id }, data: { sharingSyncedAt: new Date() } })
+        .catch(() => {});
+    }
+  }
+
+  const remaining = await prisma.document.count({ where: staleWhere });
+  if (remaining === 0) {
+    await prisma.orgConfig.update({
+      where: { id: "singleton" },
+      data: { sharingSweepStartedAt: null },
+    });
+  }
+
+  return { processed: batch.length, remaining, total, failures };
+}
+
+/** How many documents are waiting on the current sweep, if one is running. */
+export async function sharingSweepStatus() {
+  const config = await getConfig();
+  if (!config.sharingSweepStartedAt) return { running: false, remaining: 0, total: 0 };
+  const scope = {
+    status: "ACTIVE" as const,
+    googleFileId: { not: null },
+    visibility: { not: "PRIVATE" as const },
+  };
+  const [remaining, total] = await Promise.all([
+    prisma.document.count({
+      where: {
+        ...scope,
+        OR: [{ sharingSyncedAt: null }, { sharingSyncedAt: { lt: config.sharingSweepStartedAt } }],
+      },
+    }),
+    prisma.document.count({ where: scope }),
+  ]);
+  return { running: true, remaining, total };
 }
 
 // ---------------------------------------------------------------------------

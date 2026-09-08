@@ -23,14 +23,23 @@ export default async function AdminSettingsPage({
 }) {
   const params = await searchParams;
   const setup = await getSetupState();
-  const [documentCount, sampleCount, canvaAccount, canvaConnected, canvaMirrorCount] =
-    await Promise.all([
-      prisma.document.count({ where: { googleFileId: { not: null } } }),
-      prisma.document.count({ where: { metadata: { contains: '"sample":true' } } }),
-      getCanvaAccount(),
-      canvaReady(),
-      prisma.document.count({ where: { canvaDesignId: { not: null } } }),
-    ]);
+  const [
+    documentCount,
+    sampleCount,
+    canvaAccount,
+    canvaConnected,
+    canvaMirrorCount,
+    boardMemberCount,
+  ] = await Promise.all([
+    prisma.document.count({ where: { googleFileId: { not: null } } }),
+    prisma.document.count({ where: { metadata: { contains: '"sample":true' } } }),
+    getCanvaAccount(),
+    canvaReady(),
+    prisma.document.count({ where: { canvaDesignId: { not: null } } }),
+    prisma.user.count({
+      where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
+    }),
+  ]);
 
   const canvaLabel =
     env.canvaMode === "mock"
@@ -327,8 +336,10 @@ export default async function AdminSettingsPage({
         description="Naming, the board group and what new documents look like."
       >
         <ConfigForm
+          boardCount={boardMemberCount}
           config={{
             orgName: setup.config.orgName,
+            shareMode: setup.config.shareMode,
             groupEmail: setup.config.groupEmail,
             groupCanEdit: setup.config.groupCanEdit,
             namingTemplate: setup.config.namingTemplate,

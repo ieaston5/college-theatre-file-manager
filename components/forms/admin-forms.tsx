@@ -22,6 +22,8 @@ import {
   PRODUCTION_STATUSES,
   PRODUCTION_STATUS_META,
   ROLE_META,
+  SHARE_MODES,
+  SHARE_MODE_META,
   VISIBILITIES,
   VISIBILITY_META,
 } from "@/lib/constants";
@@ -31,9 +33,11 @@ import { applyNamingTemplate } from "@/lib/utils";
 
 export function ConfigForm({
   config,
+  boardCount,
 }: {
   config: {
     orgName: string;
+    shareMode: string;
     groupEmail: string | null;
     groupCanEdit: boolean;
     namingTemplate: string;
@@ -41,9 +45,11 @@ export function ConfigForm({
     currentSeason: string | null;
     stampDocHeader: boolean;
   };
+  boardCount: number;
 }) {
   const [state, formAction] = useActionState(saveConfigAction, emptyState);
   const [template, setTemplate] = useState(config.namingTemplate);
+  const [shareMode, setShareMode] = useState(config.shareMode);
 
   const preview = applyNamingTemplate(template, {
     production: "URINETOWN",
@@ -82,9 +88,39 @@ export function ConfigForm({
       </div>
 
       <Field
+        label="How board documents reach the board in Drive"
+        required
+        hint={
+          shareMode === "MEMBERS"
+            ? `Each board document will carry ${boardCount} individual ${
+                boardCount === 1 ? "permission" : "permissions"
+              }. Changing this makes every existing document need re-sharing — the hub will offer a sweep.`
+            : "The hub cannot see who is in a consumer Google Group, so disabling somebody here will not remove their access in Drive."
+        }
+      >
+        <RadioCards
+          name="shareMode"
+          columns={2}
+          value={shareMode}
+          onChange={setShareMode}
+          options={SHARE_MODES.map((option) => ({
+            value: option,
+            label: SHARE_MODE_META[option].label,
+            description: SHARE_MODE_META[option].blurb,
+            icon: SHARE_MODE_META[option].icon,
+            tint: SHARE_MODE_META[option].tint,
+          }))}
+        />
+      </Field>
+
+      <Field
         label="Board Google Group"
         htmlFor="groupEmail"
-        hint="Documents marked “board” are shared with this address in Drive. Leave blank and the hub will list them but not share them."
+        hint={
+          shareMode === "MEMBERS"
+            ? "Not used for access while sharing per member, but keep it — it is still how you email everybody, and switching back needs it."
+            : "Documents marked “board” are shared with this address in Drive. Leave blank and the hub will list them but not share them."
+        }
       >
         <input
           id="groupEmail"
