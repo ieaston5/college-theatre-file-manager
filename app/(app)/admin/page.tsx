@@ -376,7 +376,16 @@ export default async function AdminSettingsPage({
           <Row label="Drive">{env.driveMode === "mock" ? "simulated" : "Google Drive"}</Row>
           <Row label="Canva">{env.canvaMode}</Row>
           <Row label="Local sign-in">{env.allowDevLogin ? "enabled" : "off"}</Row>
-          <Row label="App URL">{env.appUrl}</Row>
+          <Row label="App URL">
+            {env.appUrl}
+            {env.appUrlWasIncomplete ? (
+              <span className="ml-1 text-xs text-amber-700">
+                — repaired: <code>APP_URL</code> is missing its <code>https://</code> or has a
+                trailing slash. Every redirect URI is built from it, so set it exactly as shown
+                here and redeploy.
+              </span>
+            ) : null}
+          </Row>
         </dl>
       </Card>
     </div>
