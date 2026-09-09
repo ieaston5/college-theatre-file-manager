@@ -387,6 +387,34 @@ export default async function AdminSettingsPage({
             ) : null}
           </Row>
         </dl>
+
+        {/* Always shown, not only when Google is unconfigured. These are needed
+            again every time the domain changes — a new deployment URL, a custom
+            domain — and that is exactly when the app *is* configured and the
+            setup panel above is hidden. Being unable to find them is how an
+            afternoon goes on redirect_uri_mismatch. */}
+        <div className="mt-3 rounded-lg bg-white p-3 text-xs">
+          <div className="font-medium text-ink-700">
+            Authorised redirect URIs for this deployment
+          </div>
+          <p className="mt-1 text-ink-500">
+            Register both in the Google Cloud console (APIs &amp; Services → Credentials → your
+            OAuth client). Google matches them exactly, so a missing one answers{" "}
+            <code>redirect_uri_mismatch</code> and no sign-in is possible.
+          </p>
+          <ul className="mt-2 space-y-1 font-mono text-ink-700">
+            <li>{loginRedirectUri()}</li>
+            <li>{driveRedirectUri()}</li>
+          </ul>
+          {env.canvaMode !== "off" ? (
+            <>
+              <div className="mt-2 text-ink-500">Canva return URL, if you use Canva:</div>
+              <ul className="mt-1 font-mono text-ink-700">
+                <li>{canvaRedirectUri()}</li>
+              </ul>
+            </>
+          ) : null}
+        </div>
       </Card>
     </div>
   );

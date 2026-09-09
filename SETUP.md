@@ -641,6 +641,25 @@ editor, or tick *just save the link*.
 address, and that the group accepts members/files from outside — Google Groups
 can be configured to reject it.
 
+**`Error 400: redirect_uri_mismatch`, and the URI in the message looks
+correct.** It probably *is* correct — the hub builds it from `APP_URL` — and the
+problem is that it has not been registered. Google Cloud console → APIs &
+Services → **Credentials** → your OAuth 2.0 Client ID → **Authorised redirect
+URIs** → add the one from the error, verbatim. Then:
+
+- Paste under *Authorised redirect URIs*, not *Authorised JavaScript origins*.
+  The second is for a different kind of app and will not help.
+- Google matches the whole string exactly: scheme, host, path, no trailing
+  slash. `https://…/api/auth/google/callback/` is a different URI.
+- Add the sign-in **and** the Drive-connection callback while you are there,
+  or connecting the hub account fails the same way one step later.
+- If you have more than one OAuth client, check you are editing the one whose
+  client ID is in the host's `GOOGLE_CLIENT_ID`. Editing the wrong client
+  changes nothing and looks identical.
+- Changes usually take effect immediately, occasionally a few minutes. Admin →
+  Google & settings prints both URIs for whatever `APP_URL` the deployment
+  currently has, so you can copy rather than retype.
+
 **Access blocked / app not verified.** The signing-in address is not in the
 OAuth **test users** list (2b).
 
