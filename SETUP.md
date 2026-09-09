@@ -276,15 +276,38 @@ provider is still the local one. Both are fixed here.
 
 **1. Get a database.** [Neon](https://neon.tech) and
 [Supabase](https://supabase.com) both have a free tier that is plenty for a
-club. Copy **both** connection strings it offers you. Neon calls them the
-*pooled* and *unpooled* strings; Supabase calls them the *connection pooler*
-and *direct connection*.
+club.
 
-Two URLs because serverless opens and drops connections constantly, which a
-pooler is built for and a Postgres server is not, while migrations need the
-direct one because they take advisory locks a pooler will not pass through. If
-your database has no pooler, use the same string for both — but set both, since
-Prisma refuses to generate at all when `DIRECT_URL` is missing.
+Two URLs, because serverless opens and drops connections constantly — which a
+pooler is built for and a Postgres server is not — while migrations need a
+connection that is *not* in transaction-pooling mode, because they use prepared
+statements and advisory locks that such a pooler will not pass through. Both
+must be set, here and on the host: Prisma refuses to generate at all when
+`DIRECT_URL` is missing.
+
+**Supabase** offers *three* strings (Project Settings → Database → Connection
+string), and picking wrongly fails in two different confusing ways. Take these
+two:
+
+| Variable | Which Supabase string | Port |
+| --- | --- | --- |
+| `DATABASE_URL` | **Transaction pooler**, plus `?pgbouncer=true&connection_limit=1` | 6543 |
+| `DIRECT_URL` | **Session pooler** | 5432 |
+
+- Using the transaction pooler (6543) for `DIRECT_URL` is the single commonest
+  mistake: migrations fail with prepared-statement errors.
+- Use the **session pooler**, not the *direct connection*
+  (`db.<ref>.supabase.co`), for `DIRECT_URL`. The direct connection is
+  IPv6-only unless you have bought the IPv4 add-on, so it fails from most
+  laptops and build machines with a "can't reach database server" that looks
+  like a wrong password. Session mode is the IPv4-safe equivalent and is fine
+  for migrations.
+- Both strings contain your database password where Supabase writes
+  `[YOUR-PASSWORD]`. Replace it, and if it contains `@ : / ?` or `#`,
+  percent-encode those characters or the URL will parse wrongly.
+
+**Neon** is simpler: its *pooled* string is `DATABASE_URL` and its *unpooled*
+string is `DIRECT_URL`.
 
 **2. Switch the project over.**
 
@@ -307,19 +330,34 @@ DIRECT_URL="postgres://…?sslmode=require"                    # direct: migrati
 case-sensitive `LIKE` to Postgres' `ILIKE`, so searching "budget" starts
 matching "Budget" too.
 
-**4. Create the schema, from your machine.**
+**4. The schema.** `prisma/migrations/0_init/` is already in this repository —
+the whole Postgres schema, generated from `schema.prisma` by Prisma itself. The
+deployment applies it during its build, so there is nothing to run here for a
+fresh database. If you would rather apply it from your machine first, or you
+are changing the schema later:
 
 ```
-npx prisma migrate dev --name init   # writes prisma/migrations/ and applies it
-npm run db:seed                      # categories, production roles, checklist
-npm run typecheck
+npx prisma migrate deploy    # apply what exists
+npx prisma migrate dev --name whatever   # after editing schema.prisma
 ```
 
-**5. Commit `prisma/schema.prisma` *and* `prisma/migrations/`.** This is the
-step that is easy to miss and confusing to debug: the deployment applies
-migrations during its build (`vercel-build` runs `prisma migrate deploy`), so
-if the migration files are not in the repository the build succeeds and the
-site then reports missing tables.
+**5. Load the starting data.** This is the one step that needs a database
+connection from somewhere, because the hub is unusable without categories and
+production roles — no category means no way to file a document.
+
+```
+npm run db:seed
+```
+
+Run it **once**: the categories, roles and people are upserts, but the
+checklist templates, templates and sample documents are plain inserts, so a
+second run duplicates them. Then, once you are signed in, Admin → Settings →
+**Remove sample data** clears the demo documents and keeps your categories.
+
+**6. Commit `prisma/schema.prisma` and `prisma/migrations/`.** Easy to miss and
+confusing to debug: the deployment runs `prisma migrate deploy` during its
+build, so if the migration files are not in the repository the build succeeds
+and the site then reports missing tables.
 
 Everything you set up in stages 1–2 lives in the old SQLite file, which does
 not travel. If you had already done real work there, carry it over rather than
@@ -538,6 +576,21 @@ nothing to apply. Commit it.
 
 **A change to an environment variable had no effect.** They are read at build
 and boot. Redeploy.
+
+**Migrations fail with a prepared-statement error** (`prepared statement "s0"
+already exists`, or `ERROR: prepared statement does not exist`). `DIRECT_URL`
+is pointing at a transaction-mode pooler — Supabase's port 6543. Use the
+session pooler on 5432 instead.
+
+**"Can't reach database server" from your laptop or the build, with a password
+you know is right.** On Supabase, `db.<ref>.supabase.co` is IPv6-only without
+the IPv4 add-on. Use the session pooler string
+(`aws-…pooler.supabase.com:5432`) for `DIRECT_URL`.
+
+**The build fails at `prisma generate` with `Environment variable not found:
+DIRECT_URL`.** Exactly what it says: the datasource needs both URLs. Add it to
+the host's environment, using the same value as `DATABASE_URL` if your database
+genuinely has no second endpoint.
 
 **"Google did not return a refresh token."** The hub account has already
 granted access. Remove *Penn Players Hub* from

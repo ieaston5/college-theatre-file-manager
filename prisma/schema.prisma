@@ -11,8 +11,10 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations bypass the pooler; the app does not.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
