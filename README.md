@@ -216,3 +216,4 @@ scripts/
   `Cannot read properties of undefined (reading 'findMany')` on the new model.
 # college-theatre-file-manager
 # college-theatre-file-manager
+# college-theatre-file-manager
