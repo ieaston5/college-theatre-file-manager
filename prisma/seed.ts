@@ -588,6 +588,38 @@ async function main() {
     (process.env.BOOTSTRAP_ADMIN_EMAILS ?? "").split(",")[0]?.trim().toLowerCase() ||
     "admin@pennplayers.example";
 
+  /**
+   * Seeding a *deployed* database while the hub is on the simulated Drive is a
+   * trap worth naming out loud, because it happened.
+   *
+   * The sample content needs somewhere to put files, so in simulated mode the
+   * seed writes an account row with mock folder ids and no Google token. On a
+   * laptop that is exactly right. Against the database a real deployment uses,
+   * it leaves what looks like a working Google connection and templates
+   * pointing at files that exist nowhere — and the deployment, which is in
+   * Google mode, cannot file anything.
+   */
+  const simulated = (process.env.DRIVE_MODE ?? "auto") !== "google" && !process.env.GOOGLE_CLIENT_ID;
+  const remoteDatabase = !(process.env.DATABASE_URL ?? "").startsWith("file:");
+  if (simulated && remoteDatabase) {
+    console.log(
+      [
+        "",
+        "  ⚠  Seeding a remote database while the Drive is simulated.",
+        "",
+        "     The categories, roles, people and checklists are all real and are",
+        "     what you want. But the sample documents, the templates and the",
+        "     Google account row will hold simulated ids, and a deployment",
+        "     running in Google mode cannot use any of them.",
+        "",
+        "     After signing in to the deployment:",
+        "       Admin → Settings → Remove sample data   (clears all three)",
+        "       Admin → Google connection → Connect     (the real account)",
+        "",
+      ].join("\n"),
+    );
+  }
+
   console.log("→ configuration");
   await prisma.orgConfig.upsert({
     where: { id: "singleton" },

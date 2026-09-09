@@ -15,6 +15,7 @@ import {
   productionSchema,
   templateSchema,
 } from "@/lib/validation";
+import { isSimulatedDriveId } from "@/lib/google/oauth";
 import { extractDriveFileId, slugify } from "@/lib/utils";
 import { env } from "@/lib/env";
 import { ROLE_META } from "@/lib/constants";
@@ -553,10 +554,37 @@ export async function removeSampleDataAction() {
   await prisma.production.deleteMany({
     where: { slug: { startsWith: "sample-" }, documents: { none: {} } },
   });
+
+  // Anything else the simulated Drive left behind. Seeding while the hub is in
+  // simulated mode writes mock file ids and an account row with no token; on a
+  // real install those are worse than useless, because they look like a
+  // working connection and like usable templates.
+  const templates = await prisma.template.findMany({ select: { id: true, googleFileId: true } });
+  const simulatedTemplates = templates.filter((t) => isSimulatedDriveId(t.googleFileId));
+  if (simulatedTemplates.length > 0) {
+    await prisma.template.deleteMany({
+      where: { id: { in: simulatedTemplates.map((t) => t.id) } },
+    });
+  }
+
+  const account = await prisma.driveAccount.findUnique({ where: { id: "singleton" } });
+  const droppedAccount = Boolean(account && !account.refreshToken);
+  if (droppedAccount) {
+    await prisma.driveAccount.deleteMany({ where: { id: "singleton" } });
+  }
+
   await recordAudit({
     actor,
     action: "config.update",
-    summary: `Removed ${sample.length} sample document${sample.length === 1 ? "" : "s"} and the demo members`,
+    summary: [
+      `Removed ${sample.length} sample document${sample.length === 1 ? "" : "s"} and the demo members`,
+      simulatedTemplates.length > 0
+        ? `${simulatedTemplates.length} simulated template${simulatedTemplates.length === 1 ? "" : "s"}`
+        : null,
+      droppedAccount ? "the simulated Google account row" : null,
+    ]
+      .filter(Boolean)
+      .join(", "),
   });
   refreshEverywhere();
   redirect("/admin?sample_removed=1");

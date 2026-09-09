@@ -97,6 +97,25 @@ export default async function AdminSettingsPage({
           description="One Google account owns every document the hub creates, so nothing is lost when a board member graduates."
         />
 
+        {setup.driveAccountIsSimulated ? (
+          <div className="space-y-3 text-sm">
+            <Badge tone="amber" icon="warning">
+              Left over from the simulation
+            </Badge>
+            <p className="text-ink-600">
+              There is an account row for{" "}
+              <span className="font-medium">{setup.account?.email}</span>, but it holds no Google
+              token — it was written while the hub was running on the simulated Drive, most likely
+              by the sample data. Nothing can be filed to Drive until a real account is connected.
+            </p>
+            <p className="text-ink-500">
+              <strong>Connect the hub&rsquo;s Google account</strong> below replaces it. The
+              simulated folder ids are discarded, so the folder tree is created afresh in the real
+              account.
+            </p>
+          </div>
+        ) : null}
+
         {!env.googleConfigured ? (
           <div className="space-y-3 text-sm">
             <Badge tone="amber" icon="warning">

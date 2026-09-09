@@ -119,8 +119,19 @@ export async function saveDriveCredentials(params: {
   return prisma.driveAccount.upsert({
     where: { id: "singleton" },
     create: { id: "singleton", ...data },
-    update: data,
+    // The folder ids are deliberately cleared on every connect. They may
+    // belong to a different account, or — the case that actually happened —
+    // to the simulated Drive, in which case every later call would fail
+    // looking for a folder that exists nowhere. ensureRootFolders() resolves
+    // them again by name straight afterwards and reuses the real folders when
+    // they are already there, so reconnecting the same account is a no-op.
+    update: { ...data, rootFolderId: null, productionsFolderId: null, standingFolderId: null },
   });
+}
+
+/** Ids from the simulated Drive, which are useless against the real API. */
+export function isSimulatedDriveId(id: string | null | undefined): boolean {
+  return typeof id === "string" && /^(fld|doc|upl|perm)_/.test(id);
 }
 
 /**
