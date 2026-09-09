@@ -214,3 +214,4 @@ scripts/
   `prisma/schema.prisma` means `prisma db push && prisma generate`, and a
   running dev server keeps the old generated client in memory — the symptom is
   `Cannot read properties of undefined (reading 'findMany')` on the new model.
+# college-theatre-file-manager
