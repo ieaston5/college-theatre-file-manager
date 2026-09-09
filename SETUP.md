@@ -357,9 +357,13 @@ deploy:
 | `BOOTSTRAP_ADMIN_EMAILS` | your address, so you can sign in to an empty hub |
 | `CANVA_CLIENT_ID` / `CANVA_CLIENT_SECRET` | only if you use Canva (2g) |
 
-Set them for **all three** environments (Production, Preview, Development), or
-at least Production and Preview — a preview deployment with no `DATABASE_URL`
-fails exactly the same way, and Vercel builds one for every push.
+Set them for **Production** at least. Vercel also builds a Preview deployment
+for every push, and one with no `DATABASE_URL` fails exactly as above — so
+either give Preview the same values, or accept that preview URLs 500 and only
+use the production domain. Be aware of what sharing means: a preview pointed at
+the same database reads and writes the real data, and `vercel-build` will apply
+migrations to it. For one club that is usually the sane trade; if it is not,
+give Preview a Neon branch of its own.
 
 **Generate new secrets; do not copy the local ones.** They have been in a file
 on your laptop, in your shell history, and possibly in a screenshot. Note that
@@ -383,6 +387,13 @@ https://<your-domain>/api/google/callback
 Leave the `localhost` ones in place; an OAuth client can have several, and you
 will still want to run it locally. If you use Canva, add
 `https://<your-domain>/api/canva/callback` to the Canva app's return URLs too.
+
+Use the **stable production domain** (`<project>.vercel.app` or your own), and
+make `APP_URL` exactly that, with no trailing slash. The hub builds its redirect
+URI from `APP_URL`, so if the two disagree Google refuses with
+`redirect_uri_mismatch`. This is also why sign-in does not work on preview
+deployments: each one has its own generated hostname, which is neither
+registered nor what `APP_URL` says.
 
 Keep the app in **Testing** status with the board (and any company members who
 sign in) as test users. That caps you at 100 accounts and shows an "unverified
