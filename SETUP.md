@@ -601,6 +601,18 @@ nothing to apply. Commit it.
 **A change to an environment variable had no effect.** They are read at build
 and boot. Redeploy.
 
+**`P1000: Authentication failed against database server … credentials for
+`postgres` are not valid`.** Nine times in ten the connection string still
+contains Supabase's placeholder — the literal text `[YOUR-PASSWORD]`, square
+brackets included — because it is copied from the dashboard as one line and the
+slot is easy to miss. Replace it, brackets and all, in **both** strings and in
+**both** places (`.env` and the host's environment).
+
+If you never noted the database password, it is not recoverable: Project
+Settings → Database → **Reset database password**, which does not touch your
+data. Take the one Supabase generates rather than inventing one, and if it
+contains `@ : / ? #` or `%`, percent-encode those characters in the URL.
+
 **Migrations fail with a prepared-statement error** (`prepared statement "s0"
 already exists`, or `ERROR: prepared statement does not exist`). `DIRECT_URL`
 is pointing at a transaction-mode pooler — Supabase's port 6543. Use the

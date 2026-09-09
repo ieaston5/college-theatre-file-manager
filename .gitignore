@@ -6,10 +6,12 @@ build/
 *.tsbuildinfo
 next-env.d.ts
 
-# Secrets — never commit
+# Secrets — never commit. The wildcard covers .env.bak, .env.vercel and
+# anything else that ends up holding a connection string; .env.example is the
+# one deliberate exception, and holds no values.
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
 
 # Local database
 prisma/*.db
