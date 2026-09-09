@@ -258,20 +258,44 @@ Everything below is ready to run. Budget an hour, most of it waiting for a
 database to provision. Do it in this order — the Google redirect URIs need the
 real domain, which you do not have until the deploy exists.
 
-### 3a. Move to Postgres
+### 3a. Move to Postgres — do this *before* the first deploy
 
-SQLite is a file on one machine, which is fine locally and no use at all on a
-host that starts a fresh container per request. One command switches the
-project over:
+SQLite is a file on one machine. On a serverless host it does not merely
+perform badly, it cannot work: the filesystem is read-only and thrown away
+between requests, so there is nowhere for `dev.db` to live. **Deploying the
+SQLite schema produces a site where every page is a 500** —
+
+```
+error: Environment variable not found: DATABASE_URL.
+  -->  schema.prisma:15
+14 |   provider = "sqlite"
+```
+
+— which is Prisma saying two things at once: the variable is missing, *and* the
+provider is still the local one. Both are fixed here.
+
+**1. Get a database.** [Neon](https://neon.tech) and
+[Supabase](https://supabase.com) both have a free tier that is plenty for a
+club. Copy **both** connection strings it offers you. Neon calls them the
+*pooled* and *unpooled* strings; Supabase calls them the *connection pooler*
+and *direct connection*.
+
+Two URLs because serverless opens and drops connections constantly, which a
+pooler is built for and a Postgres server is not, while migrations need the
+direct one because they take advisory locks a pooler will not pass through. If
+your database has no pooler, use the same string for both — but set both, since
+Prisma refuses to generate at all when `DIRECT_URL` is missing.
+
+**2. Switch the project over.**
 
 ```
 npm run use-db -- postgres
 ```
 
-That rewrites the datasource in `prisma/schema.prisma` and prints the follow-up
-commands. Then get a database — [Neon](https://neon.tech) and
-[Supabase](https://supabase.com) both have a free tier that is plenty for a
-club — and put **both** of its URLs in `.env`:
+This rewrites the whole datasource block in `prisma/schema.prisma`, including
+the `directUrl` line, and prints the follow-up commands.
+
+**3. Point your local `.env` at it.**
 
 ```
 DATABASE_PROVIDER=postgresql
@@ -279,27 +303,37 @@ DATABASE_URL="postgres://…?sslmode=require&pgbouncer=true"   # pooled: the app
 DIRECT_URL="postgres://…?sslmode=require"                    # direct: migrations
 ```
 
-Two URLs because serverless opens and drops connections constantly, which a
-pooler is built for and a Postgres server is not; migrations need the direct
-one because they take advisory locks a pooler will not pass through. Neon calls
-these the *pooled* and *unpooled* connection strings; Supabase calls them the
-*connection pooler* and *direct connection*.
-
-Then create the schema and check it:
-
-```
-npx prisma migrate dev --name init
-npm run typecheck
-```
-
 `DATABASE_PROVIDER=postgresql` also switches the hub's search from
 case-sensitive `LIKE` to Postgres' `ILIKE`, so searching "budget" starts
 matching "Budget" too.
 
-To go back to SQLite for local work: `npm run use-db -- sqlite`.
+**4. Create the schema, from your machine.**
 
-The datasource block also needs `directUrl` while you are on Postgres — the
-switcher prints the exact three lines.
+```
+npx prisma migrate dev --name init   # writes prisma/migrations/ and applies it
+npm run db:seed                      # categories, production roles, checklist
+npm run typecheck
+```
+
+**5. Commit `prisma/schema.prisma` *and* `prisma/migrations/`.** This is the
+step that is easy to miss and confusing to debug: the deployment applies
+migrations during its build (`vercel-build` runs `prisma migrate deploy`), so
+if the migration files are not in the repository the build succeeds and the
+site then reports missing tables.
+
+Everything you set up in stages 1–2 lives in the old SQLite file, which does
+not travel. If you had already done real work there, carry it over rather than
+redoing it:
+
+```
+npm run use-db -- sqlite && npm run backup     # dump from SQLite
+npm run use-db -- postgres                     # then, after step 4
+npm run restore -- backups/<file>.json
+```
+
+Local development from here on uses Postgres too. The simplest arrangement for
+a club is to point your local `.env` at the same database; if you would rather
+not develop against live data, Neon can branch it.
 
 ### 3b. Deploy to Vercel
 
@@ -323,11 +357,19 @@ deploy:
 | `BOOTSTRAP_ADMIN_EMAILS` | your address, so you can sign in to an empty hub |
 | `CANVA_CLIENT_ID` / `CANVA_CLIENT_SECRET` | only if you use Canva (2g) |
 
+Set them for **all three** environments (Production, Preview, Development), or
+at least Production and Preview — a preview deployment with no `DATABASE_URL`
+fails exactly the same way, and Vercel builds one for every push.
+
 **Generate new secrets; do not copy the local ones.** They have been in a file
 on your laptop, in your shell history, and possibly in a screenshot. Note that
 `APP_ENCRYPTION_KEY` is what the stored Google refresh token is encrypted with,
 so a new key means reconnecting the Google account on the new deployment — 
 which you have to do anyway, since the token does not travel.
+
+Environment variables are read at build and boot, so **changing one requires a
+redeploy** — Vercel does not apply it to the running deployment. Deployments →
+⋯ → *Redeploy* on the latest one.
 
 ### 3c. Point Google at the real domain
 
@@ -464,6 +506,27 @@ dashboard back.
 ---
 
 ## Troubleshooting
+
+**Every page on the deployed site is a 500, and the log says `Environment
+variable not found: DATABASE_URL` pointing at `provider = "sqlite"`.** The
+deployment is still on the local database. Both halves need fixing and stage 3a
+does both: run `npm run use-db -- postgres`, create and **commit** the
+migration, and set `DATABASE_URL` / `DIRECT_URL` / `DATABASE_PROVIDER` in the
+host's environment. Adding the variables alone is not enough — SQLite cannot
+run on a host with a read-only, disposable filesystem, whatever `DATABASE_URL`
+says.
+
+**Sign-in bounces to `/login` or `/no-access` and the log shows a Prisma
+error.** Sign-in is not broken; the database is unreachable. The OAuth round
+trip stores its state in a table, so no database means no sign-in. Fix the
+database and try again before looking at anything Google-related.
+
+**The build succeeds but the site says a table does not exist.**
+`prisma/migrations/` is not in the repository, so `prisma migrate deploy` had
+nothing to apply. Commit it.
+
+**A change to an environment variable had no effect.** They are read at build
+and boot. Redeploy.
 
 **"Google did not return a refresh token."** The hub account has already
 granted access. Remove *Penn Players Hub* from

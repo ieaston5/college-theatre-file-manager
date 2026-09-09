@@ -37,13 +37,36 @@ if (current === target) {
   process.exit(0);
 }
 
-const updated = schema.replace(
-  /(datasource db \{[^}]*provider\s*=\s*")[a-z]+(")/,
-  `$1${target}$2`,
-);
+/**
+ * Rewrite the whole datasource block, rather than only the provider word.
+ *
+ * Postgres on a serverless host needs `directUrl` as well: the app talks to a
+ * pooler, and migrations have to bypass it because a pooler will not pass
+ * through the advisory locks they take. Leaving that line for somebody to add
+ * by hand is how a deployment ends up with no tables.
+ */
+const block =
+  target === "postgresql"
+    ? `datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations bypass the pooler; the app does not.
+  directUrl = env("DIRECT_URL")
+}`
+    : `datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}`;
+
+const updated = schema.replace(/datasource db \{[^}]*\}/, block);
 fs.writeFileSync(SCHEMA, updated);
 
-console.log(`Switched prisma/schema.prisma from ${current} to ${target}.\n`);
+console.log(`Switched prisma/schema.prisma from ${current} to ${target}.`);
+console.log(
+  target === "postgresql"
+    ? "The datasource now reads DATABASE_URL (pooled) and DIRECT_URL (direct).\n"
+    : "The datasource now reads DATABASE_URL only.\n",
+);
 
 if (target === "postgresql") {
   console.log(`Next, in this order:
@@ -55,22 +78,23 @@ if (target === "postgresql") {
        DIRECT_URL="postgresql://…"          # no pooler
        DATABASE_PROVIDER="postgresql"        # turns on case-insensitive search
 
-  2. Add the direct URL to the datasource block, which Prisma needs for
-     migrations against a pooled database:
+     BOTH are required, here and on the host: Prisma refuses to generate at
+     all if DIRECT_URL is missing. If your database has no pooler, set
+     DIRECT_URL to the same string as DATABASE_URL.
 
-       datasource db {
-         provider  = "postgresql"
-         url       = env("DATABASE_URL")
-         directUrl = env("DIRECT_URL")
-       }
-
-  3. Create the first migration against the empty database:
+  2. Create the first migration, which also applies it:
 
        npx prisma migrate dev --name init
 
-  4. Seed it, or import your existing data:
+  3. Load the starting categories, production roles and checklist:
 
        npm run db:seed
+
+     (Then Admin -> Settings -> Remove sample data once you are signed in.)
+
+  4. COMMIT prisma/schema.prisma AND prisma/migrations/. The deployment runs
+     "prisma migrate deploy" during its build, so without the migration files
+     the host builds fine and then has no tables.
 
   5. Reconnect Google in Admin, because the encrypted refresh token does not
      travel with a new APP_ENCRYPTION_KEY.
@@ -88,6 +112,10 @@ if (target === "postgresql") {
   console.log(`Next:
 
   1. Set DATABASE_URL="file:./dev.db" and remove DATABASE_PROVIDER from .env.
-  2. Remove directUrl from the datasource block if it is there.
-  3. npx prisma db push && npm run db:seed`);
+     DIRECT_URL is no longer read, so it can stay or go.
+  2. npx prisma db push && npm run db:seed
+
+  Note that prisma/migrations/ holds Postgres SQL. Leave it alone rather than
+  deleting it — SQLite here uses db push and ignores it, and the deployment
+  still needs it.`);
 }
