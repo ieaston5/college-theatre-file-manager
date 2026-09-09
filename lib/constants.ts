@@ -370,6 +370,13 @@ export type AccessLevel = (typeof ACCESS_LEVELS)[number];
 export type Tone = "indigo" | "green" | "amber" | "rose" | "sky" | "slate" | "violet";
 
 export const DRIVE_SCOPES = [
+  // The hub has to know which account it just connected, so it can show it in
+  // Admin and compare file ownership against it. Without an identity scope the
+  // access token is good for Drive and refused by the userinfo endpoint, which
+  // answers "Request is missing required authentication credential" — an error
+  // that sounds like a broken token rather than a missing scope.
+  "openid",
+  "email",
   "https://www.googleapis.com/auth/drive",
   "https://www.googleapis.com/auth/documents",
   "https://www.googleapis.com/auth/spreadsheets",

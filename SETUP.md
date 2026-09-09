@@ -628,6 +628,14 @@ DIRECT_URL`.** Exactly what it says: the datasource needs both URLs. Add it to
 the host's environment, using the same value as `DATABASE_URL` if your database
 genuinely has no second endpoint.
 
+**"Request is missing required authentication credential. Expected OAuth 2
+access token…"** while connecting the hub's Google account. The consent
+succeeded and the *next* step failed: the hub asks Google which account it just
+connected, which needs the `openid` and `email` scopes. If you are running a
+version of this project from before those were added to `DRIVE_SCOPES`, update
+and connect again — Google will show the consent screen once more, now
+including "See your primary Google Account email address".
+
 **"Google did not return a refresh token."** The hub account has already
 granted access. Remove *Penn Players Hub* from
 <https://myaccount.google.com/permissions> on the hub account, then connect

@@ -89,12 +89,57 @@ export async function exchangeDriveCode(code: string) {
     );
   }
   oauth.setCredentials(tokens);
-  const info = await google.oauth2({ version: "v2", auth: oauth }).userinfo.get();
-  return {
-    tokens,
-    email: (info.data.email ?? "").toLowerCase(),
-    name: info.data.name ?? null,
-  };
+
+  /**
+   * Which account did we just connect?
+   *
+   * Read it from the id_token, which the `openid`/`email` scopes in
+   * DRIVE_SCOPES make Google return alongside the access token. That is one
+   * fewer network call than asking the userinfo endpoint, and it cannot fail
+   * for lack of a scope — the failure mode that made this step return
+   * "Request is missing required authentication credential" the first time it
+   * ever ran against real Google.
+   *
+   * The userinfo call stays as a fallback for a token minted before the scope
+   * was added, and a failure there is reported for what it is rather than
+   * discarding a refresh token we have just been given.
+   */
+  let email = "";
+  let name: string | null = null;
+
+  if (tokens.id_token) {
+    try {
+      const ticket = await oauth.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: env.googleClientId,
+      });
+      const payload = ticket.getPayload();
+      email = (payload?.email ?? "").toLowerCase();
+      name = payload?.name ?? null;
+    } catch (error) {
+      console.error("[google] could not read the id_token from the drive connect", error);
+    }
+  }
+
+  if (!email) {
+    try {
+      const info = await google.oauth2({ version: "v2", auth: oauth }).userinfo.get();
+      email = (info.data.email ?? "").toLowerCase();
+      name = info.data.name ?? name;
+    } catch (error) {
+      throw new Error(
+        "Connected to Google, but the hub could not read which account it was. " +
+          "This usually means the OAuth client is missing the openid/email scopes. " +
+          `(${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  }
+
+  if (!email) {
+    throw new Error("Google did not say which account was connected. Try connecting again.");
+  }
+
+  return { tokens, email, name };
 }
 
 export async function saveDriveCredentials(params: {
