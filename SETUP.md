@@ -306,6 +306,30 @@ two:
   `[YOUR-PASSWORD]`. Replace it, and if it contains `@ : / ?` or `#`,
   percent-encode those characters or the URL will parse wrongly.
 
+The two you want look like this — identical apart from the port:
+
+```dotenv
+# DATABASE_URL — transaction pooler, port 6543, params appended by you
+postgresql://postgres.abcdefghijklmnop:PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+
+# DIRECT_URL — session pooler, port 5432, no params needed
+postgresql://postgres.abcdefghijklmnop:PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres
+```
+
+Copy them from the dashboard rather than typing them from the above: the region
+prefix varies (`aws-0-`, `aws-1-`, …) and `abcdefghijklmnop` stands for your own
+project reference. The shape is worth knowing so you can tell the three strings
+apart at a glance:
+
+| | Username | Host | Port |
+| --- | --- | --- | --- |
+| Transaction pooler → `DATABASE_URL` | `postgres.<ref>` | `…pooler.supabase.com` | 6543 |
+| Session pooler → `DIRECT_URL` | `postgres.<ref>` | `…pooler.supabase.com` | 5432 |
+| Direct connection → *don't use* | `postgres` | `db.<ref>.supabase.co` | 5432 |
+
+So: a dot in the username means a pooler, and the port tells you which. A
+`db.` host is the one to avoid.
+
 **Neon** is simpler: its *pooled* string is `DATABASE_URL` and its *unpooled*
 string is `DIRECT_URL`.
 
