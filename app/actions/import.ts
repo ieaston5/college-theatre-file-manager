@@ -16,6 +16,57 @@ function refreshEverywhere() {
   revalidatePath("/", "layout");
 }
 
+/**
+ * Ask Drive, as the hub account, why a folder looks the way it does.
+ *
+ * Separate from scanning because it writes nothing and answers a different
+ * question: not "what can I import" but "what does Drive think this account
+ * can see". The full answer goes into the activity log, so it can be read
+ * afterwards without anyone sharing credentials.
+ */
+export async function diagnoseFolderAction(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  try {
+    const actor = await assertRole("ADMIN");
+    const link = text(form, "folder") ?? "";
+    const folderId = extractDriveFileId(link);
+    if (!folderId) {
+      return { error: "Paste the folder's Drive link first." };
+    }
+
+    const { diagnoseFolder } = await import("@/lib/google/diagnose");
+    const result = await diagnoseFolder(actor, folderId);
+    refreshEverywhere();
+
+    const lines = [
+      `Asked as ${result.askedAs ?? "an unconnected account"}.`,
+      result.folder
+        ? `Drive says: “${result.folder.name}” · owned by this account: ${
+            result.folder.ownedByMe ?? "unknown"
+          } · shared with this account: ${result.folder.sharedWithMeTime ?? "no record"} · may list contents: ${
+            result.folder.canListChildren ?? "unknown"
+          }.`
+        : "Drive would not return that id at all.",
+      `Items listed inside: ${result.children.total}.`,
+      `Folders currently shared with this account: ${
+        result.sharedFolders.length > 0
+          ? result.sharedFolders.map((f) => `“${f.name}”`).join(", ")
+          : "none"
+      }.`,
+    ];
+
+    return {
+      ok: result.verdict,
+      hint: result.hint ?? undefined,
+      warnings: lines,
+    };
+  } catch (error) {
+    return toActionState(error);
+  }
+}
+
 export async function startScanAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   try {
     const actor = await assertRole("ADMIN");

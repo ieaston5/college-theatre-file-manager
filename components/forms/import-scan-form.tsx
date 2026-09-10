@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import Link from "next/link";
-import { startScanAction } from "@/app/actions/import";
+import { diagnoseFolderAction, startScanAction } from "@/app/actions/import";
 import { emptyState } from "@/app/actions/shared";
 import { Field, inputClass } from "../ui";
 import { FormBanner, SubmitButton, Toggle } from "./form-bits";
@@ -17,10 +17,12 @@ export function ImportScanForm({
   rootFolderId: string | null;
 }) {
   const [state, formAction] = useActionState(startScanAction, emptyState);
+  const [checkState, checkAction] = useActionState(diagnoseFolderAction, emptyState);
 
   return (
     <form action={formAction} className="space-y-4">
       <FormBanner state={state} />
+      <FormBanner state={checkState} />
 
       <Field
         label="Drive folder"
@@ -67,9 +69,21 @@ export function ImportScanForm({
             Nothing is filed by scanning — you confirm each file afterwards.
           </span>
         )}
-        <SubmitButton icon="search" pendingLabel="Reading the folder…">
-          Scan
-        </SubmitButton>
+        <div className="flex items-center gap-2">
+          {/* Asks Drive what it thinks this account can see, and writes the
+              answer to the activity log. Nothing is written to Drive. */}
+          <SubmitButton
+            formAction={checkAction}
+            variant="secondary"
+            icon="info"
+            pendingLabel="Asking Drive…"
+          >
+            Why is it empty?
+          </SubmitButton>
+          <SubmitButton icon="search" pendingLabel="Reading the folder…">
+            Scan
+          </SubmitButton>
+        </div>
       </div>
 
       {rootFolderId ? (

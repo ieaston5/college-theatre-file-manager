@@ -54,16 +54,28 @@ export function SubmitButton({
   variant = "primary",
   className,
   icon,
+  formAction,
 }: {
   children: React.ReactNode;
   pendingLabel?: string;
   variant?: "primary" | "secondary" | "danger";
   className?: string;
   icon?: string;
+  /**
+   * Send this button's submission to a different action than the form's own —
+   * how one set of fields can drive two operations, e.g. scan a folder or ask
+   * Drive why it looks empty.
+   */
+  formAction?: (payload: FormData) => void;
 }) {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" disabled={pending} className={buttonClass(variant, className)}>
+    <button
+      type="submit"
+      disabled={pending}
+      formAction={formAction}
+      className={buttonClass(variant, className)}
+    >
       {pending ? (
         <Icon name="refresh" className="size-4 animate-spin" />
       ) : icon ? (

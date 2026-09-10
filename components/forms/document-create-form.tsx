@@ -109,6 +109,8 @@ export function DocumentCreateForm({
   const [categoryId, setCategoryId] = useState(defaultCategoryId ?? "");
   const [productionId, setProductionId] = useState(defaultProductionId ?? "none");
   const [mode, setMode] = useState<CreationMode>("DOC");
+  /** Whether the person picked the file type, as opposed to inheriting it. */
+  const [typeChosenByHand, setTypeChosenByHand] = useState(false);
   const [visibility, setVisibility] = useState<string>(companyCreatorOnly ? "COMPANY" : "BOARD");
   const [editAccess, setEditAccess] = useState<string>("BOARD");
   const [templateId, setTemplateId] = useState("blank");
@@ -158,10 +160,17 @@ export function DocumentCreateForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
-    // A category's default file type only applies to the Google types. Upload
-    // and Canva are deliberate choices about where the content comes from, so
-    // picking a category must not silently switch back to "Google Doc".
-    if (next.defaultDocType && !isUpload && !isCanva) {
+    /**
+     * A category's default file type is a suggestion for somebody who has not
+     * said what they want yet. Once they have picked a type themselves it is
+     * theirs, and choosing a category must not quietly undo it.
+     *
+     * This used to be a list of exempt types (upload, Canva), which meant
+     * every new type arrived broken — Form was silently switched to Sheet by
+     * picking a category whose default is Sheet. Tracking whether the choice
+     * was deliberate fixes the whole class instead of the latest instance.
+     */
+    if (next.defaultDocType && !typeChosenByHand) {
       setMode(next.defaultDocType as CreationMode);
     }
     // Never leave "Company" selected on a category that is board-only.
@@ -382,6 +391,8 @@ export function DocumentCreateForm({
             value={mode}
             onChange={(next) => {
               setMode(next as CreationMode);
+              // From here on the category's default type must not override it.
+              setTypeChosenByHand(true);
               setTemplateId("blank");
               if (next !== "UPLOAD") setFiles([]);
             }}
