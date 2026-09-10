@@ -119,6 +119,20 @@ export type ScanResult = {
   found: number;
   duplicates: number;
   skippedFolders: number;
+  /**
+   * What Drive actually returned, so "nothing to import" can say why.
+   *
+   * A scan that finds nothing has several quite different causes — an empty
+   * folder, a folder full of subfolders with the box unticked, a folder this
+   * account may see but not enumerate, a shortcut rather than the folder
+   * itself — and they are indistinguishable from the outside.
+   */
+  diagnostics: {
+    entriesReturned: number;
+    subfolders: number;
+    shortcuts: number;
+    foldersVisited: number;
+  };
 };
 
 /** Walk a Drive folder and record everything worth filing. */
@@ -149,6 +163,9 @@ export async function scanDriveFolder(
   let found = 0;
   let duplicates = 0;
   let skippedFolders = 0;
+  let entriesReturned = 0;
+  let shortcuts = 0;
+  let foldersVisited = 0;
 
   const queue: Array<{ id: string; path: string; depth: number }> = [
     { id: options.folderId, path: options.folderName ?? "", depth: 0 },
@@ -157,6 +174,8 @@ export async function scanDriveFolder(
   while (queue.length > 0 && found < MAX_FILES) {
     const folder = queue.shift()!;
     const entries = await provider.listFolder(folder.id);
+    foldersVisited += 1;
+    entriesReturned += entries.length;
 
     for (const entry of entries) {
       if (found >= MAX_FILES) break;
@@ -173,7 +192,10 @@ export async function scanDriveFolder(
         continue;
       }
       // Shortcuts point at a file that will be scanned on its own.
-      if (entry.mimeType === SHORTCUT_MIME) continue;
+      if (entry.mimeType === SHORTCUT_MIME) {
+        shortcuts += 1;
+        continue;
+      }
 
       const alreadyOnHub = await prisma.document.findUnique({
         where: { googleFileId: entry.id },
@@ -221,10 +243,24 @@ export async function scanDriveFolder(
     targetType: "ImportBatch",
     targetId: batch.id,
     summary: `Scanned ${options.folderName ?? "a Drive folder"} — ${found} files, ${duplicates} already on the hub`,
-    metadata: { folderId: options.folderId, found, duplicates },
+    metadata: {
+      folderId: options.folderId,
+      found,
+      duplicates,
+      skippedFolders,
+      entriesReturned,
+      shortcuts,
+      foldersVisited,
+    },
   });
 
-  return { batchId: batch.id, found, duplicates, skippedFolders };
+  return {
+    batchId: batch.id,
+    found,
+    duplicates,
+    skippedFolders,
+    diagnostics: { entriesReturned, subfolders: skippedFolders, shortcuts, foldersVisited },
+  };
 }
 
 export type FileDecision = {

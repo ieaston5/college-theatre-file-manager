@@ -13,6 +13,10 @@ export type DriveFileInfo = {
   sizeBytes?: number | null;
   /** Hub metadata stored on the file itself; used to verify uploads. */
   appProperties?: Record<string, string> | null;
+  /** Set when this "folder" is really a shortcut to one somewhere else. */
+  shortcutTargetId?: string | null;
+  /** Whether this account may enumerate the folder. null when unknown. */
+  canListChildren?: boolean | null;
 };
 
 export type DocHeader = {

@@ -15,7 +15,13 @@ import {
 } from "./types";
 
 const FILE_FIELDS =
-  "id,name,mimeType,webViewLink,iconLink,modifiedTime,parents,trashed,size,appProperties,owners(emailAddress)";
+  "id,name,mimeType,webViewLink,iconLink,modifiedTime,parents,trashed,size,appProperties,owners(emailAddress)," +
+  // shortcutDetails: "Add shortcut to Drive" creates a *new* file pointing at
+  // the original, and listing a shortcut's children returns nothing because
+  // the children belong to the target. Following it is the fix.
+  // capabilities.canListChildren: whether this account may enumerate the
+  // folder at all — the difference between "empty" and "not allowed to look".
+  "shortcutDetails(targetId,targetMimeType),capabilities(canListChildren,canAddChildren,canEdit)";
 
 function toInfo(file: {
   id?: string | null;
@@ -29,6 +35,12 @@ function toInfo(file: {
   size?: string | null;
   appProperties?: Record<string, string> | null;
   owners?: Array<{ emailAddress?: string | null }> | null;
+  shortcutDetails?: { targetId?: string | null; targetMimeType?: string | null } | null;
+  capabilities?: {
+    canListChildren?: boolean | null;
+    canAddChildren?: boolean | null;
+    canEdit?: boolean | null;
+  } | null;
 }): DriveFileInfo {
   return {
     id: file.id ?? "",
@@ -42,6 +54,8 @@ function toInfo(file: {
     ownerEmail: file.owners?.[0]?.emailAddress ?? null,
     sizeBytes: file.size ? Number(file.size) : null,
     appProperties: file.appProperties ?? null,
+    shortcutTargetId: file.shortcutDetails?.targetId ?? null,
+    canListChildren: file.capabilities?.canListChildren ?? null,
   };
 }
 

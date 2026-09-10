@@ -22,7 +22,7 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
     const link = text(form, "folder") ?? "";
     const includeSubfolders = form.get("includeSubfolders") !== null;
 
-    const folderId = extractDriveFileId(link);
+    let folderId = extractDriveFileId(link);
     if (!folderId) {
       return {
         error: "That does not look like a Drive folder link.",
@@ -31,12 +31,43 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
     }
 
     const provider = driveProvider();
-    const folder = await provider.getFile(folderId);
+    const account = await prisma.driveAccount.findUnique({ where: { id: "singleton" } });
+    const hubEmail = account?.email ?? "the hub's Google account";
+
+    let folder = await provider.getFile(folderId);
     if (!folder) {
-      const account = await prisma.driveAccount.findUnique({ where: { id: "singleton" } });
       return {
-        error: `The hub's Google account (${account?.email ?? "not connected"}) cannot see that folder.`,
+        error: `The hub's Google account (${hubEmail}) cannot see that folder.`,
         hint: "Share the folder with that address — view access is enough to scan it.",
+      };
+    }
+
+    // "Add shortcut to Drive" makes a separate file that points at the folder.
+    // Its own child list is empty, so scanning it finds nothing and looks like
+    // a permissions problem. Follow it to the real folder instead.
+    if (folder.shortcutTargetId) {
+      const target = await provider.getFile(folder.shortcutTargetId);
+      if (!target) {
+        return {
+          error: `That link is a shortcut, and ${hubEmail} cannot see what it points at.`,
+          hint: "Share the original folder with that address, or copy the original folder's own link.",
+        };
+      }
+      folderId = folder.shortcutTargetId;
+      folder = target;
+    }
+
+    if (folder.mimeType !== "application/vnd.google-apps.folder") {
+      return {
+        error: `That link is a file, not a folder — “${folder.name}”.`,
+        hint: "Use Documents → Add existing to file a single document. Import is for whole folders.",
+      };
+    }
+
+    if (folder.canListChildren === false) {
+      return {
+        error: `${hubEmail} can see “${folder.name}” but is not allowed to list what is inside it.`,
+        hint: "Share the folder itself with that address as a Viewer. Sharing the files individually is not enough — Drive will not enumerate a folder you cannot open.",
       };
     }
 
@@ -48,10 +79,32 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
 
     refreshEverywhere();
     if (result.found === 0) {
+      const { entriesReturned, subfolders, shortcuts } = result.diagnostics;
+
+      // Each of these looks identical from outside and needs a different fix.
+      if (entriesReturned === 0) {
+        return {
+          ok: `Nothing to import: Drive reported “${folder.name}” as empty for ${hubEmail}.`,
+          warnings: [
+            "If you can see files in it yourself, they are shared with you but the *folder* is not shared with the hub account — Drive only lists children of a folder the asking account can open. Share the folder itself with that address as a Viewer, then scan again.",
+          ],
+        };
+      }
+      if (subfolders > 0 && !includeSubfolders) {
+        return {
+          ok: `Nothing to import at the top level of ${folder.name}, but it holds ${subfolders} ${
+            subfolders === 1 ? "subfolder" : "subfolders"
+          }.`,
+          warnings: ["Tick “include subfolders” and scan again."],
+        };
+      }
       return {
-        ok: `Nothing to import from ${folder.name} — no files found${
-          includeSubfolders ? "" : " (subfolders were not searched)"
-        }.`,
+        ok: `Nothing to import from ${folder.name}.`,
+        warnings: [
+          `Drive returned ${entriesReturned} ${entriesReturned === 1 ? "entry" : "entries"}: ${subfolders} ${
+            subfolders === 1 ? "subfolder" : "subfolders"
+          }, ${shortcuts} ${shortcuts === 1 ? "shortcut" : "shortcuts"} and no files. Shortcuts are skipped, because the file they point at is filed from wherever it really lives.`,
+        ],
       };
     }
     return {
