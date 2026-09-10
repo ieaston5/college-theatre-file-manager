@@ -79,7 +79,16 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
 
     refreshEverywhere();
     if (result.found === 0) {
-      const { entriesReturned, subfolders, shortcuts } = result.diagnostics;
+      const { entriesReturned, subfolders, shortcuts, shortcutsUnreadable } = result.diagnostics;
+
+      // A folder of shortcuts whose targets are not shared with the hub. The
+      // shortcut being shared says nothing about the file it points at.
+      if (shortcutsUnreadable > 0 && shortcutsUnreadable === shortcuts) {
+        return {
+          error: `Everything in “${folder.name}” is a shortcut to a file ${hubEmail} cannot open.`,
+          hint: "Sharing a shortcut does not share what it points at. Share the original files (or the folders they live in) with that address, then scan again.",
+        };
+      }
 
       // Each of these looks identical from outside and needs a different fix.
       if (entriesReturned === 0) {
@@ -103,14 +112,27 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
         warnings: [
           `Drive returned ${entriesReturned} ${entriesReturned === 1 ? "entry" : "entries"}: ${subfolders} ${
             subfolders === 1 ? "subfolder" : "subfolders"
-          }, ${shortcuts} ${shortcuts === 1 ? "shortcut" : "shortcuts"} and no files. Shortcuts are skipped, because the file they point at is filed from wherever it really lives.`,
+          }, ${shortcuts} ${shortcuts === 1 ? "shortcut" : "shortcuts"}, and no files.` +
+            (shortcutsUnreadable > 0
+              ? ` ${shortcutsUnreadable} of those shortcuts point at files ${hubEmail} cannot open — share the originals, not the shortcuts.`
+              : ""),
         ],
       };
     }
+    const followed = result.diagnostics.shortcutsFollowed;
+    const unreadable = result.diagnostics.shortcutsUnreadable;
     return {
       ok: `Found ${result.found} ${result.found === 1 ? "file" : "files"} in ${folder.name}${
         result.duplicates > 0 ? `, ${result.duplicates} already on the hub` : ""
-      }.`,
+      }${followed > 0 ? `, following ${followed} ${followed === 1 ? "shortcut" : "shortcuts"} to the real file` : ""}.`,
+      warnings:
+        unreadable > 0
+          ? [
+              `${unreadable} ${unreadable === 1 ? "shortcut points" : "shortcuts point"} at ${
+                unreadable === 1 ? "a file" : "files"
+              } ${hubEmail} cannot open, so ${unreadable === 1 ? "it was" : "they were"} left out. Sharing a shortcut does not share what it points at.`,
+            ]
+          : [],
       documentId: result.batchId,
     };
   } catch (error) {

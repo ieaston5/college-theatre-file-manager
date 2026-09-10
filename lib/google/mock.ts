@@ -38,6 +38,10 @@ type MockFile = {
   sizeBytes?: number;
   blobFile?: string;
   revisions?: number;
+  /** Simulates "Add shortcut to Drive": this file points at another. */
+  shortcutTargetId?: string | null;
+  /** Simulates a folder this account may see but not enumerate. */
+  canListChildren?: boolean;
 };
 
 type MockState = { accountEmail: string; files: Record<string, MockFile> };
@@ -84,6 +88,10 @@ function toInfo(file: MockFile): DriveFileInfo {
     ownerEmail: file.permissions.find((perm) => perm.role === "owner")?.email ?? MOCK_ACCOUNT,
     sizeBytes: file.sizeBytes ?? null,
     appProperties: file.appProperties ?? null,
+    // Simulated shortcuts, so the import path that follows them can be
+    // exercised without a real Drive.
+    shortcutTargetId: file.shortcutTargetId ?? null,
+    canListChildren: file.canListChildren ?? true,
   };
 }
 

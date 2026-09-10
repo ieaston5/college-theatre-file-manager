@@ -131,6 +131,10 @@ export type ScanResult = {
     entriesReturned: number;
     subfolders: number;
     shortcuts: number;
+    /** Shortcuts whose target the hub could read, and therefore imported. */
+    shortcutsFollowed: number;
+    /** Shortcuts whose target is not shared with the hub account. */
+    shortcutsUnreadable: number;
     foldersVisited: number;
   };
 };
@@ -165,6 +169,8 @@ export async function scanDriveFolder(
   let skippedFolders = 0;
   let entriesReturned = 0;
   let shortcuts = 0;
+  let shortcutsFollowed = 0;
+  let shortcutsUnreadable = 0;
   let foldersVisited = 0;
 
   const queue: Array<{ id: string; path: string; depth: number }> = [
@@ -177,8 +183,34 @@ export async function scanDriveFolder(
     foldersVisited += 1;
     entriesReturned += entries.length;
 
-    for (const entry of entries) {
+    for (const listed of entries) {
       if (found >= MAX_FILES) break;
+
+      /**
+       * Resolve shortcuts to what they point at.
+       *
+       * Drive has not allowed a file to have two parents since 2020: adding
+       * somebody else's file to your own folder creates a shortcut instead. So
+       * a folder assembled *for* an import is very often a folder of
+       * shortcuts, and the previous behaviour — skip them, on the theory that
+       * the real file would be scanned from wherever it lives — meant a
+       * carefully prepared folder scanned as empty.
+       */
+      let entry = listed;
+      if (listed.mimeType === SHORTCUT_MIME) {
+        shortcuts += 1;
+        const targetId = listed.shortcutTargetId;
+        const target = targetId ? await provider.getFile(targetId) : null;
+        if (!target) {
+          // The shortcut is readable but its target is not shared with the
+          // hub, which is worth saying rather than skipping in silence.
+          shortcutsUnreadable += 1;
+          continue;
+        }
+        shortcutsFollowed += 1;
+        // Keep the target's own name and id: that is the file being filed.
+        entry = target;
+      }
 
       if (entry.mimeType === FOLDER_MIME) {
         skippedFolders += 1;
@@ -189,11 +221,6 @@ export async function scanDriveFolder(
             depth: folder.depth + 1,
           });
         }
-        continue;
-      }
-      // Shortcuts point at a file that will be scanned on its own.
-      if (entry.mimeType === SHORTCUT_MIME) {
-        shortcuts += 1;
         continue;
       }
 
@@ -250,6 +277,8 @@ export async function scanDriveFolder(
       skippedFolders,
       entriesReturned,
       shortcuts,
+      shortcutsFollowed,
+      shortcutsUnreadable,
       foldersVisited,
     },
   });
@@ -259,7 +288,14 @@ export async function scanDriveFolder(
     found,
     duplicates,
     skippedFolders,
-    diagnostics: { entriesReturned, subfolders: skippedFolders, shortcuts, foldersVisited },
+    diagnostics: {
+      entriesReturned,
+      subfolders: skippedFolders,
+      shortcuts,
+      shortcutsFollowed,
+      shortcutsUnreadable,
+      foldersVisited,
+    },
   };
 }
 
