@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { getSetupState } from "@/lib/config";
+import { SCOPE_LABELS, getSetupState } from "@/lib/config";
 import { canvaRedirectUri, driveRedirectUri, env, loginRedirectUri } from "@/lib/env";
 import { canvaProvider, canvaReady, getCanvaAccount } from "@/lib/canva";
 import { disconnectCanvaAction } from "@/app/actions/canva";
@@ -96,6 +96,23 @@ export default async function AdminSettingsPage({
           title="Google connection"
           description="One Google account owns every document the hub creates, so nothing is lost when a board member graduates."
         />
+
+        {setup.missingScopes.length > 0 ? (
+          <div className="mb-4 space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+            <Badge tone="amber" icon="warning">
+              Reconnect needed
+            </Badge>
+            <p className="text-amber-900">
+              This version of the hub asks Google for{" "}
+              {setup.missingScopes
+                .map((scope) => SCOPE_LABELS[scope] ?? scope)
+                .join(", ")}
+              , which the current connection was never granted. Press{" "}
+              <strong>Reconnect / switch account</strong> below and approve it, or anything using it
+              will fail with a permissions error.
+            </p>
+          </div>
+        ) : null}
 
         {setup.driveAccountIsSimulated ? (
           <div className="space-y-3 text-sm">

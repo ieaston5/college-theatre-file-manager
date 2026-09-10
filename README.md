@@ -21,8 +21,8 @@ while `ALLOW_DEV_LOGIN=true`). `ieaston@upenn.edu` is seeded as the admin.
 
 ## What it does
 
-**Creating.** A single form: name, type (Doc / Sheet / Slides / **upload a
-file**), category, production, who can see it. From that the hub
+**Creating.** A single form: name, type (Doc / Sheet / Slides / **Form** /
+**upload a file**), category, production, who can see it. From that the hub
 
 - names the file from a rule you control, e.g. `[URINETOWN] Running budget — Budgets & finance`
 - creates it in `Penn Players Hub / Productions / Urinetown / Budgets & finance`

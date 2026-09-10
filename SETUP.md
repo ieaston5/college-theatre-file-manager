@@ -72,7 +72,13 @@ In the [Google Cloud console](https://console.cloud.google.com), signed in as
 
 1. **New project** → name it `Penn Players Hub`.
 2. **APIs & Services → Library** → enable: *Google Drive API*, *Google Docs
-   API*, *Google Sheets API*, *Google Slides API*, *Gmail API*.
+   API*, *Google Sheets API*, *Google Slides API*, *Google Forms API*,
+   *Gmail API*.
+
+   The Forms one is needed because a Google Form is the single file type the
+   Drive API cannot create — a blank form has to come from the Forms API. (A
+   form copied from one of your templates is an ordinary Drive copy and works
+   either way.)
 
    The Gmail one is easy to skip and the failure is confusing: sign-in and
    documents work fine, and then the first welcome email or digest fails with
@@ -635,6 +641,15 @@ connected, which needs the `openid` and `email` scopes. If you are running a
 version of this project from before those were added to `DRIVE_SCOPES`, update
 and connect again — Google will show the consent screen once more, now
 including "See your primary Google Account email address".
+
+**Admin → Google connection says "Reconnect needed".** The hub has been
+upgraded and now asks Google for a scope the existing connection never granted
+— creating Google Forms, for instance. Press *Reconnect / switch account* and
+approve; nothing else is affected, and no files move.
+
+**Creating a form fails with a permissions error, or "Google Forms API has not
+been used in project…".** Enable the *Google Forms API* (2b), then reconnect
+the hub account so the grant includes it.
 
 **"Google did not return a refresh token."** The hub account has already
 granted access. Remove *Penn Players Hub* from

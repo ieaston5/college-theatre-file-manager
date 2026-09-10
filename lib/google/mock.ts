@@ -242,7 +242,11 @@ export class MockDriveProvider implements DriveProvider {
         : null,
     };
     save(state);
-    return toInfo(state.files[id]);
+    const info = toInfo(state.files[id]);
+    // Forms have a separate link for answering; simulate one so the flow that
+    // stores and displays it can be exercised without the Forms API.
+    if (input.docType === "FORM") info.formResponderUrl = `/mock-drive/${id}?respond=1`;
+    return info;
   }
 
   async getFile(fileId: string): Promise<DriveFileInfo | null> {
@@ -275,6 +279,15 @@ export class MockDriveProvider implements DriveProvider {
   async listFolder(folderId: string): Promise<DriveFileInfo[]> {
     return Object.values(load().files)
       .filter((file) => !file.trashed && file.parents.includes(folderId))
+      .map(toInfo);
+  }
+
+  async listSharedFolders(limit = 25): Promise<DriveFileInfo[]> {
+    // The simulation has no notion of another account's Drive, so every folder
+    // counts as visible. Enough to exercise the diagnostic's shape.
+    return Object.values(load().files)
+      .filter((file) => !file.trashed && file.mimeType === "application/vnd.google-apps.folder")
+      .slice(0, limit)
       .map(toInfo);
   }
 

@@ -21,7 +21,12 @@ const FILE_FIELDS =
   // the children belong to the target. Following it is the fix.
   // capabilities.canListChildren: whether this account may enumerate the
   // folder at all — the difference between "empty" and "not allowed to look".
-  "shortcutDetails(targetId,targetMimeType),capabilities(canListChildren,canAddChildren,canEdit)";
+  "shortcutDetails(targetId,targetMimeType),capabilities(canListChildren,canAddChildren,canEdit)," +
+  // ownedByMe / sharedWithMeTime answer the question that matters when a
+  // folder reads as empty: is Drive treating it as *shared with this account*
+  // at all? A folder reachable only by link can be fetched by id but is not in
+  // the account's corpus, so listing its children returns nothing.
+  "ownedByMe,sharedWithMeTime";
 
 function toInfo(file: {
   id?: string | null;
@@ -41,6 +46,8 @@ function toInfo(file: {
     canAddChildren?: boolean | null;
     canEdit?: boolean | null;
   } | null;
+  ownedByMe?: boolean | null;
+  sharedWithMeTime?: string | null;
 }): DriveFileInfo {
   return {
     id: file.id ?? "",
@@ -56,6 +63,8 @@ function toInfo(file: {
     appProperties: file.appProperties ?? null,
     shortcutTargetId: file.shortcutDetails?.targetId ?? null,
     canListChildren: file.capabilities?.canListChildren ?? null,
+    ownedByMe: file.ownedByMe ?? null,
+    sharedWithMeTime: file.sharedWithMeTime ?? null,
   };
 }
 
@@ -161,6 +170,35 @@ export class GoogleDriveProvider implements DriveProvider {
           supportsAllDrives: true,
         });
         file = toInfo(copy.data);
+      } else if (input.docType === "FORM") {
+        /**
+         * Forms are the exception: `drive.files.create` with the form mime
+         * type is rejected, so a blank form has to come from the Forms API,
+         * which always creates it in the account's My Drive root with no
+         * description and no appProperties. The Drive call afterwards is what
+         * files it where the hub wants it and labels it like everything else.
+         */
+        const forms = google.forms({ version: "v1", auth: await this.auth() });
+        const created = await forms.forms.create({
+          requestBody: { info: { title: input.name, documentTitle: input.name } },
+        });
+        const formId = created.data.formId;
+        if (!formId) throw new Error("The Forms API did not return a form id.");
+
+        const moved = await drive.files.update({
+          fileId: formId,
+          addParents: input.parentFolderId ?? undefined,
+          requestBody: {
+            name: input.name,
+            description: input.description ?? undefined,
+            appProperties: input.appProperties,
+          },
+          fields: FILE_FIELDS,
+          supportsAllDrives: true,
+        });
+        file = toInfo(moved.data);
+        // The link people answer on, which is not the edit link.
+        file.formResponderUrl = created.data.responderUri ?? null;
       } else {
         const created = await drive.files.create({
           requestBody: {
@@ -329,6 +367,23 @@ export class GoogleDriveProvider implements DriveProvider {
       return out;
     } catch (error) {
       wrap(error, "Listing the Drive folder");
+    }
+  }
+
+  async listSharedFolders(limit = 25): Promise<DriveFileInfo[]> {
+    const drive = await this.drive();
+    try {
+      const res = await drive.files.list({
+        q: "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        fields: `files(${FILE_FIELDS})`,
+        pageSize: limit,
+        orderBy: "sharedWithMeTime desc",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      return (res.data.files ?? []).map(toInfo);
+    } catch (error) {
+      wrap(error, "Listing the folders shared with the hub");
     }
   }
 

@@ -17,6 +17,20 @@ export type DriveFileInfo = {
   shortcutTargetId?: string | null;
   /** Whether this account may enumerate the folder. null when unknown. */
   canListChildren?: boolean | null;
+  /** Whether the hub's own account owns this. null when unknown. */
+  ownedByMe?: boolean | null;
+  /**
+   * When the file was shared *with* this account. Absent means access came
+   * some other way — usually a link — which is the case where a folder can be
+   * fetched by id but its contents cannot be listed.
+   */
+  sharedWithMeTime?: string | null;
+  /**
+   * Forms only: the link people fill in, as opposed to the edit link. Google
+   * keeps these separate and sharing the edit link by mistake lets responders
+   * change the questions.
+   */
+  formResponderUrl?: string | null;
 };
 
 export type DocHeader = {
@@ -78,6 +92,15 @@ export interface DriveProvider {
   createDocument(input: CreateDocumentInput): Promise<DriveFileInfo>;
   getFile(fileId: string): Promise<DriveFileInfo | null>;
   listFolder(folderId: string): Promise<DriveFileInfo[]>;
+  /**
+   * Folders that have been shared *with* the hub account.
+   *
+   * Diagnostic only: when an import finds nothing, the useful question is
+   * whether Drive considers the folder shared with this account at all. If it
+   * is not in this list, the address it was shared with is not the address the
+   * hub is using — which no amount of re-scanning will reveal.
+   */
+  listSharedFolders(limit?: number): Promise<DriveFileInfo[]>;
   renameFile(fileId: string, name: string): Promise<void>;
   /**
    * Merge hub labels into the file's appProperties.

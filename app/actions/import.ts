@@ -92,10 +92,40 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
 
       // Each of these looks identical from outside and needs a different fix.
       if (entriesReturned === 0) {
+        /**
+         * The folder read as empty. Ask Drive how this account reaches it,
+         * because the answer decides the fix and is invisible in the UI:
+         *
+         *  - owned by the hub, or shared *with* it → the folder really is
+         *    empty as far as this account is concerned;
+         *  - neither → the hub is reaching it by link. A link grants enough to
+         *    fetch the folder by id, which is why the name resolves, but the
+         *    folder is not in the account's corpus, so nothing inside it can
+         *    be listed. Sharing it *to the address* is the fix.
+         */
+        const reachedByLink = folder.ownedByMe === false && !folder.sharedWithMeTime;
+
+        if (reachedByLink) {
+          const visible = await provider.listSharedFolders(10).catch(() => []);
+          return {
+            error: `Drive does not consider “${folder.name}” shared with ${hubEmail} — the hub can only reach it by link, and Drive will not list the contents of a folder reached that way.`,
+            hint:
+              `Open the folder, press Share, and add ${hubEmail} directly as a Viewer. ` +
+              (visible.length > 0
+                ? `Folders currently shared with that address: ${visible
+                    .slice(0, 6)
+                    .map((f) => `“${f.name}”`)
+                    .join(", ")}${visible.length > 6 ? ", …" : ""}.`
+                : `Nothing is currently shared with that address, which suggests the share went to a different one.`),
+          };
+        }
+
         return {
           ok: `Nothing to import: Drive reported “${folder.name}” as empty for ${hubEmail}.`,
           warnings: [
-            "If you can see files in it yourself, they are shared with you but the *folder* is not shared with the hub account — Drive only lists children of a folder the asking account can open. Share the folder itself with that address as a Viewer, then scan again.",
+            folder.ownedByMe
+              ? "The hub's own account owns that folder and Drive says there is nothing in it."
+              : "The folder is shared with the hub account, but Drive lists nothing inside it. If you can see files there yourself, they are most likely shared with you individually rather than through the folder — open the folder while signed in as the hub account to see exactly what it sees.",
           ],
         };
       }

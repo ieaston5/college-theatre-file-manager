@@ -52,6 +52,12 @@ const MODE_COPY: Record<CreationMode, { label: string; icon: string; tint: strin
       tint: DOC_TYPE_META.SLIDES.color,
       blurb: "Pitches, design presentations",
     },
+    FORM: {
+      label: "Google Form",
+      icon: "form",
+      tint: DOC_TYPE_META.FORM.color,
+      blurb: "Auditions, availability, feedback",
+    },
     UPLOAD: {
       label: "Upload a file",
       icon: "upload",

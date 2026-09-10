@@ -62,11 +62,11 @@ export const USER_STATUS_META: Record<UserStatus, { label: string; tone: Tone }>
 
 // --- Document types ---------------------------------------------------------
 
-export const CREATABLE_DOC_TYPES = ["DOC", "SHEET", "SLIDES"] as const;
+export const CREATABLE_DOC_TYPES = ["DOC", "SHEET", "SLIDES", "FORM"] as const;
 export type CreatableDocType = (typeof CREATABLE_DOC_TYPES)[number];
 
 /** What the "What should it be?" picker offers. */
-export const CREATION_MODES = ["DOC", "SHEET", "SLIDES", "UPLOAD", "CANVA"] as const;
+export const CREATION_MODES = ["DOC", "SHEET", "SLIDES", "FORM", "UPLOAD", "CANVA"] as const;
 export type CreationMode = (typeof CREATION_MODES)[number];
 
 export const DOC_TYPES = [
@@ -381,6 +381,11 @@ export const DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/documents",
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/presentations",
+  // Forms are the one Google file type the Drive API cannot create — a blank
+  // one has to come from the Forms API. Copying an existing form is a Drive
+  // operation, so template-based forms would work without this, but creating
+  // one from scratch would not.
+  "https://www.googleapis.com/auth/forms.body",
   // Lets the hub send its own mail — onboarding, private-share notices and the
   // weekly digest — from the hub account rather than through a third party.
   "https://www.googleapis.com/auth/gmail.send",

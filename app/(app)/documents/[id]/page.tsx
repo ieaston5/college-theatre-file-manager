@@ -102,6 +102,18 @@ export default async function DocumentPage({
   const isCanva = Boolean(document.canvaDesignId);
   const canvaStale = canvaMirrorIsStale(document);
 
+  // Forms keep two links. Circulating the edit one by mistake would let
+  // responders rewrite the questions, so the hub shows them separately.
+  const formResponderUrl = (() => {
+    if (document.docType !== "FORM" || !document.metadata) return null;
+    try {
+      const parsed = JSON.parse(document.metadata) as { formResponderUrl?: string };
+      return parsed.formResponderUrl ?? null;
+    } catch {
+      return null;
+    }
+  })();
+
   const companyAudience =
     document.visibility === "COMPANY"
       ? await prisma.productionMember.findMany({
@@ -249,6 +261,19 @@ export default async function DocumentPage({
           >
             <Icon name="canva" className="size-4" />
             Edit in Canva
+          </a>
+        ) : null}
+
+        {formResponderUrl ? (
+          <a
+            href={formResponderUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonClass("secondary")}
+            title="The link to send people. The button above opens the editor, where the questions can be changed."
+          >
+            <Icon name="form" className="size-4" />
+            Open the form to fill in
           </a>
         ) : null}
 

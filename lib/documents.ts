@@ -356,6 +356,20 @@ export async function createDocument(
         driveOwnerEmail: file.ownerEmail ?? null,
         googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
         lastSyncedAt: new Date(),
+        // A form has two links and they must not be confused: the edit link
+        // lets someone change the questions, the responder link is the one to
+        // circulate. Kept in metadata rather than a column, so the same
+        // document row shape serves every type.
+        ...(file.formResponderUrl
+          ? {
+              metadata: JSON.stringify({
+                createdVia: "hub",
+                templateId: template?.id ?? null,
+                driveMode: env.driveMode,
+                formResponderUrl: file.formResponderUrl,
+              }),
+            }
+          : {}),
       },
     });
 
