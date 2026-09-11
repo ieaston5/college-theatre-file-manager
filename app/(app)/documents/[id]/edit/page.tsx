@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getConfig } from "@/lib/config";
+import { getSetupState } from "@/lib/config";
 import { canEditDocument, canViewDocument, getViewerContext } from "@/lib/access";
 import { DocumentEditForm } from "@/components/forms/document-edit-form";
 import { PageHeader } from "@/components/ui";
@@ -18,8 +18,8 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
   if (!document || !canViewDocument(viewer, document)) notFound();
   if (!canEditDocument(viewer, document)) redirect(`/documents/${id}`);
 
-  const [config, categories, productions] = await Promise.all([
-    getConfig(),
+  const [setup, categories, productions] = await Promise.all([
+    getSetupState(),
     prisma.category.findMany({
       where: { OR: [{ archived: false }, { id: document.categoryId }] },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -71,7 +71,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           status: production.status,
           abbreviation: production.abbreviation,
         }))}
-        groupEmail={config.groupEmail}
+        boardCount={setup.boardCount}
       />
     </div>
   );

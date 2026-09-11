@@ -154,11 +154,16 @@ export function extractDriveFileId(input: string): string | null {
   return null;
 }
 
-export function formatBytes(bytes: number | null | undefined): string {
+/**
+ * Accepts bigint because that is what the size columns read back as — a
+ * registered Drive file can be bigger than a 32-bit integer holds.
+ */
+export function formatBytes(bytes: number | bigint | null | undefined): string {
   if (bytes === null || bytes === undefined) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
+  const size = Number(bytes);
+  if (size < 1024) return `${size} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = size / 1024;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024;

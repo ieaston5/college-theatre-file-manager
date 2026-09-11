@@ -341,9 +341,6 @@ export class MockDriveProvider implements DriveProvider {
 
     const desired = new Map<string, "reader" | "writer">();
     desired.set(plan.creatorEmail.toLowerCase(), "writer");
-    if (plan.visibility !== "PRIVATE" && plan.groupEmail) {
-      desired.set(plan.groupEmail.toLowerCase(), plan.groupCanEdit ? "writer" : "reader");
-    }
     for (const extra of plan.extra ?? []) {
       const email = extra.email.toLowerCase();
       if (desired.get(email) === "writer") continue;
@@ -351,7 +348,7 @@ export class MockDriveProvider implements DriveProvider {
     }
 
     const additive = plan.strategy === "additive";
-    const groupEmail = plan.groupEmail?.toLowerCase() ?? null;
+    const retiredGroup = plan.retireGroupEmail?.toLowerCase() ?? null;
     const revoked: string[] = [];
     const kept: MockPermission[] = [];
 
@@ -367,8 +364,9 @@ export class MockDriveProvider implements DriveProvider {
         desired.delete(email);
         continue;
       }
-      // Nobody wants this permission any more.
-      if (additive && email !== groupEmail) {
+      // Nobody wants this permission any more. On a file the hub does not own
+      // that means leaving it alone, except for the old board group.
+      if (additive && email !== retiredGroup) {
         kept.push(perm);
         continue;
       }
@@ -385,8 +383,7 @@ export class MockDriveProvider implements DriveProvider {
 
     for (const [email, role] of desired) {
       const id = newId("perm");
-      const isGroup = email === plan.groupEmail?.toLowerCase();
-      kept.push({ id, email, role, type: isGroup ? "group" : "user" });
+      kept.push({ id, email, role, type: "user" });
       granted.push({ email, level: role === "writer" ? "WRITER" : "READER", permissionId: id });
     }
 

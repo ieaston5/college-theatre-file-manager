@@ -21,14 +21,14 @@ import {
 export function DocumentRegisterForm({
   categories,
   productions,
-  groupEmail,
+  boardCount,
   hubAccountEmail,
   driveMode,
   companyCreatorOnly = false,
 }: {
   categories: FormCategory[];
   productions: FormProduction[];
-  groupEmail: string | null;
+  boardCount: number | null;
   hubAccountEmail: string | null;
   driveMode: "google" | "mock";
   companyCreatorOnly?: boolean;
@@ -142,7 +142,7 @@ export function DocumentRegisterForm({
         <VisibilityPicker
           value={visibility}
           onChange={setVisibility}
-          groupEmail={groupEmail}
+          boardCount={boardCount}
           category={category}
           companyCreatorOnly={companyCreatorOnly}
         />

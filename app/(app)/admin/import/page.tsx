@@ -205,7 +205,9 @@ export default async function AdminImportPage({
                 mimeType: item.mimeType,
                 ownerEmail: item.ownerEmail,
                 folderPath: item.folderPath,
-                sizeBytes: item.sizeBytes,
+                // Narrowed for the client component: a byte count is only
+                // ever displayed, and Number is exact well past any file size.
+                sizeBytes: item.sizeBytes === null ? null : Number(item.sizeBytes),
                 modifiedAt: item.modifiedAt?.toISOString() ?? null,
                 webViewLink: item.webViewLink,
                 guessedCategoryId: item.guessedCategoryId,

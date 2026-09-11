@@ -1,11 +1,9 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
-import { auditGroupAction, sweepSharingAction, type SweepProgress } from "@/app/actions/sharing";
-import { emptyState } from "@/app/actions/shared";
-import { Field, buttonClass, inputClass } from "../ui";
+import { useState, useTransition } from "react";
+import { sweepSharingAction, type SweepProgress } from "@/app/actions/sharing";
+import { buttonClass } from "../ui";
 import { Icon } from "../icons";
-import { FormBanner, SubmitButton } from "./form-bits";
 import { pluralize } from "@/lib/utils";
 
 /**
@@ -111,35 +109,5 @@ export function SharingSweep({
             : "Re-share everything anyway"}
       </button>
     </div>
-  );
-}
-
-/** Paste the Google Group's member list; see both sides of the difference. */
-export function GroupAuditForm() {
-  const [state, formAction] = useActionState(auditGroupAction, emptyState);
-
-  return (
-    <form action={formAction} className="space-y-3">
-      <FormBanner state={state} />
-      <Field
-        label="The group's current members"
-        htmlFor="members"
-        hint="There is no API for a consumer Google Group's membership, so this is a paste job: open the group at groups.google.com → Members, copy the addresses, drop them here."
-      >
-        <textarea
-          id="members"
-          name="members"
-          rows={4}
-          className={`${inputClass} font-mono text-xs`}
-          placeholder={"someone@gmail.com\nsomeone.else@gmail.com"}
-          required
-        />
-      </Field>
-      <div className="flex justify-end">
-        <SubmitButton variant="secondary" icon="shield" pendingLabel="Comparing…">
-          Compare with the hub
-        </SubmitButton>
-      </div>
-    </form>
   );
 }

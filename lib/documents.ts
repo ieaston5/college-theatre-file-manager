@@ -137,11 +137,11 @@ type SharableDocument = Pick<
 >;
 
 /**
- * Every board member who should be able to reach a document, used when the
- * hub shares with people by name instead of with the Google Group. The point
- * of that mode: the hub cannot read a consumer Google Group's membership, so
- * with GROUP sharing "disable this member" leaves their Drive access intact.
- * Naming everybody costs more permissions but makes offboarding real.
+ * Every board member who should be able to reach a document — the member list
+ * is the access list. The hub cannot read a consumer Google Group's
+ * membership, so sharing board documents with the group meant "disable this
+ * member" left their Drive access untouched. Naming everybody costs one Drive
+ * permission per person per file, and in exchange offboarding is real.
  */
 async function boardRecipients(
   boardCanEdit: boolean,
@@ -160,7 +160,6 @@ async function boardRecipients(
 
 async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   const config = await getConfig();
-  const perMember = config.shareMode === "MEMBERS";
 
   // Edit access is the narrower ladder: who can change the file's contents, as
   // opposed to who can see it. Clamped to visibility so it can never exceed it.
@@ -172,9 +171,7 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
     prisma.user.findUnique({ where: { id: doc.creatorId } }),
     prisma.documentShare.findMany({ where: { documentId: doc.id }, include: { user: true } }),
     companyRecipients(doc),
-    doc.visibility === "PRIVATE" || !perMember
-      ? Promise.resolve([])
-      : boardRecipients(boardCanEdit),
+    doc.visibility === "PRIVATE" ? Promise.resolve([]) : boardRecipients(boardCanEdit),
   ]);
 
   const extra = shares.map((share) => ({
@@ -199,12 +196,10 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   return {
     visibility: doc.visibility as Visibility,
     creatorEmail: creator?.email ?? "",
-    // In per-member mode the group is deliberately left out of the plan, so a
-    // reconciling pass removes it from files that used to be shared with it.
-    groupEmail: perMember ? null : config.groupEmail,
-    // Whether the group gets write on *this* file now comes from the document,
-    // not from an org-wide toggle.
-    groupCanEdit: boardCanEdit,
+    // Never granted — passed so a pass over a file left over from group
+    // sharing takes that permission off it. Harmless on a file that never had
+    // one.
+    retireGroupEmail: config.groupEmail,
     extra,
     // Anything the hub made in its own Drive — created, uploaded or mirrored
     // from Canva — is reconciled, so dropping a document's visibility actually
@@ -379,12 +374,6 @@ export async function createDocument(
     const sharing = await syncSharing(updated);
     warnings.push(...sharing.warnings);
 
-    if (input.visibility === "BOARD" && !config.groupEmail) {
-      warnings.push(
-        "No board Google Group is configured yet, so this document was not shared in Drive. An admin can set it in Admin → Settings.",
-      );
-    }
-
     await recordAudit({
       actor,
       action: "document.create",
@@ -534,13 +523,6 @@ export async function recordUploadedDocument(
 
   const sharing = await syncSharing(document);
   warnings.push(...sharing.warnings);
-
-  const config = await getConfig();
-  if (input.visibility === "BOARD" && !config.groupEmail) {
-    warnings.push(
-      "No board Google Group is configured yet, so this file was not shared in Drive. An admin can set it in Admin → Settings.",
-    );
-  }
 
   await recordAudit({
     actor,
@@ -799,12 +781,6 @@ export async function mirrorCanvaDesign(
     // it and tell the person the copy is missing.
     warnings.push(
       `The design is on the hub, but the first export failed: ${(error as Error).message}`,
-    );
-  }
-
-  if (input.visibility === "BOARD" && !config.groupEmail) {
-    warnings.push(
-      "No board Google Group is configured yet, so the exported copy was not shared in Drive.",
     );
   }
 
