@@ -14,6 +14,8 @@ export type TriageItem = {
   name: string;
   mimeType: string | null;
   ownerEmail: string | null;
+  /** The shared drive it came from; Drive reports no owner for those. */
+  driveName: string | null;
   folderPath: string | null;
   sizeBytes: number | null;
   modifiedAt: string | null;
@@ -268,7 +270,12 @@ export function ImportTriage({
                   </span>
                   <span className="mt-0.5 block truncate text-xs text-ink-500">
                     {item.folderPath ? `${item.folderPath} · ` : ""}
-                    {item.ownerEmail ?? "unknown owner"}
+                    {/* A shared drive owns its files, so there is no owner to
+                        show and no handover to arrange — naming the drive is
+                        both more accurate and more useful than "unknown". */}
+                    {item.driveName
+                      ? `${item.driveName} (shared drive)`
+                      : (item.ownerEmail ?? "unknown owner")}
                     {foreign ? " (not the hub's account)" : ""}
                     {item.sizeBytes ? ` · ${formatBytes(item.sizeBytes)}` : ""}
                     {item.modifiedAt ? ` · changed ${relativeTime(item.modifiedAt)}` : ""}

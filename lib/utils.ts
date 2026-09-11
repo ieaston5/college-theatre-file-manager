@@ -136,15 +136,27 @@ export function driveViewLink(fileId: string, docType: string): string {
   }
 }
 
-/** Pull a file id out of any Drive/Docs URL a member might paste. */
+/**
+ * Pull a file id out of any Drive/Docs URL a member might paste.
+ *
+ * Shared drives need two allowances. Their ids are shorter than a file's —
+ * nineteen characters, always beginning "0A", against a file's thirty-odd —
+ * so a flat twenty-character minimum rejects every shared drive link there
+ * is; and Drive addresses them under several paths depending on where the
+ * link was copied from. Inside a URL a long path segment is unambiguous
+ * enough that the shorter minimum costs nothing.
+ */
 export function extractDriveFileId(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
   if (/^[a-zA-Z0-9_-]{20,}$/.test(trimmed)) return trimmed;
+  // A bare shared drive id, which is too short to pass the test above.
+  if (/^0A[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
   const patterns = [
     /\/d\/([a-zA-Z0-9_-]{20,})/,
-    /\/folders\/([a-zA-Z0-9_-]{20,})/,
-    /[?&]id=([a-zA-Z0-9_-]{20,})/,
+    /\/folders\/([a-zA-Z0-9_-]{15,})/,
+    /\/(?:shared-drives|team_drives|drives)\/([a-zA-Z0-9_-]{15,})/,
+    /[?&]id=([a-zA-Z0-9_-]{15,})/,
     /\/forms\/d\/e\/([a-zA-Z0-9_-]{20,})/,
   ];
   for (const pattern of patterns) {

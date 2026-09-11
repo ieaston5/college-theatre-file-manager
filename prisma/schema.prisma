@@ -188,6 +188,12 @@ model Document {
   webViewLink       String?
   driveFolderId     String?
   driveOwnerEmail   String?
+  /// Set when the file lives in a shared drive rather than somebody's My
+  /// Drive. Shared drive files are owned by the drive — and therefore by the
+  /// club — so they never appear on the ownership chase-list, and Drive
+  /// reports no owner for them at all.
+  driveId           String?
+  driveName         String?
   /// Bytes, for uploaded and mirrored files.
   sizeBytes         Int?
   /// The name of the file as the uploader had it on their machine.
@@ -443,6 +449,11 @@ model ImportItem {
   name         String
   mimeType     String?
   ownerEmail   String?
+  /// The shared drive this file came out of, when it came out of one. Drive
+  /// reports no owner for those files, so this is what the triage list shows
+  /// in place of an owner.
+  driveId      String?
+  driveName    String?
   webViewLink  String?
   folderPath   String?
   sizeBytes    Int?

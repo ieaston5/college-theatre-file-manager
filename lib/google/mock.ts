@@ -7,6 +7,7 @@ import {
   type CreateDocumentInput,
   type DriveFileInfo,
   type DriveProvider,
+  type SharedDriveInfo,
   type SharingPlan,
   type SharingResult,
 } from "./types";
@@ -42,6 +43,13 @@ type MockFile = {
   shortcutTargetId?: string | null;
   /** Simulates a folder this account may see but not enumerate. */
   canListChildren?: boolean;
+  /**
+   * The shared drive this file lives in, if any. A drive's own root is a
+   * folder whose `driveId` is its own id — which is exactly how Drive
+   * addresses one — so no separate registry is needed and everything below
+   * the root simply inherits the value from its parent.
+   */
+  driveId?: string | null;
 };
 
 type MockState = { accountEmail: string; files: Record<string, MockFile> };
@@ -76,6 +84,7 @@ function newId(prefix: string) {
 }
 
 function toInfo(file: MockFile): DriveFileInfo {
+  const inSharedDrive = Boolean(file.driveId);
   return {
     id: file.id,
     name: file.name,
@@ -85,14 +94,60 @@ function toInfo(file: MockFile): DriveFileInfo {
     modifiedTime: file.modifiedTime,
     parents: file.parents,
     trashed: file.trashed,
-    ownerEmail: file.permissions.find((perm) => perm.role === "owner")?.email ?? MOCK_ACCOUNT,
+    // Nothing in a shared drive has an owner — the drive owns it — and the
+    // simulation has to say so, because "no owner" is what the hub reads to
+    // decide a file needs no ownership handover.
+    ownerEmail: inSharedDrive
+      ? null
+      : (file.permissions.find((perm) => perm.role === "owner")?.email ?? MOCK_ACCOUNT),
     sizeBytes: file.sizeBytes ?? null,
     appProperties: file.appProperties ?? null,
     // Simulated shortcuts, so the import path that follows them can be
     // exercised without a real Drive.
     shortcutTargetId: file.shortcutTargetId ?? null,
     canListChildren: file.canListChildren ?? true,
+    driveId: file.driveId ?? null,
+    // Likewise: a shared drive item is neither owned by the account nor
+    // "shared with" it, which is the combination the hub must not mistake for
+    // a link-only share.
+    ownedByMe: inSharedDrive ? false : true,
+    sharedWithMeTime: null,
   };
+}
+
+/** The shared drive a new child of `parentId` belongs to, if any. */
+function driveIdOfParent(state: MockState, parentId?: string | null): string | null {
+  if (!parentId) return null;
+  return state.files[parentId]?.driveId ?? null;
+}
+
+/**
+ * Create (or find) a simulated shared drive, so the import can be tried
+ * against one without a real Google Workspace.
+ */
+export function ensureMockSharedDrive(name: string): string {
+  const state = load();
+  const existing = Object.values(state.files).find(
+    (file) => file.driveId === file.id && file.name === name && !file.trashed,
+  );
+  if (existing) return existing.id;
+
+  const id = newId("drv");
+  const now = new Date().toISOString();
+  state.files[id] = {
+    id,
+    name,
+    mimeType: "application/vnd.google-apps.folder",
+    parents: [],
+    createdTime: now,
+    modifiedTime: now,
+    trashed: false,
+    // A shared drive has members, not an owner.
+    permissions: [{ id: newId("perm"), email: MOCK_ACCOUNT, role: "writer", type: "user" }],
+    driveId: id,
+  };
+  save(state);
+  return id;
 }
 
 /** Used by the /mock-drive viewer page. */
@@ -152,6 +207,7 @@ export function writeMockUpload(input: {
     blobFile,
     revisions: (existing?.revisions ?? 0) + 1,
     headerPreview: existing?.headerPreview ?? null,
+    driveId: existing?.driveId ?? driveIdOfParent(state, input.parentFolderId),
   };
   save(state);
   return toInfo(state.files[id]);
@@ -191,7 +247,9 @@ export class MockDriveProvider implements DriveProvider {
         !file.trashed &&
         file.mimeType === "application/vnd.google-apps.folder" &&
         file.name === name &&
-        (parentId ? file.parents.includes(parentId) : file.parents.length === 0),
+        // A shared drive's root is parentless too, and must never be returned
+        // as "the folder called X at the top of My Drive".
+        (parentId ? file.parents.includes(parentId) : file.parents.length === 0 && !file.driveId),
     );
     if (existing) return existing.id;
 
@@ -206,6 +264,7 @@ export class MockDriveProvider implements DriveProvider {
       modifiedTime: now,
       trashed: false,
       permissions: [{ id: newId("perm"), email: MOCK_ACCOUNT, role: "owner", type: "user" }],
+      driveId: driveIdOfParent(state, parentId),
     };
     save(state);
     return id;
@@ -228,6 +287,7 @@ export class MockDriveProvider implements DriveProvider {
       modifiedTime: now,
       trashed: false,
       permissions: [{ id: newId("perm"), email: MOCK_ACCOUNT, role: "owner", type: "user" }],
+      driveId: driveIdOfParent(state, input.parentFolderId),
       fromTemplate: input.templateFileId ?? null,
       headerPreview: header
         ? [
@@ -257,7 +317,7 @@ export class MockDriveProvider implements DriveProvider {
     // Ids the hub did not mint are treated as pre-existing Drive files that
     // somebody shared with the hub account, so "add existing" and templates
     // can be exercised without a real Google connection.
-    if (/^(fld|doc|perm|upl)_/.test(fileId)) return null;
+    if (/^(fld|doc|perm|upl|drv)_/.test(fileId)) return null;
 
     const now = new Date().toISOString();
     state.files[fileId] = {
@@ -284,11 +344,29 @@ export class MockDriveProvider implements DriveProvider {
 
   async listSharedFolders(limit = 25): Promise<DriveFileInfo[]> {
     // The simulation has no notion of another account's Drive, so every folder
-    // counts as visible. Enough to exercise the diagnostic's shape.
+    // counts as visible. Enough to exercise the diagnostic's shape. Shared
+    // drives are excluded, as they are in Drive: they are listed separately.
     return Object.values(load().files)
-      .filter((file) => !file.trashed && file.mimeType === "application/vnd.google-apps.folder")
+      .filter(
+        (file) =>
+          !file.trashed &&
+          file.mimeType === "application/vnd.google-apps.folder" &&
+          !file.driveId,
+      )
       .slice(0, limit)
       .map(toInfo);
+  }
+
+  async listSharedDrives(limit = 50): Promise<SharedDriveInfo[]> {
+    return Object.values(load().files)
+      .filter((file) => !file.trashed && file.driveId === file.id)
+      .slice(0, limit)
+      .map((file) => ({
+        id: file.id,
+        name: file.name,
+        canListChildren: file.canListChildren ?? true,
+        createdTime: file.createdTime,
+      }));
   }
 
   async renameFile(fileId: string, name: string): Promise<void> {
