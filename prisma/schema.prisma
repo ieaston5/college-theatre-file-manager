@@ -208,8 +208,12 @@ model Document {
   webViewLink       String?
   driveFolderId     String?
   driveOwnerEmail   String?
-  /// Bytes, for uploaded and mirrored files.
-  sizeBytes         Int?
+  /// Bytes, for uploaded, imported and mirrored files.
+  ///
+  /// BigInt rather than Int: uploads through the hub are capped at 100 MB,
+  /// but a registered or imported file is whatever Drive already holds, and
+  /// a rehearsal video clears the 2 GB ceiling of a 32-bit integer easily.
+  sizeBytes         BigInt?
   /// The name of the file as the uploader had it on their machine.
   originalFileName  String?
   mimeType          String?
@@ -465,7 +469,9 @@ model ImportItem {
   ownerEmail   String?
   webViewLink  String?
   folderPath   String?
-  sizeBytes    Int?
+  /// BigInt for the same reason as Document.sizeBytes: this is Drive's number
+  /// for a file nobody vetted, and one oversized file must not fail the scan.
+  sizeBytes    BigInt?
   modifiedAt   DateTime?
 
   guessedCategoryId   String?
