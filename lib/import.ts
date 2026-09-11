@@ -147,6 +147,26 @@ export async function scanDriveFolder(
   options: { folderId: string; folderName?: string | null; includeSubfolders: boolean },
 ): Promise<ScanResult> {
   const provider = driveProvider();
+
+  /**
+   * Never write simulated files into a real database.
+   *
+   * This is here because it happened: a scan run against the simulated Drive,
+   * with DATABASE_URL pointed at the club's deployed Postgres, filed 174
+   * invented files — rehearsal reports for a show they had never staged —
+   * into their import queue. They were indistinguishable from real findings
+   * until you clicked one and Google returned 404.
+   *
+   * The simulation exists for a laptop with a laptop's database. Anything
+   * else is a mistake worth refusing rather than explaining afterwards.
+   */
+  if (provider.mode === "mock" && !(process.env.DATABASE_URL ?? "").startsWith("file:")) {
+    throw new Error(
+      "Refusing to scan: the Drive is simulated but the database is not local, " +
+        "so this would file invented files into a real hub. Point DATABASE_URL at a local " +
+        "database, or set DRIVE_MODE=google.",
+    );
+  }
   const [categories, productions] = await Promise.all([
     prisma.category.findMany({
       where: { archived: false },
