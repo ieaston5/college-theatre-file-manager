@@ -470,18 +470,14 @@ export class GoogleDriveProvider implements DriveProvider {
     const revoked: string[] = [];
     const warnings: string[] = [];
 
-    const desired = new Map<string, { level: "READER" | "WRITER"; type: "user" | "group" }>();
-    desired.set(plan.creatorEmail.toLowerCase(), { level: "WRITER", type: "user" });
-    if (plan.visibility !== "PRIVATE" && plan.groupEmail) {
-      desired.set(plan.groupEmail.toLowerCase(), {
-        level: plan.groupCanEdit ? "WRITER" : "READER",
-        type: "group",
-      });
-    }
+    // Everybody the file should reach is named individually — there is no
+    // group permission to grant any more.
+    const desired = new Map<string, { level: "READER" | "WRITER" }>();
+    desired.set(plan.creatorEmail.toLowerCase(), { level: "WRITER" });
     for (const extra of plan.extra ?? []) {
       const email = extra.email.toLowerCase();
       if (desired.get(email)?.level === "WRITER") continue;
-      desired.set(email, { level: extra.level, type: "user" });
+      desired.set(email, { level: extra.level });
     }
 
     let existing: Array<{
@@ -503,7 +499,7 @@ export class GoogleDriveProvider implements DriveProvider {
     }
 
     const additive = plan.strategy === "additive";
-    const groupEmail = plan.groupEmail?.toLowerCase() ?? null;
+    const retiredGroup = plan.retireGroupEmail?.toLowerCase() ?? null;
 
     // 1. Reconcile what is already on the file.
     for (const perm of existing) {
@@ -538,9 +534,11 @@ export class GoogleDriveProvider implements DriveProvider {
         continue;
       }
 
-      // On a file the hub does not own, only ever pull the board group back.
+      // On a file the hub does not own, only ever pull the old board group
+      // back — its members are named on the file individually now, and leaving
+      // it in place would be access no member list can take away.
       const shouldRevoke = additive
-        ? Boolean(email && groupEmail && email === groupEmail && !wanted)
+        ? Boolean(email && retiredGroup && email === retiredGroup)
         : isLinkShare || !wanted || !roleMatches;
       if (!shouldRevoke) continue;
 
@@ -571,7 +569,7 @@ export class GoogleDriveProvider implements DriveProvider {
             const res = await drive.permissions.create({
               fileId,
               requestBody: {
-                type: spec.type,
+                type: "user",
                 role: spec.level === "WRITER" ? "writer" : "reader",
                 emailAddress: email,
               },

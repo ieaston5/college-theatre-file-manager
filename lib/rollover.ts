@@ -191,7 +191,7 @@ export async function runRollover(
 
   // Disabling board members changes who Drive should let in, so mark
   // everything stale rather than re-sharing hundreds of files inline.
-  if (disabledMembers.length > 0 && config.shareMode === "MEMBERS") {
+  if (disabledMembers.length > 0) {
     await prisma.orgConfig.update({
       where: { id: "singleton" },
       data: { sharingSweepStartedAt: new Date() },
@@ -200,12 +200,6 @@ export async function runRollover(
       `${disabledMembers.length} ${
         disabledMembers.length === 1 ? "person was" : "people were"
       } disabled. Run the sweep in Admin → Sharing to take their Drive access away.`,
-    );
-  } else if (disabledMembers.length > 0) {
-    warnings.push(
-      `${disabledMembers.length} ${
-        disabledMembers.length === 1 ? "person was" : "people were"
-      } disabled on the hub, but group sharing means they can still open board documents in Drive if they are still in the Google Group. Remove them there too.`,
     );
   }
 

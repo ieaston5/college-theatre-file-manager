@@ -21,7 +21,7 @@ export function DocumentEditForm({
   document,
   categories,
   productions,
-  groupEmail,
+  boardCount,
   companyCreatorOnly = false,
 }: {
   document: {
@@ -38,7 +38,7 @@ export function DocumentEditForm({
   };
   categories: FormCategory[];
   productions: FormProduction[];
-  groupEmail: string | null;
+  boardCount: number | null;
   companyCreatorOnly?: boolean;
 }) {
   const [state, formAction] = useActionState(updateDocumentAction, emptyState);
@@ -96,7 +96,7 @@ export function DocumentEditForm({
         <VisibilityPicker
           value={visibility}
           onChange={setVisibility}
-          groupEmail={groupEmail}
+          boardCount={boardCount}
           category={category}
           companyCreatorOnly={companyCreatorOnly}
         />

@@ -628,10 +628,10 @@ async function main() {
       id: "singleton",
       orgName: "Penn Players",
       currentSeason: "Fall 2026",
-      // Placeholder so the board/private distinction is visible straight away.
-      // Change it in Admin → Settings before connecting a real Google account.
+      // The address the board is emailed at, not how access works — board
+      // documents are shared with each member by name. Change it in
+      // Admin → Settings before connecting a real Google account.
       groupEmail: "pennplayers-board@googlegroups.com",
-      groupCanEdit: true,
       namingTemplate: "[{production}] {title} — {category}",
       driveRootName: "Penn Players Hub",
       stampDocHeader: true,

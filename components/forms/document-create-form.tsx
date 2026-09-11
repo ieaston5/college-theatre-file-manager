@@ -78,7 +78,7 @@ export function DocumentCreateForm({
   templates,
   namingTemplate,
   currentSeason,
-  groupEmail,
+  boardCount,
   driveMode,
   canvaMode,
   canvaReady,
@@ -92,7 +92,7 @@ export function DocumentCreateForm({
   templates: FormTemplate[];
   namingTemplate: string;
   currentSeason: string | null;
-  groupEmail: string | null;
+  boardCount: number | null;
   driveMode: "google" | "mock";
   canvaMode: "canva" | "mock" | "off";
   canvaReady: boolean;
@@ -533,7 +533,7 @@ export function DocumentCreateForm({
         <VisibilityPicker
           value={visibility}
           onChange={setVisibility}
-          groupEmail={groupEmail}
+          boardCount={boardCount}
           category={category}
           companyCreatorOnly={companyCreatorOnly}
         />
