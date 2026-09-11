@@ -233,7 +233,7 @@ export async function runRollover(
   // Either way the board is smaller than Drive thinks it is, so mark
   // everything stale rather than re-sharing hundreds of files inline.
   const retired = disabledMembers.length + steppedDownMembers.length;
-  if (retired > 0 && config.shareMode === "MEMBERS") {
+  if (retired > 0) {
     await prisma.orgConfig.update({
       where: { id: "singleton" },
       data: { sharingSweepStartedAt: new Date() },
@@ -242,12 +242,6 @@ export async function runRollover(
       `${retired} ${
         retired === 1 ? "person is" : "people are"
       } off the board. Run the sweep in Admin → Sharing to take their Drive access to board documents away.`,
-    );
-  } else if (retired > 0) {
-    warnings.push(
-      `${retired} ${
-        retired === 1 ? "person is" : "people are"
-      } off the board on the hub, but group sharing means they can still open board documents in Drive if they are still in the Google Group. Remove them there too.`,
     );
   }
 

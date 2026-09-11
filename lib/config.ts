@@ -2,7 +2,7 @@ import { cache } from "react";
 import type { OrgConfig } from "@prisma/client";
 import { prisma } from "./db";
 import { env } from "./env";
-import { DRIVE_SCOPES } from "./constants";
+import { BOARD_ROLES, DRIVE_SCOPES } from "./constants";
 
 /**
  * The single OrgConfig row, created on demand.
@@ -49,11 +49,14 @@ export const SCOPE_LABELS: Record<string, string> = {
 
 /** Everything a page needs to decide whether to nag about setup. */
 export const getSetupState = cache(async function getSetupState() {
-  const [config, account, categoryCount, memberCount] = await Promise.all([
+  const [config, account, categoryCount, memberCount, boardCount] = await Promise.all([
     getConfig(),
     getDriveAccount(),
     prisma.category.count({ where: { archived: false } }),
     prisma.user.count({ where: { status: { not: "DISABLED" } } }),
+    prisma.user.count({
+      where: { role: { in: [...BOARD_ROLES] }, status: { not: "DISABLED" } },
+    }),
   ]);
 
   /**
@@ -86,8 +89,13 @@ export const getSetupState = cache(async function getSetupState() {
      * upgraded needs to know to press Reconnect, so say so up front.
      */
     missingScopes: missingDriveScopes(account?.scope ?? null),
-    groupConfigured: Boolean(config.groupEmail),
     categoryCount,
     memberCount,
+    /**
+     * Everybody who gets a named Drive permission on a board document. Shown
+     * where somebody is about to choose Board visibility, because it is the
+     * honest answer to "who will be able to open this?".
+     */
+    boardCount,
   };
 });

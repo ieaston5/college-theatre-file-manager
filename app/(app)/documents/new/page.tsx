@@ -130,7 +130,7 @@ export default async function NewDocumentPage({
           }))}
           namingTemplate={setup.config.namingTemplate}
           currentSeason={setup.config.currentSeason}
-          groupEmail={setup.config.groupEmail}
+          boardCount={setup.boardCount}
           driveMode={env.driveMode}
           companyCreatorOnly={companyCreatorOnly}
           canvaMode={env.canvaMode}

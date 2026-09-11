@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getConfig } from "@/lib/config";
+import { getSetupState } from "@/lib/config";
 import {
   canEditDocument,
   canViewDocument,
@@ -34,8 +34,8 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
   const allowedCategoryIds = creatableCategoryIds(viewer);
   const allowedProductionIds = creatableProductionIds(viewer);
 
-  const [config, categories, productions] = await Promise.all([
-    getConfig(),
+  const [setup, categories, productions] = await Promise.all([
+    getSetupState(),
     prisma.category.findMany({
       where: {
         OR: [
@@ -101,9 +101,9 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           status: production.status,
           abbreviation: production.abbreviation,
         }))}
-        groupEmail={config.groupEmail}
-        namingTemplate={config.namingTemplate}
-        currentSeason={config.currentSeason}
+        boardCount={setup.boardCount}
+        namingTemplate={setup.config.namingTemplate}
+        currentSeason={setup.config.currentSeason}
         companyCreatorOnly={companyCreatorOnly}
       />
     </div>

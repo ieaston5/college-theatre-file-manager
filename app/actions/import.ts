@@ -129,8 +129,32 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
     });
 
     refreshEverywhere();
+
+    // Files the walk reached but could not record. Named, because a scan that
+    // quietly finds 380 of 400 files looks complete.
+    const failures = result.failures;
+    const failureWarning =
+      failures.length > 0
+        ? `${failures.length} ${
+            failures.length === 1 ? "file was" : "files were"
+          } found in Drive but could not be added to this scan, so ${
+            failures.length === 1 ? "it is" : "they are"
+          } not in it: ${failures.slice(0, 5).join("; ")}${
+            failures.length > 5 ? `; and ${failures.length - 5} more` : ""
+          }. Scan the folder again once the reason is dealt with — files already added are not duplicated.`
+        : null;
+
     if (result.found === 0) {
       const { entriesReturned, subfolders, shortcuts, shortcutsUnreadable } = result.diagnostics;
+
+      // Everything the walk reached failed, so the folder itself is fine and
+      // the per-file reasons are the whole story.
+      if (failureWarning) {
+        return {
+          error: `Nothing could be added from “${folder.name}” — every file the hub reached failed to record.`,
+          warnings: [failureWarning],
+        };
+      }
 
       // A folder of shortcuts whose targets are not shared with the hub. The
       // shortcut being shared says nothing about the file it points at.
@@ -205,6 +229,7 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
     const notLookedIn = result.diagnostics.notLookedIn;
 
     const warnings: string[] = [];
+    if (failureWarning) warnings.push(failureWarning);
     if (unreadable > 0) {
       warnings.push(
         `${unreadable} ${unreadable === 1 ? "shortcut points" : "shortcuts point"} at ${

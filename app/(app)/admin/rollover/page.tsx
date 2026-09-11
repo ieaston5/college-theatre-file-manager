@@ -89,8 +89,9 @@ export default async function AdminRolloverPage() {
           </li>
           <li className="flex gap-2">
             <span className="text-ink-400">·</span>
-            With group sharing it cannot remove anybody from the Google Group. Switch to per-member
-            sharing and taking somebody off the board takes their Drive access with it.
+            It does not take anybody's Drive access away on the spot. Board documents carry a
+            permission per person, so coming off the board marks them all for re-sharing — run the
+            sweep in Admin → Sharing to finish the job.
           </li>
         </ul>
       </Card>

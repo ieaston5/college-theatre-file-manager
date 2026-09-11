@@ -380,9 +380,7 @@ export default async function AdminSettingsPage({
           boardCount={boardMemberCount}
           config={{
             orgName: setup.config.orgName,
-            shareMode: setup.config.shareMode,
             groupEmail: setup.config.groupEmail,
-            groupCanEdit: setup.config.groupCanEdit,
             namingTemplate: setup.config.namingTemplate,
             driveRootName: setup.config.driveRootName,
             currentSeason: setup.config.currentSeason,

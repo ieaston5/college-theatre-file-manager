@@ -25,6 +25,8 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
 const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 const MAX_DEPTH = 4;
 const MAX_FILES = 400;
+/** How many per-file failures the activity log keeps verbatim. */
+const MAX_LOGGED_FAILURES = 50;
 
 function words(value: string): string[] {
   return value
@@ -120,6 +122,16 @@ export type ScanResult = {
   duplicates: number;
   skippedFolders: number;
   /**
+   * Files the walk reached but could not record, as `name: reason`.
+   *
+   * One unrecordable file used to end the scan: a file whose size overflowed
+   * the column threw out of the loop, and a folder of several hundred files
+   * produced a batch nobody could use. A scan that skips one file and says
+   * which is worth far more than a scan that stops, so failures are collected
+   * and reported rather than thrown.
+   */
+  failures: string[];
+  /**
    * What Drive actually returned, so "nothing to import" can say why.
    *
    * A scan that finds nothing has several quite different causes — an empty
@@ -195,6 +207,7 @@ export async function scanDriveFolder(
   let shortcutsUnreadable = 0;
   let foldersVisited = 0;
   const tooDeep: string[] = [];
+  const failures: string[] = [];
 
   const queue: Array<{ id: string; path: string; depth: number }> = [
     { id: options.folderId, path: options.folderName ?? "", depth: 0 },
@@ -251,38 +264,52 @@ export async function scanDriveFolder(
         continue;
       }
 
-      const alreadyOnHub = await prisma.document.findUnique({
-        where: { googleFileId: entry.id },
-        select: { id: true },
-      });
+      /**
+       * One file per failure, never the batch.
+       *
+       * Everything in here can fail for reasons particular to a single file —
+       * a size Postgres will not take in an Int, a name the database rejects,
+       * a transient read — and none of them say anything about the hundreds of
+       * files after it. So the file is named, the reason kept, and the walk
+       * carries on.
+       */
+      try {
+        const alreadyOnHub = await prisma.document.findUnique({
+          where: { googleFileId: entry.id },
+          select: { id: true },
+        });
 
-      const guess = alreadyOnHub
-        ? { confidence: 0 }
-        : guessPlacement(entry.name, folder.path, categories, productions);
+        const guess = alreadyOnHub
+          ? { confidence: 0 }
+          : guessPlacement(entry.name, folder.path, categories, productions);
 
-      await prisma.importItem.upsert({
-        where: { batchId_googleFileId: { batchId: batch.id, googleFileId: entry.id } },
-        create: {
-          batchId: batch.id,
-          googleFileId: entry.id,
-          name: entry.name,
-          mimeType: entry.mimeType,
-          ownerEmail: entry.ownerEmail ?? null,
-          webViewLink: entry.webViewLink || driveViewLink(entry.id, docTypeFromMime(entry.mimeType)),
-          folderPath: folder.path || null,
-          sizeBytes: entry.sizeBytes ?? null,
-          modifiedAt: entry.modifiedTime ? new Date(entry.modifiedTime) : null,
-          guessedCategoryId: guess.categoryId ?? null,
-          guessedProductionId: guess.productionId ?? null,
-          confidence: guess.confidence,
-          decision: alreadyOnHub ? "DUPLICATE" : "PENDING",
-          documentId: alreadyOnHub?.id ?? null,
-        },
-        update: {},
-      });
+        await prisma.importItem.upsert({
+          where: { batchId_googleFileId: { batchId: batch.id, googleFileId: entry.id } },
+          create: {
+            batchId: batch.id,
+            googleFileId: entry.id,
+            name: entry.name,
+            mimeType: entry.mimeType,
+            ownerEmail: entry.ownerEmail ?? null,
+            webViewLink:
+              entry.webViewLink || driveViewLink(entry.id, docTypeFromMime(entry.mimeType)),
+            folderPath: folder.path || null,
+            sizeBytes: entry.sizeBytes ?? null,
+            modifiedAt: entry.modifiedTime ? new Date(entry.modifiedTime) : null,
+            guessedCategoryId: guess.categoryId ?? null,
+            guessedProductionId: guess.productionId ?? null,
+            confidence: guess.confidence,
+            decision: alreadyOnHub ? "DUPLICATE" : "PENDING",
+            documentId: alreadyOnHub?.id ?? null,
+          },
+          update: {},
+        });
 
-      found += 1;
-      if (alreadyOnHub) duplicates += 1;
+        found += 1;
+        if (alreadyOnHub) duplicates += 1;
+      } catch (error) {
+        failures.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
@@ -296,7 +323,9 @@ export async function scanDriveFolder(
     action: "import.scan",
     targetType: "ImportBatch",
     targetId: batch.id,
-    summary: `Scanned ${options.folderName ?? "a Drive folder"} — ${found} files, ${duplicates} already on the hub`,
+    summary:
+      `Scanned ${options.folderName ?? "a Drive folder"} — ${found} files, ${duplicates} already on the hub` +
+      (failures.length > 0 ? `, ${failures.length} could not be read` : ""),
     metadata: {
       folderId: options.folderId,
       found,
@@ -308,6 +337,10 @@ export async function scanDriveFolder(
       shortcutsUnreadable,
       foldersVisited,
       notLookedIn: tooDeep.length,
+      failed: failures.length,
+      // Capped: the log is for reading afterwards, and a scan where everything
+      // failed would otherwise write 400 messages into one row.
+      failures: failures.slice(0, MAX_LOGGED_FAILURES),
     },
   });
 
@@ -316,6 +349,7 @@ export async function scanDriveFolder(
     found,
     duplicates,
     skippedFolders,
+    failures,
     diagnostics: {
       entriesReturned,
       subfolders: skippedFolders,

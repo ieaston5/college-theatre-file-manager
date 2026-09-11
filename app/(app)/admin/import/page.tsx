@@ -19,6 +19,35 @@ import { formatDateTime, pluralize, relativeTime } from "@/lib/utils";
 import type { SearchParams } from "@/lib/queries";
 
 /**
+ * Files a scan reached but could not record, read back out of the activity
+ * log entry the scan writes.
+ *
+ * The scan reports these to whoever ran it, but that message is gone by the
+ * next page load — and an admin coming back to triage a batch needs to know
+ * the list is short of a few files, or they will file 380 of 400 and believe
+ * the folder is done.
+ */
+async function scanFailures(batchId: string): Promise<{ shown: string[]; total: number }> {
+  const entry = await prisma.auditLog.findFirst({
+    where: { action: "import.scan", targetType: "ImportBatch", targetId: batchId },
+    orderBy: { createdAt: "desc" },
+    select: { metadata: true },
+  });
+  if (!entry?.metadata) return { shown: [], total: 0 };
+  try {
+    const parsed = JSON.parse(entry.metadata) as { failures?: unknown; failed?: unknown };
+    const shown = Array.isArray(parsed.failures) ? parsed.failures.map(String) : [];
+    return {
+      shown,
+      total: typeof parsed.failed === "number" ? parsed.failed : shown.length,
+    };
+  } catch {
+    // A log row that will not parse is not worth failing the page over.
+    return { shown: [], total: 0 };
+  }
+}
+
+/**
  * Bringing the existing pile onto the hub. This is the screen that decides
  * whether the project works: the club's information already exists in
  * spreadsheets across several Drives, and if it never arrives here, people
@@ -87,13 +116,16 @@ export default async function AdminImportPage({
     string,
     number
   >;
-  const skipped = batch
-    ? await prisma.importItem.findMany({
-        where: { batchId: batch.id, decision: "SKIPPED" },
-        orderBy: { name: "asc" },
-        take: 40,
-      })
-    : [];
+  const [skipped, failed] = batch
+    ? await Promise.all([
+        prisma.importItem.findMany({
+          where: { batchId: batch.id, decision: "SKIPPED" },
+          orderBy: { name: "asc" },
+          take: 40,
+        }),
+        scanFailures(batch.id),
+      ])
+    : [[], { shown: [], total: 0 }];
 
   const uncategorised = categories.filter((category) => !category.keywords).length;
 
@@ -170,7 +202,12 @@ export default async function AdminImportPage({
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-4">
-            <Stat label="Found" value={batch.fileCount} icon="folder" />
+            <Stat
+              label="Found"
+              value={batch.fileCount}
+              icon="folder"
+              hint={failed.total > 0 ? `${failed.total} more could not be read` : undefined}
+            />
             <Stat label="Left to triage" value={counts.PENDING ?? 0} icon="clipboard" />
             <Stat label="Filed" value={counts.FILED ?? 0} icon="check-circle" />
             <Stat
@@ -180,6 +217,40 @@ export default async function AdminImportPage({
               hint="Skipped automatically"
             />
           </div>
+
+          {/* The scan skips a file it cannot record rather than stopping, so
+              this is the list that would otherwise go unnoticed. */}
+          {failed.total > 0 ? (
+            <Banner
+              tone="amber"
+              icon="warning"
+              title={`${failed.total} ${pluralize(failed.total, "file")} ${
+                failed.total === 1 ? "was" : "were"
+              } found in Drive but could not be added to this scan`}
+            >
+              <p>
+                {failed.total === 1 ? "It is" : "They are"} not in the list below, so filing
+                everything here will still leave {failed.total === 1 ? "it" : "them"} off the hub.
+                Fix what the reason points at and scan the folder again — files already added will
+                not be duplicated.
+              </p>
+              {failed.shown.length > 0 ? (
+                <ul className="mt-2 space-y-0.5 font-mono text-xs">
+                  {failed.shown.map((failure, index) => (
+                    // Two files can share a name and a reason, so the position
+                    // in the list is the only unique thing about a row.
+                    <li key={`${index}:${failure}`}>{failure}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {failed.total > failed.shown.length ? (
+                <p className="mt-2 text-xs">
+                  {failed.total - failed.shown.length} further{" "}
+                  {pluralize(failed.total - failed.shown.length, "failure")} not listed here.
+                </p>
+              ) : null}
+            </Banner>
+          ) : null}
 
           <Card>
             <SectionHeader
@@ -205,7 +276,9 @@ export default async function AdminImportPage({
                 mimeType: item.mimeType,
                 ownerEmail: item.ownerEmail,
                 folderPath: item.folderPath,
-                sizeBytes: item.sizeBytes,
+                // Narrowed for the client component: a byte count is only
+                // ever displayed, and Number is exact well past any file size.
+                sizeBytes: item.sizeBytes === null ? null : Number(item.sizeBytes),
                 modifiedAt: item.modifiedAt?.toISOString() ?? null,
                 webViewLink: item.webViewLink,
                 guessedCategoryId: item.guessedCategoryId,

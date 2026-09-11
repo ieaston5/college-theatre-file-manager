@@ -412,10 +412,11 @@ export async function stepDownFromBoardAction(form: FormData) {
     where: { userId: id, status: "ACTIVE", production: { status: { not: "ARCHIVED" } } },
   });
 
-  // Board documents are shared per person in that mode, so Drive has to be
-  // told as well. Marking the sweep beats re-sharing hundreds of files here.
+  // Board documents carry a Drive permission per person on the members list,
+  // so Drive has to be told as well. Marking the sweep beats re-sharing
+  // hundreds of files inline.
   const config = await getConfig();
-  if (config.shareMode === "MEMBERS" && !config.sharingSweepStartedAt) {
+  if (!config.sharingSweepStartedAt) {
     await prisma.orgConfig.update({
       where: { id: "singleton" },
       data: { sharingSweepStartedAt: new Date() },
@@ -494,9 +495,7 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
     const actor = await assertRole("ADMIN");
     const parsed = configSchema.safeParse({
       orgName: text(form, "orgName") ?? "",
-      shareMode: text(form, "shareMode") ?? "GROUP",
       groupEmail: text(form, "groupEmail") ?? "",
-      groupCanEdit: bool(form, "groupCanEdit"),
       namingTemplate: text(form, "namingTemplate") ?? "",
       driveRootName: text(form, "driveRootName") ?? "",
       currentSeason: text(form, "currentSeason"),
@@ -509,9 +508,7 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
       where: { id: "singleton" },
       data: {
         orgName: parsed.data.orgName,
-        shareMode: parsed.data.shareMode,
         groupEmail: parsed.data.groupEmail ?? null,
-        groupCanEdit: parsed.data.groupCanEdit,
         namingTemplate: parsed.data.namingTemplate,
         driveRootName: parsed.data.driveRootName,
         currentSeason: parsed.data.currentSeason ?? null,
@@ -520,12 +517,11 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
     });
 
     const warnings: string[] = [];
-    const sharingChanged =
-      before.groupEmail !== (parsed.data.groupEmail ?? null) ||
-      before.shareMode !== parsed.data.shareMode ||
-      before.groupCanEdit !== parsed.data.groupCanEdit;
+    // The group address is the one the hub takes *off* files, so pointing it
+    // somewhere else changes which stale permission a pass will clean up.
+    const groupChanged = before.groupEmail !== (parsed.data.groupEmail ?? null);
 
-    if (sharingChanged) {
+    if (groupChanged) {
       const affected = await prisma.document.count({
         where: { visibility: { not: "PRIVATE" }, googleFileId: { not: null }, status: "ACTIVE" },
       });
@@ -537,9 +533,9 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
           data: { sharingSweepStartedAt: new Date() },
         });
         warnings.push(
-          `Who can reach documents in Drive has changed, so ${affected} existing document${
+          `The board's group address changed, so ${affected} existing document${
             affected === 1 ? "" : "s"
-          } need re-sharing. Run the sweep in “Sharing in Drive” below — it can be stopped and resumed.`,
+          } need another pass to clear the old group's access. Run the sweep in “Sharing in Drive” below — it can be stopped and resumed.`,
         );
       }
     }

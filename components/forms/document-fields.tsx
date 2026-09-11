@@ -152,14 +152,15 @@ const VISIBILITY_TINT: Record<string, string> = {
 export function VisibilityPicker({
   value,
   onChange,
-  groupEmail,
+  boardCount,
   category,
   companyCount,
   companyCreatorOnly,
 }: {
   value: string;
   onChange: (value: string) => void;
-  groupEmail: string | null;
+  /** How many people are on the members list, and so get access in Drive. */
+  boardCount: number | null;
   /** Company is only offered where the category allows it. */
   category?: FormCategory;
   /** How many people would get access if Company is chosen. */
@@ -178,8 +179,9 @@ export function VisibilityPicker({
       label="Who should see it?"
       required
       hint={
-        /* A company member never files for the board, so the board's Drive
-           group and the board-only categories are not their problem. */
+        /* A company member never files for the board, so how board documents
+           reach the board, and the board-only categories, are not theirs to
+           worry about. */
         companyCreatorOnly ? (
           !category ? (
             "Pick a category above and this will say who “Company” reaches."
@@ -190,9 +192,11 @@ export function VisibilityPicker({
           )
         ) : (
           <>
-            {groupEmail
-              ? `Board documents are shared with ${groupEmail} in Google Drive. Nobody outside that group gets access.`
-              : "No board Google Group is set yet, so board documents will show on the hub but will not be shared in Drive until an admin adds one."}
+            {boardCount
+              ? `Board documents are shared in Google Drive with each of the ${boardCount} ${
+                  boardCount === 1 ? "person" : "people"
+                } on the hub's members list, by name. Nobody else gets access.`
+              : "Board documents are shared in Google Drive with everybody on the hub's members list, by name. Nobody else gets access."}
             {category && !category.companyVisible ? (
               <>
                 {" "}

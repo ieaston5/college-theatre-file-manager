@@ -462,7 +462,7 @@ export default async function DocumentPage({
 
               <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
                 {viewer.isBoard
-                  ? "In Google Drive each of them is added individually as a viewer — company members are not in the board group. Take someone off the show and their access disappears with them."
+                  ? "In Google Drive each of them is added individually as a viewer. Take someone off the show and their access disappears with them."
                   : "Everyone listed here is added to the file in Google Drive by name, so it opens for them with the account they sign in with. Access ends when the show does."}
               </div>
             </div>
@@ -472,26 +472,19 @@ export default async function DocumentPage({
                 Everyone with hub access can see this document listed and open it.
               </p>
               <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
-                {config.groupEmail ? (
-                  <>
-                    In Google Drive it is shared with{" "}
-                    <span className="font-medium text-ink-800">{config.groupEmail}</span> as{" "}
-                    {config.groupCanEdit ? "editors" : "viewers"}. Nobody outside that group has
-                    access — there is no public link.
-                  </>
-                ) : (
-                  <>
-                    No board Google Group is configured yet, so this is only shared with its creator
-                    in Drive. An admin can add the group in Admin → Settings and re-apply sharing.
-                  </>
-                )}
+                In Google Drive each of them is added by name, from the hub&rsquo;s members list
+                {document.editAccess === "CREATOR_ONLY"
+                  ? " as viewers"
+                  : " — the board as editors, read-only members as viewers"}
+                . Nobody outside that list has access: no public link, and no group standing in for
+                one.
               </div>
             </div>
           ) : (
             <div className="space-y-3 text-sm">
               <p className="text-ink-600">
                 {viewer.isBoard
-                  ? "This is private. It is hidden from every other member's dashboard and is not shared with the board group in Drive."
+                  ? "This is private. It is hidden from every other member's dashboard and is not shared with the rest of the board in Drive."
                   : "This is private. Only the people listed below can see it — not the rest of the company, and not the board."}
               </p>
               <ul className="space-y-2">

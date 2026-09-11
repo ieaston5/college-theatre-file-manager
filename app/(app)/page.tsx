@@ -127,11 +127,11 @@ export default async function DashboardPage() {
         }
       />
 
-      {setup && (!setup.driveConnected || !setup.groupConfigured) ? (
+      {setup && !setup.driveConnected ? (
         <Banner
           tone="amber"
           icon="warning"
-          title="Two things left before the hub is live"
+          title="One thing left before the hub is live"
           action={
             <Link href="/admin" className={buttonClass("secondary")}>
               Open admin
@@ -145,9 +145,6 @@ export default async function DashboardPage() {
                   ? "Google Drive is simulated right now — documents are fake until an admin connects the hub's Google account."
                   : "Connect the Google account that should own every hub document."}
               </li>
-            ) : null}
-            {!setup.groupConfigured ? (
-              <li>Add the board's Google Group so “board” documents get shared automatically.</li>
             ) : null}
           </ul>
         </Banner>
