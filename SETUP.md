@@ -332,18 +332,50 @@ It caps the hub at one database connection per running instance. Every page
 here fires its queries as a batch — the dashboard's eighteen, for instance —
 and with a limit of one they cannot overlap: they queue, and the page waits out
 one network round trip after another. Measured against a database held at a
-20ms round trip, the dashboard takes **441ms** with `connection_limit=1` and
-**136ms** without it, with the queries and the output identical either way. The
-other pages behave the same, at roughly a third of the time.
+20ms round trip, with the queries and the rendered output identical throughout:
 
-Raising it is a question about your database rather than about the hub. The
-transaction pooler this table points `DATABASE_URL` at exists precisely to
-multiplex many short-lived connections, so a handful per instance is what it is
-built for; the number to stay inside is your plan's pooler connection
-allowance, divided by however many instances you expect to be serving at once.
-Something in the range of 5 to 10 is a reasonable thing to try, watching the
-pooler's connection count as you go. If you see connection or pool-timeout
-errors, put it back.
+| `connection_limit` | dashboard | `/documents` | `/admin` |
+| --- | --- | --- | --- |
+| 1 | 441ms | 294ms | 348ms |
+| 2 | 272ms | 188ms | 197ms |
+| 3 | 217ms | 161ms | 157ms |
+| 5 | 177ms | 124ms | 93ms |
+| 10 | 139ms | 106ms | 89ms |
+
+Most of it is won by 3, and the curve is close to flat after 5.
+
+#### What an instance is, and how many there are
+
+An instance is **one running copy of the hub's server code — a Node process
+your host has started to answer requests**. It is not a person, a browser tab
+or a page view. `lib/db.ts` builds one client per process and reuses it for
+every request that process handles, so one instance holds one pool of up to
+`connection_limit` connections, and the peak you care about is:
+
+    connections  ≈  instances serving at once  ×  connection_limit
+
+A single instance answers one request at a time, so the host starts them to
+match *simultaneous* requests: three page loads landing together need three
+instances, and a fourth arriving while those are busy gets a fourth. Routes are
+built as separate functions, too, so somebody on the dashboard and somebody on
+`/documents` can be two live instances rather than one serving both.
+
+Two things keep that number smaller than it sounds. An instance that goes idle
+releases its connections after thirty seconds, so only instances actually
+serving traffic count. And this is a club's document hub: genuinely
+simultaneous page loads are usually one or two, spiking to a handful when a
+digest goes out — not the hundreds a public site would see.
+
+So the arithmetic for a hub like this is single digits times single digits.
+**5 is a sensible setting**: it takes the dashboard from 441ms to 177ms and
+leaves the worst realistic peak well inside what a transaction pooler — which
+exists precisely to multiplex many short-lived connections — is built for.
+
+To check rather than assume: Supabase's Database → Connection pooling page
+shows your pool size, and its connection graph shows what you are really using.
+`select count(*) from pg_stat_activity;` answers the same question directly.
+Raise the number, watch it under normal use, and put it back if you see
+connection or pool-timeout errors.
 
 Copy the strings from the dashboard rather than typing them from the above: the
 region prefix varies (`aws-0-`, `aws-1-`, …) and `abcdefghijklmnop` stands for
