@@ -149,11 +149,32 @@ const VISIBILITY_TINT: Record<string, string> = {
   BOARD: "#5b3de0",
 };
 
+/**
+ * Whether a show has actually been picked. The selects use "" for "not chosen
+ * yet" and "none" for "deliberately not tied to a show"; neither is a show.
+ */
+export function hasProduction(productionId: string): boolean {
+  return Boolean(productionId) && productionId !== "none";
+}
+
+/**
+ * Whether "Company" can be chosen at all. The category has to allow it, and
+ * the document has to belong to a show — the show is the company, so without
+ * one there is nobody for "Company" to mean.
+ */
+export function companyVisibilityAvailable(
+  category: FormCategory | undefined,
+  hasProduction: boolean,
+): boolean {
+  return Boolean(category?.companyVisible) && hasProduction;
+}
+
 export function VisibilityPicker({
   value,
   onChange,
   boardCount,
   category,
+  hasProduction,
   companyCount,
   companyCreatorOnly,
 }: {
@@ -163,16 +184,22 @@ export function VisibilityPicker({
   boardCount: number | null;
   /** Company is only offered where the category allows it. */
   category?: FormCategory;
+  /** Whether a show has been picked; Company is only offered once one has. */
+  hasProduction: boolean;
   /** How many people would get access if Company is chosen. */
   companyCount?: number | null;
   /** A company member filing for their show cannot publish to the board. */
   companyCreatorOnly?: boolean;
 }) {
+  const companyAvailable = companyVisibilityAvailable(category, hasProduction);
   const options = VISIBILITIES.filter(
     (visibility) =>
-      (visibility !== "COMPANY" || category?.companyVisible) &&
+      (visibility !== "COMPANY" || companyAvailable) &&
       (visibility !== "BOARD" || !companyCreatorOnly),
   );
+  // Worth saying out loud: the category does allow a company to see this, and
+  // the only thing in the way is that no show has been picked.
+  const companyNeedsShow = Boolean(category?.companyVisible) && !hasProduction;
 
   return (
     <Field
@@ -185,6 +212,8 @@ export function VisibilityPicker({
         companyCreatorOnly ? (
           !category ? (
             "Pick a category above and this will say who “Company” reaches."
+          ) : companyNeedsShow ? (
+            "“Company” means the people on one show, so pick the show above and it becomes an option. Until then only you can see this."
           ) : category.companyVisible ? (
             "“Company” reaches the people on this show whose role covers this category — plus the board, who can see everything. “Private” keeps it to you until you say otherwise."
           ) : (
@@ -197,7 +226,13 @@ export function VisibilityPicker({
                   boardCount === 1 ? "person" : "people"
                 } on the hub's members list, by name. Nobody else gets access.`
               : "Board documents are shared in Google Drive with everybody on the hub's members list, by name. Nobody else gets access."}
-            {category && !category.companyVisible ? (
+            {companyNeedsShow ? (
+              <>
+                {" "}
+                “Company” means the people on one show, so it is only offered once the document is
+                attached to one. Something that is not about a particular production is the board's.
+              </>
+            ) : category && !category.companyVisible ? (
               <>
                 {" "}
                 {category.name} is board-only, so it is never offered to a production company. An

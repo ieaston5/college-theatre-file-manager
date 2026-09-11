@@ -4,7 +4,7 @@ import { getConfig } from "@/lib/config";
 import { sharingSweepStatus } from "@/lib/documents";
 import { SharingSweep } from "@/components/forms/sharing-sweep";
 import { Icon } from "@/components/icons";
-import { Banner, Card, SectionHeader, Stat } from "@/components/ui";
+import { Banner, Card, SectionHeader, Stat, buttonClass } from "@/components/ui";
 import { pluralize, relativeTime } from "@/lib/utils";
 
 /**
@@ -16,32 +16,45 @@ export default async function AdminSharingPage() {
   const config = await getConfig();
   const status = await sharingSweepStatus();
 
-  const [boardCount, sharedCount, companyCount, privateCount, lastSynced, staleCount] =
-    await Promise.all([
-      prisma.user.count({
-        where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
-      }),
-      prisma.document.count({
-        where: { visibility: "BOARD", status: "ACTIVE", googleFileId: { not: null } },
-      }),
-      prisma.document.count({
-        where: { visibility: "COMPANY", status: "ACTIVE", googleFileId: { not: null } },
-      }),
-      prisma.document.count({ where: { visibility: "PRIVATE", status: "ACTIVE" } }),
-      prisma.document.findFirst({
-        where: { sharingSyncedAt: { not: null } },
-        orderBy: { sharingSyncedAt: "desc" },
-        select: { sharingSyncedAt: true },
-      }),
-      prisma.document.count({
-        where: {
-          status: "ACTIVE",
-          visibility: { not: "PRIVATE" },
-          googleFileId: { not: null },
-          sharingSyncedAt: null,
-        },
-      }),
-    ]);
+  const [
+    boardCount,
+    sharedCount,
+    companyCount,
+    privateCount,
+    lastSynced,
+    staleCount,
+    companyNoShowCount,
+  ] = await Promise.all([
+    prisma.user.count({
+      where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
+    }),
+    prisma.document.count({
+      where: { visibility: "BOARD", status: "ACTIVE", googleFileId: { not: null } },
+    }),
+    prisma.document.count({
+      where: { visibility: "COMPANY", status: "ACTIVE", googleFileId: { not: null } },
+    }),
+    prisma.document.count({ where: { visibility: "PRIVATE", status: "ACTIVE" } }),
+    prisma.document.findFirst({
+      where: { sharingSyncedAt: { not: null } },
+      orderBy: { sharingSyncedAt: "desc" },
+      select: { sharingSyncedAt: true },
+    }),
+    prisma.document.count({
+      where: {
+        status: "ACTIVE",
+        visibility: { not: "PRIVATE" },
+        googleFileId: { not: null },
+        sharingSyncedAt: null,
+      },
+    }),
+    // "Company" means the people on one show, so a company document with no
+    // show reaches no company at all — it is board-only in practice. These
+    // are the ones somebody filed before that was true.
+    prisma.document.count({
+      where: { visibility: "COMPANY", status: "ACTIVE", productionId: null },
+    }),
+  ]);
 
   const disabledMembers = await prisma.user.count({
     where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: "DISABLED" },
@@ -57,6 +70,29 @@ export default async function AdminSharingPage() {
         <em>open</em>. The hub keeps the two in step whenever a document or a member changes — this
         page is for the times they drift apart.
       </Banner>
+
+      {companyNoShowCount > 0 ? (
+        <Banner
+          tone="amber"
+          icon="warning"
+          title={`${companyNoShowCount} company ${pluralize(
+            companyNoShowCount,
+            "document",
+          )} not attached to a show`}
+          action={
+            <Link
+              href="/documents?visibility=COMPANY&production=none"
+              className={buttonClass("secondary")}
+            >
+              Show them
+            </Link>
+          }
+        >
+          A company document belongs to one show&rsquo;s company, so these reach nobody outside the
+          board. Attach each one to the production it is for, or file it for the board. Running the
+          sweep below takes the company&rsquo;s Drive access off them in the meantime.
+        </Banner>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-4">
         <Stat

@@ -301,7 +301,7 @@ export function CategoryForm({
       <Toggle
         name="companyVisible"
         label="Production companies can see documents here"
-        hint="Turn this on for the things a cast or crew legitimately needs — schedules, scripts, contact sheets. Leave it off for budgets, casting and governance: those categories are then never offered as “Company” and never appear to company members."
+        hint="Turn this on for the things a cast or crew legitimately needs — schedules, scripts, contact sheets. Leave it off for budgets, casting and governance: those categories are then never offered as “Company” and never appear to company members. “Company” means the people on one show, so it only applies to documents attached to a production — an organisation-wide category never reaches a company whatever this says."
         defaultChecked={category?.companyVisible ?? false}
       />
 

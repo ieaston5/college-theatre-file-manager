@@ -58,11 +58,9 @@ export default async function ProductionCompanyPage({
       },
     }),
     prisma.document.count({
-      where: {
-        visibility: "COMPANY",
-        status: "ACTIVE",
-        OR: [{ productionId: production.id }, { productionId: null }],
-      },
+      // This show's company documents, and only this show's: a company
+      // document that names no production reaches no company at all.
+      where: { visibility: "COMPANY", status: "ACTIVE", productionId: production.id },
     }),
   ]);
 
