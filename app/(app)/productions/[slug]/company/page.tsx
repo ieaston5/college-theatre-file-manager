@@ -99,11 +99,19 @@ export default async function ProductionCompanyPage({
       <PageHeader
         eyebrow={production.season ?? undefined}
         title={`${production.name} company`}
-        description={`${members.length} ${pluralize(
-          members.length,
-          "person",
-          "people",
-        )} on this show. What each of them can see is decided by their role — nothing else on the hub is visible to them.`}
+        description={
+          canManage
+            ? `${members.length} ${pluralize(
+                members.length,
+                "person",
+                "people",
+              )} on this show. What each of them can see is decided by their role — nothing else on the hub is visible to them.`
+            : `${members.length} ${pluralize(
+                members.length,
+                "person",
+                "people",
+              )} working on this show, grouped by what they are doing.`
+        }
         action={
           <Link href={`/productions/${production.slug}`} className={buttonClass("secondary")}>
             <Icon name="folder-open" className="size-4" />
@@ -147,21 +155,27 @@ export default async function ProductionCompanyPage({
                         · {list.length} {pluralize(list.length, "person", "people")}
                       </span>
                     </h3>
-                    <p className="mt-0.5 text-xs text-ink-500">
-                      {role
-                        ? `Can see: ${
-                            role.categories.map((category) => category.name).join(", ") ||
-                            "nothing yet"
-                          }`
-                        : "This role no longer exists — reassign these people."}
-                    </p>
+                    {/* What a role opens up is an access decision, so it is
+                        shown to the people who make it rather than to the
+                        company at large. */}
+                    {canManage ? (
+                      <p className="mt-0.5 text-xs text-ink-500">
+                        {role
+                          ? `Can see: ${
+                              role.categories.map((category) => category.name).join(", ") ||
+                              "nothing yet"
+                            }`
+                          : "This role no longer exists — reassign these people."}
+                      </p>
+                    ) : null}
                   </div>
-                  {!role ? <Badge tone="rose">Needs attention</Badge> : null}
+                  {!role && canManage ? <Badge tone="rose">Needs attention</Badge> : null}
                 </div>
                 <ul className="divide-y divide-ink-100 border-t border-ink-100">
                   {list.map((member) => (
                     <MembershipRow
                       key={member.id}
+                      canEdit={canManage}
                       membership={{
                         id: member.id,
                         title: member.title,

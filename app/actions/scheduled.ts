@@ -47,6 +47,10 @@ export async function runNowAction(_prev: ActionState, form: FormData): Promise<
 
     const parts = [
       report.sharing ? `re-shared ${report.sharing.processed} (${report.sharing.remaining} left)` : null,
+      report.drive
+        ? `read ${report.drive.seen} changes from Drive, updated ${report.drive.updated}`
+        : null,
+      report.titles ? `renamed ${report.titles.changed} to the naming rule` : null,
       report.canva
         ? `checked ${report.canva.checked} Canva designs, re-exported ${report.canva.refreshed}`
         : null,

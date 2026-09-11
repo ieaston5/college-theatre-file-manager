@@ -68,14 +68,30 @@ export function buildDocumentWhere(
   return { AND: clauses };
 }
 
-export function buildDocumentOrder(params: SearchParams): Prisma.DocumentOrderByWithRelationInput[] {
+/**
+ * Default order: when the document itself was last edited, which for anything
+ * in Drive means what Google says rather than when the hub's row was last
+ * written. Reading a denormalised column keeps that free — see
+ * Document.lastEditedAt and the scheduled check that keeps it current.
+ *
+ * Pinned documents float to the top for the board, who can see the pin and
+ * set it. A company member can do neither, so for them a pinned document
+ * jumping the queue would just be a list that is not in the order it says it
+ * is in.
+ */
+export function buildDocumentOrder(
+  params: SearchParams,
+  options?: { pinnedFirst?: boolean },
+): Prisma.DocumentOrderByWithRelationInput[] {
+  const first: Prisma.DocumentOrderByWithRelationInput[] =
+    options?.pinnedFirst === false ? [] : [{ pinned: "desc" }];
   switch (one(params, "sort")) {
     case "created":
-      return [{ pinned: "desc" }, { createdAt: "desc" }];
+      return [...first, { createdAt: "desc" }];
     case "title":
-      return [{ pinned: "desc" }, { title: "asc" }];
+      return [...first, { title: "asc" }];
     default:
-      return [{ pinned: "desc" }, { updatedAt: "desc" }];
+      return [...first, { lastEditedAt: "desc" }];
   }
 }
 
@@ -89,7 +105,7 @@ export async function queryDocuments(
     prisma.document.findMany({
       where,
       include: DOCUMENT_LIST_INCLUDE,
-      orderBy: buildDocumentOrder(params),
+      orderBy: buildDocumentOrder(params, { pinnedFirst: viewer.isBoard }),
       take: options?.take ?? 60,
       skip: options?.skip ?? 0,
     }),

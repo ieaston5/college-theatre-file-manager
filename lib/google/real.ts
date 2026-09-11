@@ -392,6 +392,38 @@ export class GoogleDriveProvider implements DriveProvider {
     }
   }
 
+  async listModifiedSince(
+    since: Date,
+    limit = 2000,
+  ): Promise<Array<{ id: string; modifiedTime: string | null }>> {
+    const drive = await this.drive();
+    const out: Array<{ id: string; modifiedTime: string | null }> = [];
+    let pageToken: string | undefined;
+    try {
+      do {
+        const res = await drive.files.list({
+          // Everything the hub account can reach, not just what it owns: plenty
+          // of a club's files are owned by the person who made them and shared
+          // with the hub.
+          q: `modifiedTime > '${since.toISOString()}' and trashed = false`,
+          fields: "nextPageToken, files(id,modifiedTime)",
+          orderBy: "modifiedTime desc",
+          pageSize: 1000,
+          pageToken,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+        for (const file of res.data.files ?? []) {
+          if (file.id) out.push({ id: file.id, modifiedTime: file.modifiedTime ?? null });
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+      } while (pageToken && out.length < limit);
+      return out.slice(0, limit);
+    } catch (error) {
+      wrap(error, "Asking Drive what has changed");
+    }
+  }
+
   async renameFile(fileId: string, name: string): Promise<void> {
     const drive = await this.drive();
     try {

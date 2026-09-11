@@ -31,7 +31,11 @@ export default async function ProductionsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Productions"
-        description="Every show, with the paperwork attached to it."
+        description={
+          viewer.isBoard
+            ? "Every show, with the paperwork attached to it."
+            : "The shows you are working on, and everything shared with you for each."
+        }
         action={
           isAdmin(user) ? (
             <Link href="/admin/productions" className={buttonClass("secondary")}>
@@ -45,7 +49,7 @@ export default async function ProductionsPage() {
       {productions.length === 0 ? (
         <EmptyState
           icon="theater"
-          title="No productions yet"
+          title={viewer.isBoard ? "No productions yet" : "You are not on a show yet"}
           action={
             isAdmin(user) ? (
               <Link href="/admin/productions" className={buttonClass("primary")}>
@@ -55,7 +59,9 @@ export default async function ProductionsPage() {
             ) : null
           }
         >
-          Add the shows you are working on and documents can be attached to them.
+          {viewer.isBoard
+            ? "Add the shows you are working on and documents can be attached to them."
+            : "Once whoever runs your show adds you to it, it turns up here with everything shared with your role."}
         </EmptyState>
       ) : (
         GROUPS.map((group) => {

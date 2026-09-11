@@ -55,7 +55,11 @@ export default async function AdminRolesPage({
         title={editing ? `Edit “${editing.name}”` : "Add a production role"}
         description="Cast, crew, design, music — whatever your processes actually look like."
       >
+        {/* Keyed on what is being edited: without it a client-side hop
+            from “add” to “edit”, or between two roles, reuses the mounted
+            form and leaves the previous role’s ticks in place. */}
         <ProductionRoleForm
+          key={editing?.id ?? "new"}
           role={
             editing
               ? {

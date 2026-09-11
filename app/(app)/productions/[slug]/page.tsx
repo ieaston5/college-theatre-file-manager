@@ -21,7 +21,7 @@ import { DocumentList, type DocumentListItem } from "@/components/document-items
 import { Icon } from "@/components/icons";
 import { Badge, Card, EmptyState, PageHeader, SectionHeader, Stat, buttonClass } from "@/components/ui";
 import { PRODUCTION_STATUS_META, type ProductionStatus } from "@/lib/constants";
-import { formatDate, pluralize } from "@/lib/utils";
+import { cn, formatDate, pluralize } from "@/lib/utils";
 
 export default async function ProductionPage({
   params,
@@ -42,6 +42,10 @@ export default async function ProductionPage({
   const allowedProductions = visibleProductionIds(viewer);
   if (allowedProductions !== null && !allowedProductions.includes(production.id)) notFound();
 
+  // The checklist is only rendered for the people who work it, so it is only
+  // fetched for them.
+  const canManage = canCreateDocuments(viewer);
+
   const [{ documents, total }, categories, companyCount, companyByRole, checklist] = await Promise.all([
     queryDocuments(viewer, query, { extra: { productionId: production.id }, take: 200 }),
     prisma.category.findMany({
@@ -54,11 +58,10 @@ export default async function ProductionPage({
       where: { productionId: production.id, status: "ACTIVE" },
       _count: { _all: true },
     }),
-    checklistFor(production.id),
+    canManage ? checklistFor(production.id) : [],
   ]);
 
   const progress = checklistProgress(checklist);
-  const canManage = canCreateDocuments(viewer);
 
   const roleNames = await prisma.productionRole.findMany({
     where: { id: { in: companyByRole.map((row) => row.roleId).filter((id): id is string => Boolean(id)) } },
@@ -116,7 +119,8 @@ export default async function ProductionPage({
 
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={meta.tone}>{meta.label}</Badge>
-        {production.abbreviation ? (
+        {/* The abbreviation only matters when you are naming a file. */}
+        {production.abbreviation && canManage ? (
           <Badge tone="slate">Files tagged “{production.abbreviation}”</Badge>
         ) : null}
         {production.venue ? (
@@ -136,15 +140,23 @@ export default async function ProductionPage({
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* "Nothing filed there yet" is a nag for whoever has to file it; to
+          everybody else it is a count of things they cannot act on. */}
+      <div className={cn("grid gap-3 sm:grid-cols-2", canManage && "lg:grid-cols-4")}>
         <Stat label="Documents" value={total} icon="folder" />
-        <Stat label="Categories used" value={byCategory.size} icon="grid" />
-        <Stat
-          label="Not started"
-          value={missing.length}
-          icon="alert"
-          hint={missing.length > 0 ? "Categories with nothing filed" : "Everything has something"}
-        />
+        {canManage ? (
+          <>
+            <Stat label="Categories used" value={byCategory.size} icon="grid" />
+            <Stat
+              label="Not started"
+              value={missing.length}
+              icon="alert"
+              hint={
+                missing.length > 0 ? "Categories with nothing filed" : "Everything has something"
+              }
+            />
+          </>
+        ) : null}
         <Stat
           label="Company"
           value={companyCount}
@@ -172,6 +184,7 @@ export default async function ProductionPage({
         }))}
         productions={[]}
         lockedProduction={production.slug}
+        boardVisibility={viewer.isBoard}
       />
 
       {documents.length === 0 ? (
@@ -190,7 +203,9 @@ export default async function ProductionPage({
             ) : null
           }
         >
-          Budgets, rehearsal reports, contact sheets — anything filed against this show lands here.
+          {canManage
+            ? "Budgets, rehearsal reports, contact sheets — anything filed against this show lands here."
+            : "The schedule, the script, the contact sheet — whatever the production team posts for this show turns up here."}
         </EmptyState>
       ) : (
         <div className="space-y-6">
@@ -225,28 +240,30 @@ export default async function ProductionPage({
                   documents={byCategory.get(category.id)!}
                   showCategory={false}
                   showProduction={false}
+                  showPinned={viewer.isBoard}
                 />
               </section>
             ))}
         </div>
       )}
 
-      {checklist.length > 0 ? (
+      {/* The checklist is the production team's to-do list — rights, budget
+          sign-off, load-in — and several of its items point at categories the
+          company cannot open. It is shown to the people who work it. */}
+      {canManage && checklist.length > 0 ? (
         <Card>
           <SectionHeader
             icon="clipboard"
             title="Checklist"
             description={`${progress.complete} of ${progress.total} done. Items tied to a category tick themselves as soon as something is filed there.`}
             action={
-              canManage ? (
-                <AddChecklistItemForm
-                  productionId={production.id}
-                  categories={categories.map((category) => ({
-                    id: category.id,
-                    name: category.name,
-                  }))}
-                />
-              ) : null
+              <AddChecklistItemForm
+                productionId={production.id}
+                categories={categories.map((category) => ({
+                  id: category.id,
+                  name: category.name,
+                }))}
+              />
             }
           />
 
@@ -266,7 +283,7 @@ export default async function ProductionPage({
               const complete = item.done || item.autoDone;
               return (
                 <li key={item.id} className="flex flex-wrap items-center gap-2.5 py-2">
-                  {canManage && !item.autoDone ? (
+                  {!item.autoDone ? (
                     <form action={toggleChecklistItemAction}>
                       <input type="hidden" name="id" value={item.id} />
                       <button
@@ -327,18 +344,16 @@ export default async function ProductionPage({
                     ) : null
                   ) : null}
 
-                  {canManage ? (
-                    <form action={removeChecklistItemAction}>
-                      <input type="hidden" name="id" value={item.id} />
-                      <button
-                        type="submit"
-                        className="shrink-0 rounded p-1 text-ink-300 hover:bg-ink-100 hover:text-rose-600"
-                        aria-label={`Remove ${item.label}`}
-                      >
-                        <Icon name="x" className="size-3.5" />
-                      </button>
-                    </form>
-                  ) : null}
+                  <form action={removeChecklistItemAction}>
+                    <input type="hidden" name="id" value={item.id} />
+                    <button
+                      type="submit"
+                      className="shrink-0 rounded p-1 text-ink-300 hover:bg-ink-100 hover:text-rose-600"
+                      aria-label={`Remove ${item.label}`}
+                    >
+                      <Icon name="x" className="size-3.5" />
+                    </button>
+                  </form>
                 </li>
               );
             })}

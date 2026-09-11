@@ -78,23 +78,23 @@ export default async function DashboardPage() {
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE", pinned: true },
       include: LIST_INCLUDE,
-      orderBy: { updatedAt: "desc" },
+      orderBy: { lastEditedAt: "desc" },
       take: 5,
     }),
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE" },
       include: LIST_INCLUDE,
-      orderBy: { updatedAt: "desc" },
+      orderBy: { lastEditedAt: "desc" },
       take: 8,
     }),
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE", creatorId: user.id },
       include: LIST_INCLUDE,
-      orderBy: { updatedAt: "desc" },
+      orderBy: { lastEditedAt: "desc" },
       take: 5,
     }),
     prisma.document.count({ where: { ...where, status: "ACTIVE" } }),
-    prisma.document.count({ where: { ...where, status: "ACTIVE", updatedAt: { gte: weekAgo } } }),
+    prisma.document.count({ where: { ...where, status: "ACTIVE", lastEditedAt: { gte: weekAgo } } }),
     prisma.document.count({
       where: { status: "ACTIVE", visibility: "PRIVATE", creatorId: user.id },
     }),
@@ -169,10 +169,10 @@ export default async function DashboardPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Documents" value={totalCount} icon="folder" href="/documents" />
         <Stat
-          label="Touched this week"
+          label="Edited this week"
           value={weekCount}
           icon="clock"
-          hint={weekCount === 0 ? "Quiet week" : "Updated in the last 7 days"}
+          hint={weekCount === 0 ? "Quiet week" : "Changed in the last 7 days"}
         />
         <Stat
           label="Productions"
@@ -320,7 +320,7 @@ export default async function DashboardPage() {
         <section>
           <SectionHeader
             icon="clock"
-            title="Recently updated"
+            title="Recently edited"
             action={
               <Link href="/documents" className={buttonClass("ghost")}>
                 See all

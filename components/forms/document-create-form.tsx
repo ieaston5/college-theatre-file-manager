@@ -111,7 +111,13 @@ export function DocumentCreateForm({
   const [mode, setMode] = useState<CreationMode>("DOC");
   /** Whether the person picked the file type, as opposed to inheriting it. */
   const [typeChosenByHand, setTypeChosenByHand] = useState(false);
-  const [visibility, setVisibility] = useState<string>(companyCreatorOnly ? "COMPANY" : "BOARD");
+  // A company member has no board option, and "Company" is only on the table
+  // once a category that allows it is chosen — so until then, private.
+  const [visibility, setVisibility] = useState<string>(() => {
+    if (!companyCreatorOnly) return "BOARD";
+    const initial = categories.find((item) => item.id === defaultCategoryId);
+    return initial?.companyVisible ? "COMPANY" : "PRIVATE";
+  });
   const [editAccess, setEditAccess] = useState<string>("BOARD");
   const [templateId, setTemplateId] = useState("blank");
   const [canvaFormat, setCanvaFormat] = useState<CanvaExportFormat>("pdf");
@@ -478,7 +484,7 @@ export function DocumentCreateForm({
               ? "Several files selected — each one keeps its own name. Clear the extra files if you want to name one yourself."
               : isCanva
                 ? "Leave blank to use the design's own name in Canva."
-                : "Plain language, no need to add the show or the date — the hub adds those."
+                : "Plain language: the show, the shelf and the season are added by the hub's naming rule, on the hub and in Drive alike."
           }
         >
           <input
@@ -501,6 +507,7 @@ export function DocumentCreateForm({
           value={productionId}
           onChange={setProductionId}
           scope={category?.scope}
+          companyCreatorOnly={companyCreatorOnly}
         />
 
         {!isUpload && !isCanva && availableTemplates.length > 0 ? (
@@ -542,6 +549,7 @@ export function DocumentCreateForm({
           onChange={setEditAccess}
           visibility={visibility}
           category={category}
+          companyCreatorOnly={companyCreatorOnly}
         />
         <DescriptionField />
         <TagsField />
@@ -550,7 +558,7 @@ export function DocumentCreateForm({
       <div className="card flex flex-wrap items-center justify-between gap-3 bg-ink-50 p-4">
         <div className="min-w-0 text-sm">
           <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-            Will be {isUpload ? "uploaded as" : isCanva ? "kept in Drive as" : "created as"}
+            Will be listed and {isUpload ? "uploaded" : isCanva ? "kept in Drive" : "created"} as
           </div>
           <div className="mt-0.5 flex items-center gap-2 font-medium text-ink-800">
             <Icon name={previewIcon} className="size-4 shrink-0" />

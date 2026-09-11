@@ -26,6 +26,8 @@ export type RolloverPlan = {
     lastLoginAt: Date | null;
     privateCount: number;
     ownedInDriveCount: number;
+    /** Current shows they are cast or crewed on, which they keep either way. */
+    activeMemberships: number;
   }>;
   companyToRetire: number;
   lastRolloverAt: Date | null;
@@ -69,6 +71,17 @@ export async function planRollover(): Promise<RolloverPlan> {
               where: { driveOwnerEmail: member.email, status: "ACTIVE" },
             })
           : 0,
+        activeMemberships: await prisma.productionMember.count({
+          where: {
+            userId: member.id,
+            status: "ACTIVE",
+            production: {
+              status: { not: "ARCHIVED" },
+              // A show being archived in this same pass no longer counts.
+              id: { notIn: showsToArchive.map((show) => show.id) },
+            },
+          },
+        }),
       })),
   );
 
@@ -88,6 +101,8 @@ export async function planRollover(): Promise<RolloverPlan> {
 export type RolloverResult = {
   archivedShows: string[];
   disabledMembers: string[];
+  /** Kept on the hub as company members because they are still on a show. */
+  steppedDownMembers: string[];
   foldersMoved: number;
   documentsResynced: number;
   warnings: string[];
@@ -106,6 +121,7 @@ export async function runRollover(
   const warnings: string[] = [];
   const archivedShows: string[] = [];
   const disabledMembers: string[] = [];
+  const steppedDownMembers: string[] = [];
   let foldersMoved = 0;
   let documentsResynced = 0;
 
@@ -151,7 +167,11 @@ export async function runRollover(
     }
   }
 
-  // 2. Disable the departing board. Their documents stay; their access stops.
+  // 2. Retire the departing board. Their documents stay; their board access
+  //    stops. Anyone still cast or crewed on a show that survived step 1 is
+  //    stepped down to a company member instead of being disabled: their term
+  //    is over, but they are still in the building, and cutting them off from
+  //    their own show's schedule would be a bug rather than a tidy-up.
   for (const memberId of input.memberIds) {
     if (memberId === actor.id) {
       warnings.push("You cannot disable your own account, so you were left alone.");
@@ -172,8 +192,29 @@ export async function runRollover(
       }
     }
 
-    await prisma.user.update({ where: { id: memberId }, data: { status: "DISABLED" } });
-    disabledMembers.push(member.email);
+    const stillOnAShow = await prisma.productionMember.count({
+      where: {
+        userId: memberId,
+        status: "ACTIVE",
+        production: { status: { not: "ARCHIVED" } },
+      },
+    });
+
+    if (stillOnAShow > 0) {
+      await prisma.user.update({ where: { id: memberId }, data: { role: "COMPANY" } });
+      steppedDownMembers.push(member.email);
+    } else {
+      await prisma.user.update({ where: { id: memberId }, data: { status: "DISABLED" } });
+      disabledMembers.push(member.email);
+    }
+  }
+
+  if (steppedDownMembers.length > 0) {
+    warnings.push(
+      `${steppedDownMembers.join(", ")} ${
+        steppedDownMembers.length === 1 ? "is" : "are"
+      } still working on a current show, so they were taken off the board rather than disabled. They keep company access to that show and nothing else.`,
+    );
   }
 
   // 3. The new season.
@@ -189,17 +230,18 @@ export async function runRollover(
     data: { lastRolloverAt: new Date() },
   });
 
-  // Disabling board members changes who Drive should let in, so mark
+  // Either way the board is smaller than Drive thinks it is, so mark
   // everything stale rather than re-sharing hundreds of files inline.
-  if (disabledMembers.length > 0) {
+  const retired = disabledMembers.length + steppedDownMembers.length;
+  if (retired > 0) {
     await prisma.orgConfig.update({
       where: { id: "singleton" },
       data: { sharingSweepStartedAt: new Date() },
     });
     warnings.push(
-      `${disabledMembers.length} ${
-        disabledMembers.length === 1 ? "person was" : "people were"
-      } disabled. Run the sweep in Admin → Sharing to take their Drive access away.`,
+      `${retired} ${
+        retired === 1 ? "person is" : "people are"
+      } off the board. Run the sweep in Admin → Sharing to take their Drive access to board documents away.`,
     );
   }
 
@@ -208,11 +250,18 @@ export async function runRollover(
     action: "rollover.run",
     summary: `Rolled over to ${input.newSeason ?? config.currentSeason ?? "a new season"} — archived ${archivedShows.length} ${
       archivedShows.length === 1 ? "show" : "shows"
-    }, disabled ${disabledMembers.length}`,
-    metadata: { archivedShows, disabledMembers },
+    }, disabled ${disabledMembers.length}, stepped ${steppedDownMembers.length} down to company`,
+    metadata: { archivedShows, disabledMembers, steppedDownMembers },
   });
 
-  return { archivedShows, disabledMembers, foldersMoved, documentsResynced, warnings };
+  return {
+    archivedShows,
+    disabledMembers,
+    steppedDownMembers,
+    foldersMoved,
+    documentsResynced,
+    warnings,
+  };
 }
 
 /**

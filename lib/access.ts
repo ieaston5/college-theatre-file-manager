@@ -16,7 +16,9 @@ import { atLeast, isBoardRole } from "./constants";
  *            their role says so, and they never see a category that has not
  *            been marked as company-visible at all.
  *   BOARD    everybody with board access to the hub. Company members never see
- *            these, whatever production they are on.
+ *            these, whatever production they are on and whoever filed them —
+ *            somebody who has come off the board keeps their private
+ *            documents and loses the board's.
  *
  * Company access is computed from data (production membership → role →
  * categories) rather than hardcoded, so the board can change who sees what in
@@ -167,7 +169,13 @@ export function allowedVisibilitiesFor(
 
 export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput {
   const clauses: Prisma.DocumentWhereInput[] = [
-    { creatorId: viewer.id },
+    // Filing something does not outlast board access: somebody whose term has
+    // ended still owns their private documents, but the board paperwork they
+    // wrote goes with the board. An explicit share is a decision somebody
+    // made by hand, so it stands either way.
+    viewer.isBoard
+      ? { creatorId: viewer.id }
+      : { creatorId: viewer.id, visibility: { not: "BOARD" } },
     { shares: { some: { userId: viewer.id } } },
   ];
 
@@ -199,10 +207,13 @@ export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput
 }
 
 export function canViewDocument(viewer: Viewer, doc: DocumentLike): boolean {
-  if (doc.creatorId === viewer.id) return true;
   if (doc.shares?.some((share) => share.userId === viewer.id)) return true;
 
+  // Checked before ownership: a board document belongs to the board, so
+  // somebody who has come off it stops seeing even the ones they filed.
   if (doc.visibility === "BOARD") return viewer.isBoard;
+
+  if (doc.creatorId === viewer.id) return true;
 
   if (doc.visibility === "COMPANY") {
     if (viewer.isBoard) return true;

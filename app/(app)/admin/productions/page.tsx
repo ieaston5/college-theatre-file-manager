@@ -37,6 +37,7 @@ export default async function AdminProductionsPage({
         description="Each show gets its own folder in Drive, created the first time something is filed against it."
       >
         <ProductionForm
+          key={editing?.id ?? "new"}
           production={
             editing
               ? {

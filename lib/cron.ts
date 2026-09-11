@@ -2,7 +2,13 @@ import { prisma } from "./db";
 import { getConfig } from "./config";
 import { recordAudit } from "./audit";
 import { canvaEnabled, canvaProvider } from "./canva";
-import { canvaMirrorIsStale, exportCanvaMirror, runSharingSweep } from "./documents";
+import {
+  canvaMirrorIsStale,
+  exportCanvaMirror,
+  normaliseDocumentTitles,
+  runSharingSweep,
+} from "./documents";
+import { driveProvider } from "./google";
 import { sendDigests } from "./email/digest";
 
 /**
@@ -13,6 +19,8 @@ import { sendDigests } from "./email/digest";
  * whether there is anything to do, so a missed run costs nothing and a double
  * run does nothing twice.
  */
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Don't re-export a design somebody is still working in. */
 export const CANVA_QUIET_MINUTES = 30;
@@ -37,10 +45,100 @@ const SWEEP_CHUNK = 12;
 
 export type CronReport = {
   sharing: { processed: number; remaining: number; slices: number } | null;
+  drive: { seen: number; updated: number } | null;
+  titles: { scanned: number; changed: number } | null;
   canva: { checked: number; refreshed: number; failures: number } | null;
   digest: { sent: number; skipped: number; failed: number } | null
   skipped: string[];
 };
+
+/**
+ * How far back a first run looks. Long enough to catch up a hub that has been
+ * running without this job, short enough that the first call is still one or
+ * two pages of results.
+ */
+const FIRST_DRIVE_SCAN_DAYS = 90;
+/** Re-ask for a minute either side of the last scan, in case of clock skew. */
+const DRIVE_SCAN_OVERLAP_MS = 60_000;
+/** Most a single run will read; the rest waits for the next one. */
+const DRIVE_SCAN_PAGE = 2000;
+
+/**
+ * Fold Google's edit times into the hub.
+ *
+ * Every list is ordered and labelled by when a document was last edited, and
+ * for anything in Drive that is a fact only Google holds — somebody opens the
+ * rehearsal schedule and types, and nothing tells the hub. Asking per document
+ * would be one API call per row of every list, so instead this asks Drive once
+ * for everything that changed since the last run and matches the answer up by
+ * file id. One or two calls, whatever the size of the hub.
+ */
+export async function refreshDriveEditTimes(options?: {
+  since?: Date;
+  limit?: number;
+}): Promise<{ seen: number; updated: number }> {
+  const config = await getConfig();
+  const since =
+    options?.since ??
+    new Date(
+      (config.lastDriveScanAt?.getTime() ?? Date.now() - FIRST_DRIVE_SCAN_DAYS * DAY_MS) -
+        DRIVE_SCAN_OVERLAP_MS,
+    );
+
+  const startedAt = new Date();
+  const changed = await driveProvider().listModifiedSince(
+    since,
+    options?.limit ?? DRIVE_SCAN_PAGE,
+  );
+  if (changed.length === 0) {
+    await prisma.orgConfig.update({
+      where: { id: "singleton" },
+      data: { lastDriveScanAt: startedAt },
+    });
+    return { seen: 0, updated: 0 };
+  }
+
+  const times = new Map(
+    changed
+      .filter((file) => file.modifiedTime)
+      .map((file) => [file.id, new Date(file.modifiedTime!)]),
+  );
+
+  // Most of what Drive reports will be files the hub has never heard of, so
+  // the matching happens here rather than in a query per file.
+  let updated = 0;
+  const ids = [...times.keys()];
+  for (let start = 0; start < ids.length; start += 200) {
+    const batch = ids.slice(start, start + 200);
+    const documents = await prisma.document.findMany({
+      where: { googleFileId: { in: batch } },
+      select: { id: true, googleFileId: true, lastEditedAt: true },
+    });
+    for (const document of documents) {
+      const modifiedAt = times.get(document.googleFileId!);
+      if (!modifiedAt || modifiedAt.getTime() === document.lastEditedAt.getTime()) continue;
+      await prisma.document.update({
+        where: { id: document.id },
+        data: { googleModifiedAt: modifiedAt, lastEditedAt: modifiedAt, lastSyncedAt: startedAt },
+      });
+      updated += 1;
+    }
+  }
+
+  // Drive answers newest first, so a truncated answer is missing its oldest
+  // end. Marking the scan complete would lose those for good; instead the
+  // watermark goes back to the oldest one actually read and the next run
+  // starts from there.
+  const truncated = changed.length >= (options?.limit ?? DRIVE_SCAN_PAGE);
+  const oldestSeen = changed.at(-1)?.modifiedTime;
+  await prisma.orgConfig.update({
+    where: { id: "singleton" },
+    data: {
+      lastDriveScanAt: truncated && oldestSeen ? new Date(oldestSeen) : startedAt,
+    },
+  });
+  return { seen: changed.length, updated };
+}
 
 /**
  * Bring Canva mirrors back in line with their originals.
@@ -147,8 +245,6 @@ export async function refreshStaleCanvaMirrors(options?: {
   return { checked, refreshed, failures, stale };
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
  * Whether the digest is due: the configured day, and not already sent.
  *
@@ -178,12 +274,19 @@ export function digestIsDue(config: {
 }
 
 export async function runScheduledJobs(options?: {
-  force?: { sharing?: boolean; canva?: boolean; digest?: boolean };
+  force?: { sharing?: boolean; drive?: boolean; canva?: boolean; digest?: boolean };
   /** Override the wall-clock budget, e.g. from a longer-lived host. */
   budgetMs?: number;
 }): Promise<CronReport> {
   const config = await getConfig();
-  const report: CronReport = { sharing: null, canva: null, digest: null, skipped: [] };
+  const report: CronReport = {
+    sharing: null,
+    drive: null,
+    titles: null,
+    canva: null,
+    digest: null,
+    skipped: [],
+  };
 
   const startedAt = Date.now();
   const budget = options?.budgetMs ?? BUDGET_MS;
@@ -208,7 +311,37 @@ export async function runScheduledJobs(options?: {
     report.skipped.push("sharing (nothing stale)");
   }
 
-  // 2. Canva mirrors, with whatever is left of the budget.
+  // 2. What Google says has changed. Cheap — a call or two — and it is what
+  //    every "last edited" on the hub is showing.
+  if (Date.now() < startedAt + budget || options?.force?.drive) {
+    try {
+      report.drive = await refreshDriveEditTimes();
+    } catch (error) {
+      // Usually "no Google account connected", which is a state the hub runs
+      // in quite happily — the other jobs should still get their turn.
+      console.error("[cron] could not read Drive's edit times", error);
+      report.skipped.push(`drive (${(error as Error).message})`);
+    }
+  } else {
+    report.skipped.push("drive (no time left this run)");
+  }
+
+  // 3. The one-off pass that brings titles that predate the naming rule into
+  //    line with it. Idempotent, but only worth running unprompted once —
+  //    after that it is the admin's button in Settings.
+  if (config.titlesNormalisedAt === null) {
+    try {
+      const result = await normaliseDocumentTitles();
+      report.titles = { scanned: result.scanned, changed: result.changed };
+    } catch (error) {
+      console.error("[cron] could not apply the naming rule", error);
+      report.skipped.push(`titles (${(error as Error).message})`);
+    }
+  } else {
+    report.skipped.push("titles (already applied)");
+  }
+
+  // 4. Canva mirrors, with whatever is left of the budget.
   if (config.canvaAutoRefresh || options?.force?.canva) {
     const result = await refreshStaleCanvaMirrors({
       force: options?.force?.canva,
@@ -219,7 +352,7 @@ export async function runScheduledJobs(options?: {
     report.skipped.push("canva (auto-refresh off)");
   }
 
-  // 3. The weekly digest.
+  // 5. The weekly digest.
   if (digestIsDue(config) || options?.force?.digest) {
     report.digest = await sendDigests();
   } else {
@@ -239,6 +372,8 @@ export async function runScheduledJobs(options?: {
 
   const didSomething =
     (report.sharing?.processed ?? 0) > 0 ||
+    (report.drive?.updated ?? 0) > 0 ||
+    (report.titles?.changed ?? 0) > 0 ||
     (report.canva?.refreshed ?? 0) > 0 ||
     (report.digest?.sent ?? 0) > 0;
 
@@ -247,6 +382,8 @@ export async function runScheduledJobs(options?: {
       action: "cron.run",
       summary: [
         report.sharing?.processed ? `re-shared ${report.sharing.processed}` : null,
+        report.drive?.updated ? `took ${report.drive.updated} edit times from Drive` : null,
+        report.titles?.changed ? `renamed ${report.titles.changed} to the naming rule` : null,
         report.canva?.refreshed ? `re-exported ${report.canva.refreshed} Canva designs` : null,
         report.digest?.sent ? `sent ${report.digest.sent} digests` : null,
       ]

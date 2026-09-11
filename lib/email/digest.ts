@@ -33,10 +33,10 @@ export async function buildDigestFor(user: {
   const quietBefore = new Date(Date.now() - QUIET_DAYS * 24 * 60 * 60 * 1000);
 
   const [changedCount, changed, created, categories, canvaMirrors] = await Promise.all([
-    prisma.document.count({ where: { ...where, status: "ACTIVE", updatedAt: { gte: since } } }),
+    prisma.document.count({ where: { ...where, status: "ACTIVE", lastEditedAt: { gte: since } } }),
     prisma.document.findMany({
-      where: { ...where, status: "ACTIVE", updatedAt: { gte: since } },
-      orderBy: { updatedAt: "desc" },
+      where: { ...where, status: "ACTIVE", lastEditedAt: { gte: since } },
+      orderBy: { lastEditedAt: "desc" },
       take: 14,
       include: {
         category: { select: { name: true } },
@@ -44,14 +44,14 @@ export async function buildDigestFor(user: {
       },
     }),
     // "of them new" has to be a subset of what changed, or the sentence reads
-    // as nonsense when a document's updatedAt has been set behind its
+    // as nonsense when a document's edit time has been set behind its
     // createdAt (which seeded data does).
     prisma.document.count({
       where: {
         ...where,
         status: "ACTIVE",
         createdAt: { gte: since },
-        updatedAt: { gte: since },
+        lastEditedAt: { gte: since },
       },
     }),
     prisma.category.findMany({
@@ -71,10 +71,10 @@ export async function buildDigestFor(user: {
     if (!viewer.isBoard && !viewer.companyCategoryIds.includes(category.id)) continue;
     const latest = await prisma.document.findFirst({
       where: { ...where, status: "ACTIVE", categoryId: category.id },
-      orderBy: { updatedAt: "desc" },
-      select: { updatedAt: true },
+      orderBy: { lastEditedAt: "desc" },
+      select: { lastEditedAt: true },
     });
-    if (latest && latest.updatedAt < quietBefore) quietCategories.push(category.name);
+    if (latest && latest.lastEditedAt < quietBefore) quietCategories.push(category.name);
   }
 
   // Board only: shows with production categories still empty.
@@ -121,6 +121,7 @@ export async function buildDigestFor(user: {
     orgName: config.orgName,
     appUrl: env.appUrl,
     name: user.name,
+    isBoard: viewer.isBoard,
     since,
     changedCount,
     changed: changed.map((document) => ({

@@ -52,7 +52,7 @@ async function editableDocument(id: string) {
   if (!canEditDocument(viewer, document)) {
     throw new Error("Only the person who filed this document (or an admin) can change it.");
   }
-  return { user, document };
+  return { user, viewer, document };
 }
 
 // --- create -----------------------------------------------------------------
@@ -161,7 +161,7 @@ export async function updateDocumentAction(
   const id = text(form, "id");
   try {
     if (!id) return { error: "Missing document id." };
-    const { user } = await editableDocument(id);
+    const { user, viewer, document } = await editableDocument(id);
     const parsed = updateDocumentSchema.safeParse({
       id,
       title: text(form, "title") ?? "",
@@ -174,6 +174,17 @@ export async function updateDocumentAction(
       pinned: bool(form, "pinned"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
+
+    // Re-filing is filing: a company member may only move a document to a
+    // category, show and visibility they could have filed it into. Checked
+    // only when one of those actually changes, so that somebody whose role
+    // has since lost its filing rights can still fix a typo in their own
+    // document's name.
+    const refiled =
+      parsed.data.categoryId !== document.categoryId ||
+      (parsed.data.productionId ?? null) !== document.productionId ||
+      parsed.data.visibility !== document.visibility;
+    if (refiled) assertCreationAllowed(viewer, parsed.data);
 
     const { warnings } = await updateDocument(user, parsed.data);
     refreshEverywhere();

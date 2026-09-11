@@ -106,6 +106,16 @@ export interface DriveProvider {
    * hub is using — which no amount of re-scanning will reveal.
    */
   listSharedFolders(limit?: number): Promise<DriveFileInfo[]>;
+  /**
+   * Everything this account can see that Google says changed after `since`,
+   * as ids and times only.
+   *
+   * The hub sorts and labels documents by when they were last edited, which
+   * is a fact only Drive knows and which changes without the hub being told.
+   * Asking per document would be one API call per row on every list; asking
+   * Drive for the delta is one call for the lot, however big the hub is.
+   */
+  listModifiedSince(since: Date, limit?: number): Promise<Array<{ id: string; modifiedTime: string | null }>>;
   renameFile(fileId: string, name: string): Promise<void>;
   /**
    * Merge hub labels into the file's appProperties.

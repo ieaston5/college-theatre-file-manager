@@ -32,10 +32,10 @@ export const documentCountsByCategory = cache(async function documentCountsByCat
     by: ["categoryId"],
     where: { ...visibleDocumentsWhere(viewer), status: "ACTIVE" },
     _count: { _all: true },
-    _max: { updatedAt: true },
+    _max: { lastEditedAt: true },
   });
   return new Map(
-    rows.map((row) => [row.categoryId, { count: row._count._all, updated: row._max.updatedAt }]),
+    rows.map((row) => [row.categoryId, { count: row._count._all, updated: row._max.lastEditedAt }]),
   );
 });
 

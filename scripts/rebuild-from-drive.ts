@@ -318,7 +318,14 @@ async function main() {
           // Reuse the original id when Drive still remembers it, so any link
           // anybody has bookmarked keeps working.
           ...(file.props.hubDocumentId ? { id: file.props.hubDocumentId } : {}),
+          // The file's name in Drive is already the hub's naming rule applied
+          // to something, but what that something was is not recoverable from
+          // the name alone — so it stands as both the title and the base the
+          // rule would be re-applied to. Re-applying the rule after a rebuild
+          // would therefore prefix these a second time; the summary below says
+          // so, and an admin can retitle the handful that matter.
           title,
+          baseTitle: title,
           description: "Rebuilt from Drive after the hub's database was lost.",
           docType: docTypeFromMime(file.mimeType),
           source: "REGISTERED",
@@ -335,6 +342,7 @@ async function main() {
           sizeBytes: file.size,
           originalFileName: file.name,
           googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : null,
+          lastEditedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
           lastSyncedAt: new Date(),
           ...(file.props.hubCanvaDesignId ? { canvaDesignId: file.props.hubCanvaDesignId } : {}),
         },
@@ -350,6 +358,13 @@ async function main() {
       ` — ${labelled} carried their hub label, ${guessed} had to be guessed from their folder.`,
   );
   if (alreadyKnown > 0) console.log(`${alreadyKnown} were already in the database and left alone.`);
+  if (apply && restored > 0) {
+    console.log(
+      "Titles were taken from the files' names in Drive, which already follow the hub's naming rule.\n" +
+        "Do not run Admin → Settings → “Apply the naming rule” after a rebuild without checking the\n" +
+        "preview first: it would compose the rule on top of names that already have it.",
+    );
+  }
   if (newCategories.size > 0) {
     console.log(
       `${apply ? "Created" : "Would create"} ${newCategories.size} categor${

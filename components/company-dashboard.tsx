@@ -35,7 +35,7 @@ export async function CompanyDashboard({
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE" },
       include: DOCUMENT_LIST_INCLUDE,
-      orderBy: { updatedAt: "desc" },
+      orderBy: { lastEditedAt: "desc" },
       take: 10,
     }),
     prisma.document.groupBy({
@@ -170,6 +170,7 @@ export async function CompanyDashboard({
         />
         <DocumentList
           documents={recent as DocumentListItem[]}
+          showPinned={false}
           empty={
             <EmptyState icon="folder" title="Nothing shared with you yet">
               As soon as the schedule or the script is posted, it shows up here.

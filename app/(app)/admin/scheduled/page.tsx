@@ -114,8 +114,25 @@ export default async function AdminScheduledPage() {
       </Card>
 
       <Card>
-        <SectionHeader icon="list" title="The three jobs" />
+        <SectionHeader icon="list" title="The jobs" />
         <ul className="space-y-3 text-sm">
+          <li className="flex gap-3">
+            <Icon name="clock" className="mt-0.5 size-4 shrink-0 text-ink-400" />
+            <span>
+              <span className="font-medium text-ink-900">Ask Drive what has changed.</span>{" "}
+              <span className="text-ink-600">
+                Every list is ordered and labelled by when a document was last edited, which for
+                anything in Drive is a fact only Google holds — somebody opens the schedule and
+                types, and nothing tells the hub. One query for everything modified since the last
+                run keeps that honest without costing a Google call per row of every page.
+              </span>{" "}
+              <Badge tone={config.lastDriveScanAt ? "slate" : "amber"}>
+                {config.lastDriveScanAt
+                  ? `read up to ${formatDateTime(config.lastDriveScanAt)}`
+                  : "never run"}
+              </Badge>
+            </span>
+          </li>
           <li className="flex gap-3">
             <Icon name="refresh" className="mt-0.5 size-4 shrink-0 text-ink-400" />
             <span>

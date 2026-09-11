@@ -100,6 +100,20 @@ export function readMockFile(id: string): MockFile | null {
   return load().files[id] ?? null;
 }
 
+/**
+ * Backdate a simulated file. Only the seed uses this: sample documents are
+ * spread over the past few days so the hub does not look like it was filled
+ * in one go, and the simulated Drive has to tell the same story — otherwise
+ * the scheduled check reads the simulation and flattens them all to "now".
+ */
+export function setMockModifiedTime(fileId: string, when: Date): void {
+  const state = load();
+  const file = state.files[fileId];
+  if (!file) return;
+  file.modifiedTime = when.toISOString();
+  save(state);
+}
+
 const BLOB_DIR = path.join(STORE_DIR, "blobs");
 
 /**
@@ -289,6 +303,17 @@ export class MockDriveProvider implements DriveProvider {
       .filter((file) => !file.trashed && file.mimeType === "application/vnd.google-apps.folder")
       .slice(0, limit)
       .map(toInfo);
+  }
+
+  async listModifiedSince(
+    since: Date,
+    limit = 2000,
+  ): Promise<Array<{ id: string; modifiedTime: string | null }>> {
+    return Object.values(load().files)
+      .filter((file) => !file.trashed && new Date(file.modifiedTime) > since)
+      .sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime))
+      .slice(0, limit)
+      .map((file) => ({ id: file.id, modifiedTime: file.modifiedTime }));
   }
 
   async renameFile(fileId: string, name: string): Promise<void> {

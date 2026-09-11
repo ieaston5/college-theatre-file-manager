@@ -34,10 +34,14 @@ export function DocumentRow({
   document,
   showCategory = true,
   showProduction = true,
+  showPinned = true,
 }: {
   document: DocumentListItem;
   showCategory?: boolean;
   showProduction?: boolean;
+  /** Pinning surfaces a document on the board's dashboard, which company
+      members do not have — so the marker is not shown to them. */
+  showPinned?: boolean;
 }) {
   const visibility = VISIBILITY_META[document.visibility as Visibility];
   return (
@@ -52,7 +56,9 @@ export function DocumentRow({
           >
             {document.title}
           </Link>
-          {document.pinned ? <Icon name="pin" className="size-3.5 shrink-0 text-gold-500" /> : null}
+          {document.pinned && showPinned ? (
+            <Icon name="pin" className="size-3.5 shrink-0 text-gold-500" />
+          ) : null}
           {document.visibility === "PRIVATE" ? (
             <Icon name="lock" className="size-3.5 shrink-0 text-amber-600" title="Private" />
           ) : null}
@@ -96,7 +102,17 @@ export function DocumentRow({
           <span className="text-ink-300">·</span>
           <span title={visibility?.label}>{typeMeta(document.docType).short}</span>
           <span className="text-ink-300">·</span>
-          <span>updated {relativeTime(document.updatedAt)}</span>
+          {/* When the document itself last changed — Google's answer for
+              anything in Drive, so it matches what the file says there. */}
+          <span
+            title={
+              document.googleModifiedAt
+                ? `Last edited in Google ${relativeTime(document.googleModifiedAt)}`
+                : undefined
+            }
+          >
+            edited {relativeTime(document.lastEditedAt)}
+          </span>
           <span className="text-ink-300 max-sm:hidden">·</span>
           <span className="max-sm:hidden">{document.creator.name ?? document.creator.email}</span>
         </div>
@@ -122,11 +138,13 @@ export function DocumentList({
   documents,
   showCategory = true,
   showProduction = true,
+  showPinned = true,
   empty,
 }: {
   documents: DocumentListItem[];
   showCategory?: boolean;
   showProduction?: boolean;
+  showPinned?: boolean;
   empty?: React.ReactNode;
 }) {
   if (documents.length === 0) {
@@ -149,6 +167,7 @@ export function DocumentList({
           document={document}
           showCategory={showCategory}
           showProduction={showProduction}
+          showPinned={showPinned}
         />
       ))}
     </ul>
