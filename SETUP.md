@@ -610,6 +610,18 @@ somebody is still editing.
 4. *Admin → Members*: add the board. They get a welcome email if email is on.
 5. *Admin → Import*: point it at your existing Drive folder.
 
+   If the club's archive is in a **shared drive** rather than somebody's My
+   Drive, add the hub account as a **member of the drive** — sharing a folder
+   inside one is not the same thing, and only membership lets the hub list
+   what is there. Content manager is enough to rename files during an import;
+   Viewer is enough to scan and file them. Shared drives the hub can read are
+   offered as one-click scan targets on the import screen, because Drive
+   gives no other way to find one from the outside.
+
+   Files in a shared drive are owned by the drive, so they skip the ownership
+   chase-list at the bottom of that screen entirely — there is nobody to ask,
+   and Google has no transfer to perform.
+
 ### 3f. Back it up
 
 The files live in Google Drive, so Google is backing those up. What is only

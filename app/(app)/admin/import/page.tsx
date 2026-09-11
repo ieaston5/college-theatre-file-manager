@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getSetupState } from "@/lib/config";
 import { driveProvider } from "@/lib/google";
-import { ownershipHandoverList, cleanTitle } from "@/lib/import";
+import { ownershipHandoverList, sharedDriveHoldings, cleanTitle } from "@/lib/import";
 import {
   createSampleMessAction,
   deleteBatchAction,
@@ -93,7 +93,22 @@ export default async function AdminImportPage({
   const batch =
     (activeBatchId ? batches.find((entry) => entry.id === activeBatchId) : batches[0]) ?? null;
 
-  const [pending, done, handover, hubAccountEmail] = await Promise.all([
+  /**
+   * Shared drives the hub can read, offered as one-click scan targets.
+   *
+   * A shared drive never turns up under "shared with me", so there is no way
+   * to discover one from inside the hub — an admin would have to go to Drive
+   * and fetch a link. Best effort: a Drive that is slow or unreachable must
+   * not take the import page down with it.
+   */
+  const sharedDrives = setup.driveConnected
+    ? await driveProvider()
+        .listSharedDrives(25)
+        .then((drives) => drives.map((drive) => ({ id: drive.id, name: drive.name })))
+        .catch(() => [])
+    : [];
+
+  const [pending, done, handover, driveHoldings, hubAccountEmail] = await Promise.all([
     batch
       ? prisma.importItem.findMany({
           where: { batchId: batch.id, decision: "PENDING" },
@@ -109,6 +124,7 @@ export default async function AdminImportPage({
         })
       : Promise.resolve([]),
     ownershipHandoverList(setup.account?.email ?? null),
+    sharedDriveHoldings(),
     Promise.resolve(setup.account?.email ?? null),
   ]);
 
@@ -128,6 +144,7 @@ export default async function AdminImportPage({
     : [[], { shown: [], total: 0 }];
 
   const uncategorised = categories.filter((category) => !category.keywords).length;
+  const driveHeld = driveHoldings.reduce((total, drive) => total + drive.count, 0);
 
   return (
     <div className="space-y-6">
@@ -136,18 +153,20 @@ export default async function AdminImportPage({
         it sits in, and lets you confirm a screenful at a time. Filing a file records where it
         belongs and shares it to match — it does not move the file or change who owns it. Ownership
         transfer is the one thing the hub cannot do for you; there is a chase-list at the bottom.
+        Files already in a shared drive skip that step entirely, because the drive owns them.
       </Banner>
 
       <Card>
         <SectionHeader
           icon="folder-open"
           title="Scan a folder"
-          description="Point it at last year's shared folder, or one person's show folder."
+          description="Point it at last year's shared folder, one person's show folder, or a whole shared drive."
         />
         <ImportScanForm
           hubAccountEmail={hubAccountEmail}
           driveMode={env.driveMode}
           rootFolderId={setup.account?.rootFolderId ?? null}
+          sharedDrives={sharedDrives}
         />
 
         {env.driveMode === "mock" ? (
@@ -275,6 +294,7 @@ export default async function AdminImportPage({
                 name: item.name,
                 mimeType: item.mimeType,
                 ownerEmail: item.ownerEmail,
+                driveName: item.driveName,
                 folderPath: item.folderPath,
                 // Narrowed for the client component: a byte count is only
                 // ever displayed, and Number is exact well past any file size.
@@ -330,7 +350,7 @@ export default async function AdminImportPage({
         {handover.length === 0 ? (
           <p className="text-sm text-ink-600">
             {hubAccountEmail
-              ? `Everything the hub tracks is already owned by ${hubAccountEmail}. Nothing to chase.`
+              ? `Everything the hub tracks is already owned by ${hubAccountEmail} or by a shared drive. Nothing to chase.`
               : "Connect the hub's Google account to see which files are owned by individuals."}
           </p>
         ) : (
@@ -342,6 +362,18 @@ export default async function AdminImportPage({
             hubAccountEmail={hubAccountEmail}
           />
         )}
+
+        {/* Otherwise these files read as "owner unknown" and look like work
+            outstanding. A shared drive owns what is in it, so the club
+            already does, and there is no transfer Google could perform. */}
+        {driveHoldings.length > 0 ? (
+          <p className="mt-3 border-t border-ink-100 pt-3 text-xs leading-relaxed text-ink-500">
+            {driveHeld} {pluralize(driveHeld, "file")} {driveHeld === 1 ? "lives" : "live"} in a
+            shared drive ({driveHoldings.map((drive) => `${drive.name} — ${drive.count}`).join(", ")}
+            ). Those are owned by the drive rather than by a person, so they need no handover and
+            are not listed above.
+          </p>
+        ) : null}
       </Card>
 
       {params.sample === "1" ? (

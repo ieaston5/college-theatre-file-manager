@@ -15,6 +15,16 @@ export type DriveFileInfo = {
   appProperties?: Record<string, string> | null;
   /** Set when this "folder" is really a shortcut to one somewhere else. */
   shortcutTargetId?: string | null;
+  /**
+   * The shared drive this item lives in. Absent for My Drive.
+   *
+   * Worth carrying everywhere, because almost every "is this shared with us"
+   * signal below reads differently inside a shared drive: nothing there is
+   * ownedByMe, nothing has a sharedWithMeTime, and no file has an owner.
+   * Without this the hub would diagnose a perfectly healthy shared drive as a
+   * link-only share.
+   */
+  driveId?: string | null;
   /** Whether this account may enumerate the folder. null when unknown. */
   canListChildren?: boolean | null;
   /** Whether the hub's own account owns this. null when unknown. */
@@ -31,6 +41,22 @@ export type DriveFileInfo = {
    * change the questions.
    */
   formResponderUrl?: string | null;
+};
+
+/**
+ * A shared drive the hub's account is a member of.
+ *
+ * Shared drives are not "shared with" an account the way a folder is, so they
+ * never appear in listSharedFolders and there is no link to paste for them
+ * until somebody goes and finds one. Listing them is how an import can start
+ * from "what can the hub see?" rather than "what is the id?".
+ */
+export type SharedDriveInfo = {
+  id: string;
+  name: string;
+  /** Whether the hub's account may enumerate the drive. null when unknown. */
+  canListChildren: boolean | null;
+  createdTime: string | null;
 };
 
 export type DocHeader = {
@@ -96,7 +122,17 @@ export interface DriveProvider {
   ensureFolder(name: string, parentId?: string | null): Promise<string>;
   createDocument(input: CreateDocumentInput): Promise<DriveFileInfo>;
   getFile(fileId: string): Promise<DriveFileInfo | null>;
-  listFolder(folderId: string): Promise<DriveFileInfo[]>;
+  /**
+   * Children of a folder.
+   *
+   * Pass the enclosing shared drive's id when the folder is in one: Drive's
+   * default search corpus is the account's own, and naming the drive is both
+   * the documented way to search inside it and considerably faster than
+   * asking every drive at once.
+   */
+  listFolder(folderId: string, options?: { driveId?: string | null }): Promise<DriveFileInfo[]>;
+  /** Shared drives the hub's account is a member of. */
+  listSharedDrives(limit?: number): Promise<SharedDriveInfo[]>;
   /**
    * Folders that have been shared *with* the hub account.
    *

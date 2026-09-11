@@ -10,6 +10,7 @@ import {
   type DocHeader,
   type DriveFileInfo,
   type DriveProvider,
+  type SharedDriveInfo,
   type SharingPlan,
   type SharingResult,
 } from "./types";
@@ -26,7 +27,9 @@ const FILE_FIELDS =
   // folder reads as empty: is Drive treating it as *shared with this account*
   // at all? A folder reachable only by link can be fetched by id but is not in
   // the account's corpus, so listing its children returns nothing.
-  "ownedByMe,sharedWithMeTime";
+  // driveId: set only for items in a shared drive, where none of the three
+  // fields above mean anything — see DriveFileInfo.driveId.
+  "ownedByMe,sharedWithMeTime,driveId";
 
 function toInfo(file: {
   id?: string | null;
@@ -48,6 +51,7 @@ function toInfo(file: {
   } | null;
   ownedByMe?: boolean | null;
   sharedWithMeTime?: string | null;
+  driveId?: string | null;
 }): DriveFileInfo {
   return {
     id: file.id ?? "",
@@ -65,6 +69,7 @@ function toInfo(file: {
     canListChildren: file.capabilities?.canListChildren ?? null,
     ownedByMe: file.ownedByMe ?? null,
     sharedWithMeTime: file.sharedWithMeTime ?? null,
+    driveId: file.driveId ?? null,
   };
 }
 
@@ -131,7 +136,13 @@ export class GoogleDriveProvider implements DriveProvider {
         fields: "files(id,name)",
         pageSize: 5,
         supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
+        // With a parent named, the search is already pinned to one place and
+        // may follow that parent into a shared drive. Without one — the hub's
+        // own root folder — searching every shared drive in the organisation
+        // by name alone is how the hub would silently adopt somebody else's
+        // folder that happens to share its name, so that search stays inside
+        // this account's own Drive.
+        includeItemsFromAllDrives: Boolean(parentId),
       });
       const existing = found.data.files?.[0]?.id;
       if (existing) return existing;
@@ -352,10 +363,26 @@ export class GoogleDriveProvider implements DriveProvider {
     }
   }
 
-  async listFolder(folderId: string): Promise<DriveFileInfo[]> {
+  async listFolder(
+    folderId: string,
+    options?: { driveId?: string | null },
+  ): Promise<DriveFileInfo[]> {
     const drive = await this.drive();
     const out: DriveFileInfo[] = [];
     let pageToken: string | undefined;
+    /**
+     * Searching inside a shared drive means saying so.
+     *
+     * The default corpus is the account's own Drive, and a shared drive is
+     * not part of it — the account is a member of the drive, it does not own
+     * anything there. `corpora: "drive"` with the drive's id is the documented
+     * way to search one, and Google asks for it in preference to "allDrives",
+     * which makes Drive consult every drive in the organisation for a query
+     * we already know the answer's location for.
+     */
+    const scope = options?.driveId
+      ? { corpora: "drive", driveId: options.driveId }
+      : { corpora: undefined, driveId: undefined };
     try {
       do {
         const res = await drive.files.list({
@@ -365,6 +392,7 @@ export class GoogleDriveProvider implements DriveProvider {
           pageToken,
           supportsAllDrives: true,
           includeItemsFromAllDrives: true,
+          ...scope,
         });
         out.push(...(res.data.files ?? []).map(toInfo));
         pageToken = res.data.nextPageToken ?? undefined;
@@ -372,6 +400,24 @@ export class GoogleDriveProvider implements DriveProvider {
       return out;
     } catch (error) {
       wrap(error, "Listing the Drive folder");
+    }
+  }
+
+  async listSharedDrives(limit = 50): Promise<SharedDriveInfo[]> {
+    const drive = await this.drive();
+    try {
+      const res = await drive.drives.list({
+        pageSize: Math.min(limit, 100),
+        fields: "drives(id,name,createdTime,capabilities(canListChildren))",
+      });
+      return (res.data.drives ?? []).map((entry) => ({
+        id: entry.id ?? "",
+        name: entry.name ?? "Untitled shared drive",
+        canListChildren: entry.capabilities?.canListChildren ?? null,
+        createdTime: entry.createdTime ?? null,
+      }));
+    } catch (error) {
+      wrap(error, "Listing the shared drives the hub can see");
     }
   }
 
@@ -517,11 +563,17 @@ export class GoogleDriveProvider implements DriveProvider {
       type?: string | null;
       role?: string | null;
       emailAddress?: string | null;
+      permissionDetails?: Array<{ inherited?: boolean | null }> | null;
     }> = [];
     try {
       const res = await drive.permissions.list({
         fileId,
-        fields: "permissions(id,type,role,emailAddress,deleted)",
+        // permissionDetails.inherited: in a shared drive, membership of the
+        // drive grants access to everything in it, and those permissions
+        // cannot be changed or removed on the individual file. Asking Drive
+        // to do it returns an error per file; knowing in advance lets the hub
+        // say what is actually true instead.
+        fields: "permissions(id,type,role,emailAddress,deleted,permissionDetails(inherited))",
         pageSize: 100,
         supportsAllDrives: true,
       });
@@ -541,6 +593,38 @@ export class GoogleDriveProvider implements DriveProvider {
       const wanted = email ? desired.get(email) : undefined;
       const roleMatches =
         wanted && perm.role === (wanted.level === "WRITER" ? "writer" : "reader");
+      // Inherited from a shared drive or an ancestor folder: not this file's
+      // to change. Leaving it alone and saying so beats a failed API call.
+      const inherited = perm.permissionDetails?.some((detail) => detail.inherited) ?? false;
+
+      if (inherited) {
+        if (wanted && email && roleMatches) {
+          // The drive already grants exactly what the plan asks for.
+          desired.delete(email);
+          granted.push({ email, level: wanted.level, permissionId: perm.id });
+        } else if (wanted && email && wanted.level === "READER" && perm.role === "writer") {
+          // Cannot be narrowed here: the drive gave them edit access. Left in
+          // place, and left out of `desired` so no pointless grant is made.
+          desired.delete(email);
+          granted.push({ email, level: "WRITER", permissionId: perm.id });
+          warnings.push(
+            `${email} can already edit this through the shared drive or folder it lives in, so read-only access could not be applied to them.`,
+          );
+        } else if (!wanted && (!additive || (email && email === retiredGroup))) {
+          // Additive sharing only ever pulls the retired board group back, so
+          // that is the only inherited grant it needs to report as
+          // un-revokable. Worth saying: a group inherited from a shared drive
+          // is access no member list can take away, which is the whole reason
+          // the group is being retired.
+          warnings.push(
+            `${email ?? perm.type ?? "Someone"} can reach this through the shared drive or folder it lives in, ` +
+              "which cannot be undone on the file itself — change who has access there, or move the file out of it.",
+          );
+        }
+        // Anything else (wanted WRITER over an inherited reader) falls through
+        // to step 2, which adds a direct grant on top of the inherited one.
+        continue;
+      }
 
       if (wanted && roleMatches) {
         // Already exactly right: keep it and don't re-grant below.

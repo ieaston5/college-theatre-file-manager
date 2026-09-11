@@ -150,13 +150,28 @@ export type ScanResult = {
     foldersVisited: number;
     /** Subfolders below the depth limit, which were not looked in. */
     notLookedIn: string[];
+    /**
+     * Files that came out of a shared drive. Those need no ownership
+     * handover — the drive owns them, so the club already does — which is
+     * worth saying, because Drive reports them as having no owner at all and
+     * that otherwise reads as "the hub could not tell".
+     */
+    sharedDriveFiles: number;
+    /** Names of the shared drives the scan drew from. */
+    sharedDriveNames: string[];
   };
 };
 
 /** Walk a Drive folder and record everything worth filing. */
 export async function scanDriveFolder(
   actor: User,
-  options: { folderId: string; folderName?: string | null; includeSubfolders: boolean },
+  options: {
+    folderId: string;
+    folderName?: string | null;
+    includeSubfolders: boolean;
+    /** The shared drive the starting folder lives in, when it lives in one. */
+    driveId?: string | null;
+  },
 ): Promise<ScanResult> {
   const provider = driveProvider();
 
@@ -206,16 +221,44 @@ export async function scanDriveFolder(
   let shortcutsFollowed = 0;
   let shortcutsUnreadable = 0;
   let foldersVisited = 0;
+  let sharedDriveFiles = 0;
   const tooDeep: string[] = [];
+  const sharedDrivesSeen = new Set<string>();
   const failures: string[] = [];
 
-  const queue: Array<{ id: string; path: string; depth: number }> = [
-    { id: options.folderId, path: options.folderName ?? "", depth: 0 },
+  /**
+   * Shared drive names, so an imported file can say which drive it came out
+   * of rather than showing a bare id.
+   *
+   * Fetched once, on the first file that needs one, and never for a scan that
+   * only touches My Drive. A folder of shortcuts can reach into several
+   * drives at once, which is why this is the whole list rather than a lookup
+   * per file.
+   */
+  const driveNames = new Map<string, string>();
+  let driveNamesLoaded = false;
+  const driveNameFor = async (driveId: string): Promise<string | null> => {
+    if (!driveNamesLoaded) {
+      driveNamesLoaded = true;
+      for (const drive of await provider.listSharedDrives().catch(() => [])) {
+        driveNames.set(drive.id, drive.name);
+      }
+    }
+    return driveNames.get(driveId) ?? null;
+  };
+
+  const queue: Array<{ id: string; path: string; depth: number; driveId: string | null }> = [
+    {
+      id: options.folderId,
+      path: options.folderName ?? "",
+      depth: 0,
+      driveId: options.driveId ?? null,
+    },
   ];
 
   while (queue.length > 0 && found < MAX_FILES) {
     const folder = queue.shift()!;
-    const entries = await provider.listFolder(folder.id);
+    const entries = await provider.listFolder(folder.id, { driveId: folder.driveId });
     foldersVisited += 1;
     entriesReturned += entries.length;
 
@@ -255,6 +298,10 @@ export async function scanDriveFolder(
             id: entry.id,
             path: folder.path ? `${folder.path} / ${entry.name}` : entry.name,
             depth: folder.depth + 1,
+            // Following a shortcut can cross from My Drive into a shared
+            // drive, or between two of them, so the drive is taken from the
+            // subfolder rather than inherited from its parent.
+            driveId: entry.driveId ?? null,
           });
         } else if (options.includeSubfolders) {
           // Deeper than the walk goes. Counted, because an import that
@@ -283,6 +330,13 @@ export async function scanDriveFolder(
           ? { confidence: 0 }
           : guessPlacement(entry.name, folder.path, categories, productions);
 
+        const driveId = entry.driveId ?? null;
+        const driveName = driveId ? await driveNameFor(driveId) : null;
+        if (driveId) {
+          sharedDriveFiles += 1;
+          sharedDrivesSeen.add(driveName ?? driveId);
+        }
+
         await prisma.importItem.upsert({
           where: { batchId_googleFileId: { batchId: batch.id, googleFileId: entry.id } },
           create: {
@@ -291,6 +345,8 @@ export async function scanDriveFolder(
             name: entry.name,
             mimeType: entry.mimeType,
             ownerEmail: entry.ownerEmail ?? null,
+            driveId,
+            driveName,
             webViewLink:
               entry.webViewLink || driveViewLink(entry.id, docTypeFromMime(entry.mimeType)),
             folderPath: folder.path || null,
@@ -337,6 +393,8 @@ export async function scanDriveFolder(
       shortcutsUnreadable,
       foldersVisited,
       notLookedIn: tooDeep.length,
+      sharedDriveFiles,
+      sharedDrives: [...sharedDrivesSeen],
       failed: failures.length,
       // Capped: the log is for reading afterwards, and a scan where everything
       // failed would otherwise write 400 messages into one row.
@@ -358,6 +416,8 @@ export async function scanDriveFolder(
       shortcutsUnreadable,
       foldersVisited,
       notLookedIn: tooDeep,
+      sharedDriveFiles,
+      sharedDriveNames: [...sharedDrivesSeen],
     },
   };
 }
@@ -465,6 +525,8 @@ export async function fileImportItems(
           googleFileId: item.googleFileId,
           webViewLink: item.webViewLink,
           driveOwnerEmail: item.ownerEmail,
+          driveId: item.driveId,
+          driveName: item.driveName,
           sizeBytes: item.sizeBytes,
           mimeType: item.mimeType,
           originalFileName: item.name,
@@ -570,6 +632,10 @@ export function cleanTitle(fileName: string): string {
  * This is the list to chase at the end of an import: ownership transfer is the
  * one thing the hub cannot do for you, because Google requires the current
  * owner to initiate it.
+ *
+ * Files in a shared drive are left out. The drive owns them, so the club
+ * already does; there is nobody to chase, and Google has no transfer to
+ * perform. They are counted separately by sharedDriveHoldings().
  */
 export async function ownershipHandoverList(hubAccountEmail: string | null) {
   const documents = await prisma.document.findMany({
@@ -577,6 +643,7 @@ export async function ownershipHandoverList(hubAccountEmail: string | null) {
       status: "ACTIVE",
       googleFileId: { not: null },
       driveOwnerEmail: { not: null },
+      driveId: null,
       ...(hubAccountEmail ? { NOT: { driveOwnerEmail: hubAccountEmail } } : {}),
     },
     select: { id: true, title: true, driveOwnerEmail: true, webViewLink: true },
@@ -591,4 +658,24 @@ export async function ownershipHandoverList(hubAccountEmail: string | null) {
   return [...byOwner.entries()]
     .map(([owner, files]) => ({ owner, files }))
     .sort((a, b) => b.files.length - a.files.length);
+}
+
+/**
+ * Documents the hub tracks that live in a shared drive, by drive.
+ *
+ * The counterpart to the chase-list: these are the files nobody has to hand
+ * over, and saying so is the point — an empty chase-list on its own is
+ * ambiguous between "everything is settled" and "the hub could not tell who
+ * owns any of it", which is exactly what a shared drive's missing owner field
+ * looks like.
+ */
+export async function sharedDriveHoldings(): Promise<Array<{ name: string; count: number }>> {
+  const rows = await prisma.document.groupBy({
+    by: ["driveId", "driveName"],
+    where: { status: "ACTIVE", driveId: { not: null } },
+    _count: { _all: true },
+  });
+  return rows
+    .map((row) => ({ name: row.driveName ?? "a shared drive", count: row._count._all }))
+    .sort((a, b) => b.count - a.count);
 }

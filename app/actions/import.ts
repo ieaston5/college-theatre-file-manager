@@ -55,6 +55,13 @@ export async function diagnoseFolderAction(
           ? result.sharedFolders.map((f) => `“${f.name}”`).join(", ")
           : "none"
       }.`,
+      // A shared drive is never "shared with" an account, so it would be
+      // missing from the line above and its absence read as no access.
+      `Shared drives this account is a member of: ${
+        result.sharedDrives.length > 0
+          ? result.sharedDrives.map((d) => `“${d.name}”`).join(", ")
+          : "none"
+      }.`,
     ];
 
     return {
@@ -87,9 +94,23 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
 
     let folder = await provider.getFile(folderId);
     if (!folder) {
+      /**
+       * A folder inside a shared drive the hub is not a member of fails here
+       * exactly like an unshared folder does, but sharing it is the wrong
+       * advice: shared drive membership is granted on the drive, and an admin
+       * following the usual instruction will keep failing. Naming the drives
+       * the hub *can* reach turns that into an answerable question.
+       */
+      const drives = await provider.listSharedDrives(25).catch(() => []);
       return {
         error: `The hub's Google account (${hubEmail}) cannot see that folder.`,
-        hint: "Share the folder with that address — view access is enough to scan it.",
+        hint:
+          drives.length > 0
+            ? `Share the folder with that address — view access is enough to scan it. If it is in a shared drive, add ${hubEmail} as a member of the drive instead; it is already a member of ${drives
+                .slice(0, 5)
+                .map((drive) => `“${drive.name}”`)
+                .join(", ")}${drives.length > 5 ? ", …" : ""}.`
+            : `Share the folder with that address — view access is enough to scan it. If it lives in a shared drive, add ${hubEmail} as a member of that drive instead: sharing a folder inside one does not always carry.`,
       };
     }
 
@@ -118,7 +139,9 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
     if (folder.canListChildren === false) {
       return {
         error: `${hubEmail} can see “${folder.name}” but is not allowed to list what is inside it.`,
-        hint: "Share the folder itself with that address as a Viewer. Sharing the files individually is not enough — Drive will not enumerate a folder you cannot open.",
+        hint: folder.driveId
+          ? "That folder is in a shared drive. Members can normally list everything in one, so this is a folder with its own restricted access — give the hub's address access to the folder, or raise its role on the drive."
+          : "Share the folder itself with that address as a Viewer. Sharing the files individually is not enough — Drive will not enumerate a folder you cannot open.",
       };
     }
 
@@ -126,6 +149,7 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
       folderId,
       folderName: folder.name,
       includeSubfolders,
+      driveId: folder.driveId ?? null,
     });
 
     refreshEverywhere();
@@ -178,7 +202,14 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
          *    folder is not in the account's corpus, so nothing inside it can
          *    be listed. Sharing it *to the address* is the fix.
          */
-        const reachedByLink = folder.ownedByMe === false && !folder.sharedWithMeTime;
+        // A shared drive is the exception that breaks the test below: nothing
+        // in one is ownedByMe and nothing carries a sharedWithMeTime, because
+        // the hub is a member of the drive rather than a recipient of a
+        // share. Without this, every empty folder in a shared drive is
+        // diagnosed as a link-only share and the fix offered is one that
+        // cannot work.
+        const reachedByLink =
+          !folder.driveId && folder.ownedByMe === false && !folder.sharedWithMeTime;
 
         if (reachedByLink) {
           const visible = await provider.listSharedFolders(10).catch(() => []);
@@ -198,9 +229,11 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
         return {
           ok: `Nothing to import: Drive reported “${folder.name}” as empty for ${hubEmail}.`,
           warnings: [
-            folder.ownedByMe
-              ? "The hub's own account owns that folder and Drive says there is nothing in it."
-              : "The folder is shared with the hub account, but Drive lists nothing inside it. If you can see files there yourself, they are most likely shared with you individually rather than through the folder — open the folder while signed in as the hub account to see exactly what it sees.",
+            folder.driveId
+              ? `That folder is in a shared drive, and every member of a shared drive sees the same contents — so an empty result here means it really is empty for everyone. Sign in as ${hubEmail} and open it to confirm.`
+              : folder.ownedByMe
+                ? "The hub's own account owns that folder and Drive says there is nothing in it."
+                : "The folder is shared with the hub account, but Drive lists nothing inside it. If you can see files there yourself, they are most likely shared with you individually rather than through the folder — open the folder while signed in as the hub account to see exactly what it sees.",
           ],
         };
       }
@@ -253,6 +286,22 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
     if (result.found >= 400) {
       warnings.push(
         "The scan stopped at 400 files, which is its per-scan limit. File these, then scan again to continue.",
+      );
+    }
+    // Worth stating rather than leaving people to notice a blank owner
+    // column: these are the files with nothing to chase at the end.
+    const { sharedDriveFiles, sharedDriveNames } = result.diagnostics;
+    if (sharedDriveFiles > 0) {
+      warnings.push(
+        `${sharedDriveFiles} of ${result.found} ${
+          sharedDriveFiles === 1 ? "file lives" : "files live"
+        } in ${
+          sharedDriveNames.length === 1
+            ? `the “${sharedDriveNames[0]}” shared drive`
+            : `${sharedDriveNames.length} shared drives`
+        }, so ${
+          sharedDriveFiles === 1 ? "it is" : "they are"
+        } owned by the drive rather than by a person — nothing to chase for ownership once filed.`,
       );
     }
 
@@ -388,6 +437,7 @@ export async function createSampleMessAction(): Promise<void> {
   if (env.driveMode !== "mock") return;
 
   const provider = driveProvider();
+  const { ensureMockSharedDrive } = await import("@/lib/google/mock");
   const { rootFolderId } = await ensureRootFolders();
   const root = await provider.ensureFolder("Old Penn Players Drive (sample mess)", rootFolderId);
 
@@ -431,6 +481,29 @@ export async function createSampleMessAction(): Promise<void> {
     },
   ];
 
+  /**
+   * The same pile, but in a shared drive — the other shape a club's archive
+   * comes in, and the one that reads differently at every step: no owner per
+   * file, no "shared with us" record, and nothing to chase afterwards.
+   */
+  const sharedDriveId = ensureMockSharedDrive("Penn Players Archive (shared drive)");
+  const sharedDriveLayout: Array<{ folder: string | null; files: Array<[string, string]> }> = [
+    {
+      folder: "2024-25 season",
+      files: [
+        ["Company Season budget 24-25", "application/vnd.google-apps.spreadsheet"],
+        ["season wrap report", "application/vnd.google-apps.document"],
+      ],
+    },
+    {
+      folder: "Archive — programmes",
+      files: [
+        ["Into the Woods programme.pdf", "application/pdf"],
+        ["much ado programme draft", "application/vnd.google-apps.document"],
+      ],
+    },
+  ];
+
   const { writeMockUpload } = await import("@/lib/google/mock");
   let created = 0;
   for (const group of layout) {
@@ -449,10 +522,29 @@ export async function createSampleMessAction(): Promise<void> {
     }
   }
 
+  for (const group of sharedDriveLayout) {
+    const parent = group.folder
+      ? await provider.ensureFolder(group.folder, sharedDriveId)
+      : sharedDriveId;
+    for (const [name, mimeType] of group.files) {
+      const existing = (await provider.listFolder(parent)).find((file) => file.name === name);
+      if (existing) continue;
+      // No ownerEmail: the simulation reports shared drive files as ownerless,
+      // exactly as Drive does.
+      writeMockUpload({
+        name,
+        mimeType,
+        parentFolderId: parent,
+        bytes: Buffer.from(`simulated shared drive file: ${name}`),
+      });
+      created += 1;
+    }
+  }
+
   await recordAudit({
     actor,
     action: "import.sample",
-    summary: `Created ${created} sample pre-existing files to try the import on`,
+    summary: `Created ${created} sample pre-existing files to try the import on, in a My Drive folder and a simulated shared drive`,
   });
   refreshEverywhere();
   redirect("/admin/import?sample=1");
