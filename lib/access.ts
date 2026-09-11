@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { Prisma, User } from "@prisma/client";
 import { prisma } from "./db";
 import { atLeast, isBoardRole } from "./constants";
@@ -58,10 +59,18 @@ type DocumentLike = {
  * Load everything needed to answer "can this person see that?" — one query
  * beyond the user row, and it is skipped entirely for people with no
  * production memberships.
+ *
+ * Memoised on the three fields it reads rather than on the user object, so
+ * that the layout and the page inside it share one lookup even when they got
+ * their user row from different places. Keying on primitives is what makes
+ * that work: React's cache() compares arguments by identity.
  */
-export async function getViewerContext(
-  user: Pick<User, "id" | "email" | "role">,
+const loadViewerContext = cache(async function loadViewerContext(
+  id: string,
+  email: string,
+  role: string,
 ): Promise<Viewer> {
+  const user = { id, email, role };
   const rows = await prisma.productionMember.findMany({
     where: {
       userId: user.id,
@@ -107,6 +116,10 @@ export async function getViewerContext(
     memberships,
     companyCategoryIds,
   };
+});
+
+export function getViewerContext(user: Pick<User, "id" | "email" | "role">): Promise<Viewer> {
+  return loadViewerContext(user.id, user.email, user.role);
 }
 
 /**

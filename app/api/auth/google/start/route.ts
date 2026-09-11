@@ -15,5 +15,5 @@ export async function GET(request: NextRequest) {
   }
   const next = request.nextUrl.searchParams.get("next") ?? "/";
   const state = await createOAuthState("login", next.startsWith("/") ? next : "/");
-  return NextResponse.redirect(loginAuthUrl(state));
+  return NextResponse.redirect(await loginAuthUrl(state));
 }

@@ -52,18 +52,22 @@ export default async function DocumentPage({
   const { id } = await params;
   const query = await searchParams;
 
-  const document = await prisma.document.findUnique({
-    where: { id },
-    include: {
-      category: true,
-      production: true,
-      creator: true,
-      tags: true,
-      shares: { include: { user: true, grantedBy: true } },
-    },
-  });
-
-  const viewer = await getViewerContext(user);
+  // Neither of these depends on the other, and the config is wanted either
+  // way, so they go together rather than one after another.
+  const [document, viewer, config] = await Promise.all([
+    prisma.document.findUnique({
+      where: { id },
+      include: {
+        category: true,
+        production: true,
+        creator: true,
+        tags: true,
+        shares: { include: { user: true, grantedBy: true } },
+      },
+    }),
+    getViewerContext(user),
+    getConfig(),
+  ]);
 
   // Deliberately identical whether the id is unknown or simply not yours: the
   // page reveals nothing, and asking is one click. Google Drive behaves the
@@ -92,7 +96,6 @@ export default async function DocumentPage({
     );
   }
 
-  const config = await getConfig();
   const canEdit = canEditDocument(viewer, document);
   const canRemove = canDeleteDocument(viewer, document);
   const visibility = VISIBILITY_META[document.visibility as Visibility];
@@ -114,9 +117,12 @@ export default async function DocumentPage({
     }
   })();
 
-  const companyAudience =
+  // The audience, the pending requests, the share picker and the history are
+  // independent of one another; awaiting them in turn cost four rounds of
+  // database latency on a page that needs one.
+  const [companyAudience, pendingRequests, shareableMembers, activity] = await Promise.all([
     document.visibility === "COMPANY"
-      ? await prisma.productionMember.findMany({
+      ? prisma.productionMember.findMany({
           where: {
             status: "ACTIVE",
             user: { status: { not: "DISABLED" } },
@@ -130,17 +136,14 @@ export default async function DocumentPage({
           },
           orderBy: [{ role: { sortOrder: "asc" } }, { createdAt: "asc" }],
         })
-      : [];
-
-  const pendingRequests = canEdit
-    ? await prisma.accessRequest.findMany({
-        where: { documentId: document.id, status: "PENDING" },
-        include: { user: { select: { name: true, email: true } } },
-        orderBy: { createdAt: "asc" },
-      })
-    : [];
-
-  const [shareableMembers, activity] = await Promise.all([
+      : [],
+    canEdit
+      ? prisma.accessRequest.findMany({
+          where: { documentId: document.id, status: "PENDING" },
+          include: { user: { select: { name: true, email: true } } },
+          orderBy: { createdAt: "asc" },
+        })
+      : [],
     canEdit
       ? prisma.user.findMany({
           where: {

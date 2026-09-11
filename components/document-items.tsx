@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Category, Document, Production, Tag, User } from "@prisma/client";
 import { DOC_TYPE_META, VISIBILITY_META, type DocType, type Visibility } from "@/lib/constants";
 import { cn, relativeTime } from "@/lib/utils";
-import { canvaMirrorIsStale } from "@/lib/documents";
+import { canvaMirrorIsStale } from "@/lib/canva/freshness";
 import { Icon } from "./icons";
 import { Badge, EmptyState } from "./ui";
 

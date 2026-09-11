@@ -14,5 +14,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/admin?error=google_not_configured", request.url));
   }
   const state = await createOAuthState("drive", "/admin");
-  return NextResponse.redirect(driveAuthUrl(state));
+  return NextResponse.redirect(await driveAuthUrl(state));
 }

@@ -1,7 +1,7 @@
 import { prisma } from "../db";
 import { env } from "../env";
 import { getConfig } from "../config";
-import { canvaMirrorIsStale } from "../documents";
+import { canvaMirrorIsStale } from "../canva/freshness";
 import { getViewerContext, visibleDocumentsWhere } from "../access";
 import { sendEmail, weeklyDigest, type DigestData } from "./index";
 

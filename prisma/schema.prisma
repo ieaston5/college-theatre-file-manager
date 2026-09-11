@@ -6,8 +6,17 @@
 // stored as JSON text. That keeps the schema portable to Postgres (Pass 3)
 // without a rewrite.
 
+/// relationJoins makes Prisma fetch a record and its relations in one SQL
+/// statement rather than one statement per relation. Every document list on
+/// the hub includes the category, the production, the creator and the tags, so
+/// each list was five round trips to the database instead of one — and against
+/// a hosted Postgres a round trip costs tens of milliseconds whatever the query
+/// does. It is still a Prisma preview feature, but a long-standing one, it is
+/// only enabled for PostgreSQL, and the results it returns here are identical
+/// to the old strategy's, ordering included.
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

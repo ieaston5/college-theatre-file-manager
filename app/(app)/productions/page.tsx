@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getViewerContext, productionFilterFor, visibleDocumentsWhere } from "@/lib/access";
+import { getViewerContext, productionFilterFor } from "@/lib/access";
+import { documentCountsByProduction } from "@/lib/nav";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyState, PageHeader, SectionHeader, buttonClass } from "@/components/ui";
 import { PRODUCTION_STATUS_META, type ProductionStatus } from "@/lib/constants";
@@ -17,23 +18,14 @@ const GROUPS: Array<{ status: ProductionStatus; title: string; description: stri
 export default async function ProductionsPage() {
   const user = await requireUser();
   const viewer = await getViewerContext(user);
-  const where = visibleDocumentsWhere(viewer);
 
-  const [productions, counts] = await Promise.all([
+  const [productions, countByProduction] = await Promise.all([
     prisma.production.findMany({
       where: productionFilterFor(viewer),
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     }),
-    prisma.document.groupBy({
-      by: ["productionId"],
-      where: { ...where, status: "ACTIVE" },
-      _count: { _all: true },
-    }),
+    documentCountsByProduction(viewer),
   ]);
-
-  const countByProduction = new Map(
-    counts.map((row) => [row.productionId ?? "", row._count._all]),
-  );
 
   return (
     <div className="space-y-8">

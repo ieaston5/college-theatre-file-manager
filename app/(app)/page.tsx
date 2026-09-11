@@ -4,11 +4,15 @@ import { prisma } from "@/lib/db";
 import { getConfig, getSetupState } from "@/lib/config";
 import {
   canCreateDocuments,
-  categoryFilterFor,
   getViewerContext,
   productionFilterFor,
   visibleDocumentsWhere,
 } from "@/lib/access";
+import {
+  documentCountsByCategory,
+  documentCountsByProduction,
+  visibleCategories,
+} from "@/lib/nav";
 import { env } from "@/lib/env";
 import { CompanyDashboard } from "@/components/company-dashboard";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -37,10 +41,18 @@ export default async function DashboardPage() {
   }
 
   const where = visibleDocumentsWhere(viewer);
-  const setup = await getSetupState();
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const admin = isAdmin(user);
 
+  /**
+   * Everything in one round, rather than the three the dashboard used to take:
+   * the setup state, then ten queries, then the per-production tally. Those
+   * ran back to back, so the page waited out three lots of database latency
+   * before it could render anything.
+   */
   const [
+    config,
+    setup,
     categories,
     activeProductions,
     pinned,
@@ -49,13 +61,15 @@ export default async function DashboardPage() {
     totalCount,
     weekCount,
     privateCount,
-    categoryCounts,
+    countByCategory,
+    countByProduction,
     sampleCount,
   ] = await Promise.all([
-    prisma.category.findMany({
-      where: categoryFilterFor(viewer),
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    }),
+    getConfig(),
+    // Nothing but the admin setup banner reads this, and answering it means a
+    // Drive account lookup and two more counts. Everyone else skips it.
+    admin ? getSetupState() : null,
+    visibleCategories(viewer),
     prisma.production.findMany({
       where: { ...productionFilterFor(viewer), status: { in: ["ACTIVE", "PLANNING"] } },
       orderBy: [{ status: "asc" }, { opensOn: "asc" }],
@@ -84,28 +98,17 @@ export default async function DashboardPage() {
     prisma.document.count({
       where: { status: "ACTIVE", visibility: "PRIVATE", creatorId: user.id },
     }),
-    prisma.document.groupBy({
-      by: ["categoryId"],
-      where: { ...where, status: "ACTIVE" },
-      _count: { _all: true },
-    }),
-    prisma.document.count({ where: { metadata: { contains: '"sample":true' } } }),
+    documentCountsByCategory(viewer),
+    documentCountsByProduction(viewer),
+    // A LIKE over every document's metadata, and no index can serve it. Only
+    // the admin banner below reads the answer, so only admins pay for it.
+    admin ? prisma.document.count({ where: { metadata: { contains: '"sample":true' } } }) : 0,
   ]);
-
-  const countByCategory = new Map(categoryCounts.map((row) => [row.categoryId, row._count._all]));
-  const productionCounts = await prisma.document.groupBy({
-    by: ["productionId"],
-    where: { ...where, status: "ACTIVE" },
-    _count: { _all: true },
-  });
-  const countByProduction = new Map(
-    productionCounts.map((row) => [row.productionId ?? "", row._count._all]),
-  );
 
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow={setup.config.currentSeason ?? undefined}
+        eyebrow={config.currentSeason ?? undefined}
         title={`Hello, ${greeting}`}
         description="Everything the board keeps — sorted by what it is and which show it belongs to."
         action={
@@ -124,7 +127,7 @@ export default async function DashboardPage() {
         }
       />
 
-      {isAdmin(user) && (!setup.driveConnected || !setup.groupConfigured) ? (
+      {setup && (!setup.driveConnected || !setup.groupConfigured) ? (
         <Banner
           tone="amber"
           icon="warning"
@@ -150,7 +153,7 @@ export default async function DashboardPage() {
         </Banner>
       ) : null}
 
-      {isAdmin(user) && sampleCount > 0 ? (
+      {admin && sampleCount > 0 ? (
         <Banner
           tone="slate"
           icon="info"
@@ -216,7 +219,7 @@ export default async function DashboardPage() {
             icon="grid"
             title="No categories yet"
             action={
-              isAdmin(user) ? (
+              admin ? (
                 <Link href="/admin/categories" className={buttonClass("primary")}>
                   Add categories
                 </Link>
@@ -228,7 +231,7 @@ export default async function DashboardPage() {
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {categories.map((category) => {
-              const count = countByCategory.get(category.id) ?? 0;
+              const count = countByCategory.get(category.id)?.count ?? 0;
               return (
                 <li key={category.id}>
                   <Link

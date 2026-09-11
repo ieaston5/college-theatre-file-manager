@@ -1,18 +1,24 @@
+import { cache } from "react";
 import type { OrgConfig } from "@prisma/client";
 import { prisma } from "./db";
 import { env } from "./env";
 import { DRIVE_SCOPES } from "./constants";
 
-/** The single OrgConfig row, created on demand. */
-export async function getConfig(): Promise<OrgConfig> {
+/**
+ * The single OrgConfig row, created on demand.
+ *
+ * Memoised per request: the app layout reads it for the org name and footer,
+ * and the page inside it usually reads it again.
+ */
+export const getConfig = cache(async function getConfig(): Promise<OrgConfig> {
   const existing = await prisma.orgConfig.findUnique({ where: { id: "singleton" } });
   if (existing) return existing;
   return prisma.orgConfig.create({ data: { id: "singleton" } });
-}
+});
 
-export async function getDriveAccount() {
+export const getDriveAccount = cache(async function getDriveAccount() {
   return prisma.driveAccount.findUnique({ where: { id: "singleton" } });
-}
+});
 
 /**
  * Which scopes this build wants that the stored grant is missing.
@@ -42,7 +48,7 @@ export const SCOPE_LABELS: Record<string, string> = {
 };
 
 /** Everything a page needs to decide whether to nag about setup. */
-export async function getSetupState() {
+export const getSetupState = cache(async function getSetupState() {
   const [config, account, categoryCount, memberCount] = await Promise.all([
     getConfig(),
     getDriveAccount(),
@@ -84,4 +90,4 @@ export async function getSetupState() {
     categoryCount,
     memberCount,
   };
-}
+});

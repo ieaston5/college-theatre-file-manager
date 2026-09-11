@@ -73,9 +73,29 @@ const config: NextConfig = {
   // never clobbers the chunks a running dev server is serving. Production keeps
   // the default .next, which is what hosts like Vercel expect.
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  /**
+   * `googleapis` is left to Node rather than bundled. It is a very large
+   * package and it is only reached through lib/google/lazy, which imports it
+   * on demand; letting the bundler at it pulls it back into the build graph
+   * and slows every build for no gain at runtime.
+   */
+  serverExternalPackages: ["googleapis"],
   experimental: {
     // Server actions are used for every mutation in this app.
     serverActions: { bodySizeLimit: "2mb" },
+    /**
+     * How long the browser may reuse a page it has already loaded before
+     * asking the server again.
+     *
+     * Next's default for a dynamic page is zero, which means going back to the
+     * dashboard — or clicking between the sidebar's links the way people
+     * actually use the hub — re-ran the whole render every single time, even a
+     * second later. Thirty seconds makes those trips instant while keeping the
+     * data fresh enough for a shared document list; every mutation in the app
+     * calls revalidatePath, which clears this cache outright, so an edit is
+     * still visible the moment it is made.
+     */
+    staleTimes: { dynamic: 30, static: 180 },
   },
   images: {
     remotePatterns: [
