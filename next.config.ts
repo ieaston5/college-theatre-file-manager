@@ -69,13 +69,61 @@ const config: NextConfig = {
   // This project may sit inside a folder that has its own lockfile; pin the
   // trace root to the app so builds don't reach outside it.
   outputFileTracingRoot: import.meta.dirname,
+  /**
+   * Ship Prisma's query compiler with every route that talks to the database.
+   *
+   * `engineType = "client"` (see prisma/schema.prisma) puts the query compiler
+   * in a WebAssembly file, and the generated client loads it the only way a
+   * .wasm can be loaded — `fs.readFileSync(path.join(dirname,
+   * 'query_compiler_bg.wasm'))`. A computed path is invisible to the static
+   * analysis Next uses to decide which files a route needs, so the build traced
+   * the client's JavaScript into all forty functions and left the .wasm behind:
+   * every page rendered by the deployed hub failed on the first query with
+   * ENOENT on node_modules/.prisma/client/query_compiler_bg.wasm. Nothing shows
+   * up locally, where node_modules is present in full and nothing is traced.
+   *
+   * Listing it here is the supported way to tell the tracer about a file it
+   * cannot see. The pattern covers every route: thirty-nine of the forty-three
+   * reach `lib/db` already, and the four that do not pay 1.9 MB they never read
+   * — cheaper than a list that has to be right every time a route is added.
+   */
+  outputFileTracingIncludes: {
+    "/**": ["./node_modules/.prisma/client/query_compiler_bg.wasm"],
+  },
   // `npm run dev` writes to .next-dev (see package.json) so a production build
   // never clobbers the chunks a running dev server is serving. Production keeps
   // the default .next, which is what hosts like Vercel expect.
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  /**
+   * The Google clients are left to Node rather than bundled. They are only
+   * reached through lib/google/lazy, which imports them on demand; letting the
+   * bundler at them pulls them back into the build graph and undoes that.
+   */
+  serverExternalPackages: [
+    "@googleapis/drive",
+    "@googleapis/docs",
+    "@googleapis/sheets",
+    "@googleapis/slides",
+    "@googleapis/forms",
+    "@googleapis/oauth2",
+    "@googleapis/gmail",
+  ],
   experimental: {
     // Server actions are used for every mutation in this app.
     serverActions: { bodySizeLimit: "2mb" },
+    /**
+     * How long the browser may reuse a page it has already loaded before
+     * asking the server again.
+     *
+     * Next's default for a dynamic page is zero, which means going back to the
+     * dashboard — or clicking between the sidebar's links the way people
+     * actually use the hub — re-ran the whole render every single time, even a
+     * second later. Thirty seconds makes those trips instant while keeping the
+     * data fresh enough for a shared document list; every mutation in the app
+     * calls revalidatePath, which clears this cache outright, so an edit is
+     * still visible the moment it is made.
+     */
+    staleTimes: { dynamic: 30, static: 180 },
   },
   images: {
     remotePatterns: [

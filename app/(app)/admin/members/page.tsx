@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { setMemberStatusAction } from "@/app/actions/admin";
+import { setMemberStatusAction, stepDownFromBoardAction } from "@/app/actions/admin";
 import { FormCard, MemberForm } from "@/components/forms/admin-forms";
 import { Icon } from "@/components/icons";
 import { Avatar, Badge, Banner, Card, EmptyState, SectionHeader, buttonClass } from "@/components/ui";
@@ -30,7 +30,18 @@ export default async function AdminMembersPage({
     prisma.user.findMany({
       where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] } },
       orderBy: [{ status: "asc" }, { role: "asc" }, { name: "asc" }],
-      include: { _count: { select: { documents: true } } },
+      include: {
+        _count: {
+          select: {
+            documents: true,
+            // Board members are often cast or crewed as well; whether they are
+            // decides what taking them off the board should do to them.
+            memberships: {
+              where: { status: "ACTIVE", production: { status: { not: "ARCHIVED" } } },
+            },
+          },
+        },
+      },
     }),
     prisma.user.findMany({
       where: { OR: [{ role: "COMPANY" }, { memberships: { some: {} } }] },
@@ -78,8 +89,9 @@ export default async function AdminMembersPage({
       {tab === "board" ? (
         <>
           <Banner tone="sky" icon="info" title="How board access works">
-            Someone can only sign in if they are on this list. Adding an email does not send an
-            invitation — tell them the hub's address and they sign in with that Google account.
+            Everyone on this list sees the whole hub. Adding an email does not send an invitation —
+            tell them the hub's address and they sign in with that Google account. Cast and crew do
+            not belong here: they sign in too, but only see their own show.
           </Banner>
 
           <FormCard
@@ -91,6 +103,7 @@ export default async function AdminMembersPage({
             }
           >
             <MemberForm
+              key={editing?.id ?? "new"}
               member={
                 editing
                   ? {
@@ -133,6 +146,12 @@ export default async function AdminMembersPage({
                         {member.email}
                         {member.position ? ` · ${member.position}` : ""} ·{" "}
                         {member._count.documents} filed
+                        {member._count.memberships > 0
+                          ? ` · on ${member._count.memberships} current ${pluralize(
+                              member._count.memberships,
+                              "show",
+                            )}`
+                          : ""}
                         {member.lastLoginAt ? ` · last in ${relativeTime(member.lastLoginAt)}` : ""}
                       </div>
                     </div>
@@ -144,6 +163,26 @@ export default async function AdminMembersPage({
                       >
                         <Icon name="pencil" className="size-4" />
                       </Link>
+                      {!isMe && member.status !== "DISABLED" ? (
+                        <form action={stepDownFromBoardAction}>
+                          <input type="hidden" name="id" value={member.id} />
+                          <button
+                            type="submit"
+                            className={buttonClass("ghost", "px-2")}
+                            aria-label={`Take ${member.email} off the board`}
+                            title={
+                              member._count.memberships > 0
+                                ? `Take them off the board. They stay on the hub as a company member and keep access to the ${member._count.memberships} current ${pluralize(
+                                    member._count.memberships,
+                                    "show",
+                                  )} they are working on.`
+                                : "Take them off the board. They can still sign in, but see nothing until they are added to a show."
+                            }
+                          >
+                            <Icon name="user-minus" className="size-4" />
+                          </button>
+                        </form>
+                      ) : null}
                       {!isMe ? (
                         <form action={setMemberStatusAction}>
                           <input type="hidden" name="id" value={member.id} />
@@ -163,7 +202,12 @@ export default async function AdminMembersPage({
                             title={
                               member.status === "DISABLED"
                                 ? "Re-enable access"
-                                : "Disable access (keeps their documents)"
+                                : member._count.memberships > 0
+                                  ? `Block sign-in entirely — including the ${member._count.memberships} current ${pluralize(
+                                      member._count.memberships,
+                                      "show",
+                                    )} they are working on. To end a board term only, take them off the board instead.`
+                                  : "Disable access (keeps their documents)"
                             }
                           >
                             <Icon
@@ -193,9 +237,12 @@ export default async function AdminMembersPage({
               ))}
             </ul>
             <p className="mt-3 text-xs text-ink-500">
-              Disabling someone keeps everything they filed and immediately blocks their sign-in.
-              Private documents stay private to them — nobody inherits them, so ask departing board
-              members to hand over anything the club needs.
+              When a board term ends, take the person off the board rather than disabling them:
+              board access stops, and anyone who is still cast or crewed on a show keeps exactly
+              what that show allows. Disabling is the stronger one — it blocks their sign-in
+              outright, shows and all. Either way everything they filed stays, and private
+              documents stay private to them, so ask departing board members to hand over anything
+              the club needs.
             </p>
           </Card>
         </>

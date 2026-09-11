@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getViewerContext, productionFilterFor, visibleDocumentsWhere } from "@/lib/access";
+import { getViewerContext, productionFilterFor } from "@/lib/access";
+import { documentCountsByProduction } from "@/lib/nav";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyState, PageHeader, SectionHeader, buttonClass } from "@/components/ui";
 import { PRODUCTION_STATUS_META, type ProductionStatus } from "@/lib/constants";
@@ -17,29 +18,24 @@ const GROUPS: Array<{ status: ProductionStatus; title: string; description: stri
 export default async function ProductionsPage() {
   const user = await requireUser();
   const viewer = await getViewerContext(user);
-  const where = visibleDocumentsWhere(viewer);
 
-  const [productions, counts] = await Promise.all([
+  const [productions, countByProduction] = await Promise.all([
     prisma.production.findMany({
       where: productionFilterFor(viewer),
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     }),
-    prisma.document.groupBy({
-      by: ["productionId"],
-      where: { ...where, status: "ACTIVE" },
-      _count: { _all: true },
-    }),
+    documentCountsByProduction(viewer),
   ]);
-
-  const countByProduction = new Map(
-    counts.map((row) => [row.productionId ?? "", row._count._all]),
-  );
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Productions"
-        description="Every show, with the paperwork attached to it."
+        description={
+          viewer.isBoard
+            ? "Every show, with the paperwork attached to it."
+            : "The shows you are working on, and everything shared with you for each."
+        }
         action={
           isAdmin(user) ? (
             <Link href="/admin/productions" className={buttonClass("secondary")}>
@@ -53,7 +49,7 @@ export default async function ProductionsPage() {
       {productions.length === 0 ? (
         <EmptyState
           icon="theater"
-          title="No productions yet"
+          title={viewer.isBoard ? "No productions yet" : "You are not on a show yet"}
           action={
             isAdmin(user) ? (
               <Link href="/admin/productions" className={buttonClass("primary")}>
@@ -63,7 +59,9 @@ export default async function ProductionsPage() {
             ) : null
           }
         >
-          Add the shows you are working on and documents can be attached to them.
+          {viewer.isBoard
+            ? "Add the shows you are working on and documents can be attached to them."
+            : "Once whoever runs your show adds you to it, it turns up here with everything shared with your role."}
         </EmptyState>
       ) : (
         GROUPS.map((group) => {

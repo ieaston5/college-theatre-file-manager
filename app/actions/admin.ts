@@ -16,7 +16,7 @@ import {
   templateSchema,
 } from "@/lib/validation";
 import { isSimulatedDriveId } from "@/lib/google/oauth";
-import { extractDriveFileId, slugify } from "@/lib/utils";
+import { extractDriveFileId, pluralize, slugify } from "@/lib/utils";
 import { env } from "@/lib/env";
 import { ROLE_META } from "@/lib/constants";
 import { boardWelcome, sendEmail } from "@/lib/email";
@@ -381,6 +381,59 @@ export async function saveMemberAction(_prev: ActionState, form: FormData): Prom
   }
 }
 
+/**
+ * Take somebody off the board without taking them off the hub.
+ *
+ * A board term ending is not the same thing as leaving the club: plenty of
+ * outgoing board members are still cast or crewed on a current show, and
+ * disabling the account would cut them off from the schedule and the script
+ * they are entitled to. Dropping the role to COMPANY keeps exactly the access
+ * their production memberships grant and nothing else — if they are on no
+ * current show, that is nothing at all.
+ */
+export async function stepDownFromBoardAction(form: FormData) {
+  const actor = await assertRole("ADMIN");
+  const id = String(form.get("id") ?? "");
+  if (id === actor.id) {
+    throw new Error("You cannot take yourself off the board — ask another admin.");
+  }
+
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) throw new Error("That person is no longer on the hub.");
+  if (target.role === "ADMIN") {
+    const admins = await prisma.user.count({
+      where: { role: "ADMIN", status: "ACTIVE", id: { not: id } },
+    });
+    if (admins === 0) throw new Error("That is the only admin — promote someone else first.");
+  }
+
+  await prisma.user.update({ where: { id }, data: { role: "COMPANY" } });
+  const kept = await prisma.productionMember.count({
+    where: { userId: id, status: "ACTIVE", production: { status: { not: "ARCHIVED" } } },
+  });
+
+  // Board documents carry a Drive permission per person on the members list,
+  // so Drive has to be told as well. Marking the sweep beats re-sharing
+  // hundreds of files inline.
+  const config = await getConfig();
+  if (!config.sharingSweepStartedAt) {
+    await prisma.orgConfig.update({
+      where: { id: "singleton" },
+      data: { sharingSweepStartedAt: new Date() },
+    });
+  }
+  await recordAudit({
+    actor,
+    action: "member.board.stepdown",
+    targetType: "User",
+    targetId: id,
+    summary: `Took ${target.email} off the board${
+      kept > 0 ? ` — they keep company access to ${kept} current ${kept === 1 ? "show" : "shows"}` : ""
+    }`,
+  });
+  refreshEverywhere();
+}
+
 export async function setMemberStatusAction(form: FormData) {
   const actor = await assertRole("ADMIN");
   const id = String(form.get("id") ?? "");
@@ -409,6 +462,32 @@ export async function setMemberStatusAction(form: FormData) {
   refreshEverywhere();
 }
 
+/**
+ * Bring every existing title into line with the naming rule.
+ *
+ * Offered rather than done silently on save: an admin editing the rule is
+ * often mid-thought, and renaming three hundred documents under them is not
+ * something to do on a keystroke. Safe to run twice — the name is composed
+ * from the stored base title, so a second pass changes nothing.
+ */
+export async function applyNamingRuleAction(): Promise<void> {
+  const actor = await assertRole("ADMIN");
+  const { normaliseDocumentTitles } = await import("@/lib/documents");
+  const result = await normaliseDocumentTitles();
+  if (result.changed > 0) {
+    await recordAudit({
+      actor,
+      action: "config.retitle",
+      summary: `Applied the naming rule to ${result.changed} of ${result.scanned} ${pluralize(
+        result.scanned,
+        "title",
+      )}`,
+      metadata: { examples: result.examples },
+    });
+  }
+  refreshEverywhere();
+}
+
 // --- settings & Google connection ------------------------------------------
 
 export async function saveConfigAction(_prev: ActionState, form: FormData): Promise<ActionState> {
@@ -416,9 +495,7 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
     const actor = await assertRole("ADMIN");
     const parsed = configSchema.safeParse({
       orgName: text(form, "orgName") ?? "",
-      shareMode: text(form, "shareMode") ?? "GROUP",
       groupEmail: text(form, "groupEmail") ?? "",
-      groupCanEdit: bool(form, "groupCanEdit"),
       namingTemplate: text(form, "namingTemplate") ?? "",
       driveRootName: text(form, "driveRootName") ?? "",
       currentSeason: text(form, "currentSeason"),
@@ -431,9 +508,7 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
       where: { id: "singleton" },
       data: {
         orgName: parsed.data.orgName,
-        shareMode: parsed.data.shareMode,
         groupEmail: parsed.data.groupEmail ?? null,
-        groupCanEdit: parsed.data.groupCanEdit,
         namingTemplate: parsed.data.namingTemplate,
         driveRootName: parsed.data.driveRootName,
         currentSeason: parsed.data.currentSeason ?? null,
@@ -442,12 +517,11 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
     });
 
     const warnings: string[] = [];
-    const sharingChanged =
-      before.groupEmail !== (parsed.data.groupEmail ?? null) ||
-      before.shareMode !== parsed.data.shareMode ||
-      before.groupCanEdit !== parsed.data.groupCanEdit;
+    // The group address is the one the hub takes *off* files, so pointing it
+    // somewhere else changes which stale permission a pass will clean up.
+    const groupChanged = before.groupEmail !== (parsed.data.groupEmail ?? null);
 
-    if (sharingChanged) {
+    if (groupChanged) {
       const affected = await prisma.document.count({
         where: { visibility: { not: "PRIVATE" }, googleFileId: { not: null }, status: "ACTIVE" },
       });
@@ -459,9 +533,9 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
           data: { sharingSweepStartedAt: new Date() },
         });
         warnings.push(
-          `Who can reach documents in Drive has changed, so ${affected} existing document${
+          `The board's group address changed, so ${affected} existing document${
             affected === 1 ? "" : "s"
-          } need re-sharing. Run the sweep in “Sharing in Drive” below — it can be stopped and resumed.`,
+          } need another pass to clear the old group's access. Run the sweep in “Sharing in Drive” below — it can be stopped and resumed.`,
         );
       }
     }

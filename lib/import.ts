@@ -3,9 +3,9 @@ import { prisma } from "./db";
 import { driveProvider } from "./google";
 import { docTypeFromMime, type Visibility } from "./constants";
 import { recordAudit } from "./audit";
-import { syncSharing } from "./documents";
+import { documentName, syncSharing } from "./documents";
 import { getConfig } from "./config";
-import { applyNamingTemplate, driveViewLink, withExtension } from "./utils";
+import { driveViewLink, withExtension } from "./utils";
 
 /**
  * Bringing the existing pile in.
@@ -25,6 +25,8 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
 const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 const MAX_DEPTH = 4;
 const MAX_FILES = 400;
+/** How many per-file failures the activity log keeps verbatim. */
+const MAX_LOGGED_FAILURES = 50;
 
 function words(value: string): string[] {
   return value
@@ -120,6 +122,16 @@ export type ScanResult = {
   duplicates: number;
   skippedFolders: number;
   /**
+   * Files the walk reached but could not record, as `name: reason`.
+   *
+   * One unrecordable file used to end the scan: a file whose size overflowed
+   * the column threw out of the loop, and a folder of several hundred files
+   * produced a batch nobody could use. A scan that skips one file and says
+   * which is worth far more than a scan that stops, so failures are collected
+   * and reported rather than thrown.
+   */
+  failures: string[];
+  /**
    * What Drive actually returned, so "nothing to import" can say why.
    *
    * A scan that finds nothing has several quite different causes — an empty
@@ -212,6 +224,7 @@ export async function scanDriveFolder(
   let sharedDriveFiles = 0;
   const tooDeep: string[] = [];
   const sharedDrivesSeen = new Set<string>();
+  const failures: string[] = [];
 
   /**
    * Shared drive names, so an imported file can say which drive it came out
@@ -298,47 +311,61 @@ export async function scanDriveFolder(
         continue;
       }
 
-      const alreadyOnHub = await prisma.document.findUnique({
-        where: { googleFileId: entry.id },
-        select: { id: true },
-      });
+      /**
+       * One file per failure, never the batch.
+       *
+       * Everything in here can fail for reasons particular to a single file —
+       * a size Postgres will not take in an Int, a name the database rejects,
+       * a transient read — and none of them say anything about the hundreds of
+       * files after it. So the file is named, the reason kept, and the walk
+       * carries on.
+       */
+      try {
+        const alreadyOnHub = await prisma.document.findUnique({
+          where: { googleFileId: entry.id },
+          select: { id: true },
+        });
 
-      const guess = alreadyOnHub
-        ? { confidence: 0 }
-        : guessPlacement(entry.name, folder.path, categories, productions);
+        const guess = alreadyOnHub
+          ? { confidence: 0 }
+          : guessPlacement(entry.name, folder.path, categories, productions);
 
-      const driveId = entry.driveId ?? null;
-      const driveName = driveId ? await driveNameFor(driveId) : null;
-      if (driveId) {
-        sharedDriveFiles += 1;
-        sharedDrivesSeen.add(driveName ?? driveId);
+        const driveId = entry.driveId ?? null;
+        const driveName = driveId ? await driveNameFor(driveId) : null;
+        if (driveId) {
+          sharedDriveFiles += 1;
+          sharedDrivesSeen.add(driveName ?? driveId);
+        }
+
+        await prisma.importItem.upsert({
+          where: { batchId_googleFileId: { batchId: batch.id, googleFileId: entry.id } },
+          create: {
+            batchId: batch.id,
+            googleFileId: entry.id,
+            name: entry.name,
+            mimeType: entry.mimeType,
+            ownerEmail: entry.ownerEmail ?? null,
+            driveId,
+            driveName,
+            webViewLink:
+              entry.webViewLink || driveViewLink(entry.id, docTypeFromMime(entry.mimeType)),
+            folderPath: folder.path || null,
+            sizeBytes: entry.sizeBytes ?? null,
+            modifiedAt: entry.modifiedTime ? new Date(entry.modifiedTime) : null,
+            guessedCategoryId: guess.categoryId ?? null,
+            guessedProductionId: guess.productionId ?? null,
+            confidence: guess.confidence,
+            decision: alreadyOnHub ? "DUPLICATE" : "PENDING",
+            documentId: alreadyOnHub?.id ?? null,
+          },
+          update: {},
+        });
+
+        found += 1;
+        if (alreadyOnHub) duplicates += 1;
+      } catch (error) {
+        failures.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
-
-      await prisma.importItem.upsert({
-        where: { batchId_googleFileId: { batchId: batch.id, googleFileId: entry.id } },
-        create: {
-          batchId: batch.id,
-          googleFileId: entry.id,
-          name: entry.name,
-          mimeType: entry.mimeType,
-          ownerEmail: entry.ownerEmail ?? null,
-          driveId,
-          driveName,
-          webViewLink: entry.webViewLink || driveViewLink(entry.id, docTypeFromMime(entry.mimeType)),
-          folderPath: folder.path || null,
-          sizeBytes: entry.sizeBytes ?? null,
-          modifiedAt: entry.modifiedTime ? new Date(entry.modifiedTime) : null,
-          guessedCategoryId: guess.categoryId ?? null,
-          guessedProductionId: guess.productionId ?? null,
-          confidence: guess.confidence,
-          decision: alreadyOnHub ? "DUPLICATE" : "PENDING",
-          documentId: alreadyOnHub?.id ?? null,
-        },
-        update: {},
-      });
-
-      found += 1;
-      if (alreadyOnHub) duplicates += 1;
     }
   }
 
@@ -352,7 +379,9 @@ export async function scanDriveFolder(
     action: "import.scan",
     targetType: "ImportBatch",
     targetId: batch.id,
-    summary: `Scanned ${options.folderName ?? "a Drive folder"} — ${found} files, ${duplicates} already on the hub`,
+    summary:
+      `Scanned ${options.folderName ?? "a Drive folder"} — ${found} files, ${duplicates} already on the hub` +
+      (failures.length > 0 ? `, ${failures.length} could not be read` : ""),
     metadata: {
       folderId: options.folderId,
       found,
@@ -366,6 +395,10 @@ export async function scanDriveFolder(
       notLookedIn: tooDeep.length,
       sharedDriveFiles,
       sharedDrives: [...sharedDrivesSeen],
+      failed: failures.length,
+      // Capped: the log is for reading afterwards, and a scan where everything
+      // failed would otherwise write 400 messages into one row.
+      failures: failures.slice(0, MAX_LOGGED_FAILURES),
     },
   });
 
@@ -374,6 +407,7 @@ export async function scanDriveFolder(
     found,
     duplicates,
     skippedFolders,
+    failures,
     diagnostics: {
       entriesReturned,
       subfolders: skippedFolders,
@@ -399,19 +433,20 @@ export type FileDecision = {
  * The canonical Drive name for an imported file: the hub's naming rule, with
  * the original file's extension kept so operating systems still recognise it.
  */
-async function canonicalDriveName(input: {
-  title: string;
-  originalName: string;
-  category: { name: string };
-  production: { name: string; abbreviation: string | null; season: string | null } | null;
-}): Promise<string> {
-  const config = await getConfig();
+function canonicalDriveName(
+  config: { namingTemplate: string; currentSeason: string | null },
+  input: {
+    baseTitle: string;
+    originalName: string;
+    category: { name: string };
+    production: { name: string; abbreviation: string | null; season: string | null } | null;
+  },
+): string {
   return withExtension(
-    applyNamingTemplate(config.namingTemplate, {
-      production: input.production?.abbreviation || input.production?.name || null,
-      category: input.category.name,
-      title: input.title,
-      season: input.production?.season ?? config.currentSeason,
+    documentName(config, {
+      baseTitle: input.baseTitle,
+      category: input.category,
+      production: input.production,
     }),
     input.originalName,
   );
@@ -437,6 +472,7 @@ export async function fileImportItems(
   let filed = 0;
   let renamed = 0;
   const provider = driveProvider();
+  const config = await getConfig();
 
   for (const decision of decisions) {
     const item = await prisma.importItem.findUnique({ where: { id: decision.itemId } });
@@ -470,11 +506,16 @@ export async function fileImportItems(
       const production = decision.productionId
         ? await prisma.production.findUnique({ where: { id: decision.productionId } })
         : null;
-      const title = cleanTitle(item.name);
+      // What the file is called, tidied; the hub's naming rule turns that into
+      // the name it is listed under, the same one canonicalDriveName produces
+      // for the file itself.
+      const baseTitle = cleanTitle(item.name);
+      const title = documentName(config, { baseTitle, category, production });
 
       const document = await prisma.document.create({
         data: {
           title,
+          baseTitle,
           docType: docTypeFromMime(item.mimeType),
           source: "REGISTERED",
           visibility: decision.visibility,
@@ -490,6 +531,7 @@ export async function fileImportItems(
           mimeType: item.mimeType,
           originalFileName: item.name,
           googleModifiedAt: item.modifiedAt,
+          lastEditedAt: item.modifiedAt ?? new Date(),
           lastSyncedAt: new Date(),
           metadata: JSON.stringify({
             createdVia: "import",
@@ -523,8 +565,8 @@ export async function fileImportItems(
       // needs edit access on a file the hub usually does not own, so a refusal
       // is reported rather than treated as a failure to file.
       if (options?.renameInDrive) {
-        const driveName = await canonicalDriveName({
-          title,
+        const driveName = canonicalDriveName(config, {
+          baseTitle,
           originalName: item.name,
           category,
           production,

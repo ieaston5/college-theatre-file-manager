@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import Link from "next/link";
 import { registerDocumentAction } from "@/app/actions/documents";
 import { emptyState } from "@/app/actions/shared";
+import { applyNamingTemplate } from "@/lib/utils";
 import { Card, Field, buttonClass, inputClass } from "../ui";
 import { Icon } from "../icons";
 import { FormBanner, SubmitButton, Toggle } from "./form-bits";
@@ -21,26 +22,43 @@ import {
 export function DocumentRegisterForm({
   categories,
   productions,
-  groupEmail,
+  boardCount,
   hubAccountEmail,
   driveMode,
+  namingTemplate,
+  currentSeason,
   companyCreatorOnly = false,
 }: {
   categories: FormCategory[];
   productions: FormProduction[];
-  groupEmail: string | null;
+  boardCount: number | null;
   hubAccountEmail: string | null;
   driveMode: "google" | "mock";
+  namingTemplate: string;
+  currentSeason: string | null;
   companyCreatorOnly?: boolean;
 }) {
   const [state, formAction] = useActionState(registerDocumentAction, emptyState);
+  const [title, setTitle] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [productionId, setProductionId] = useState("none");
-  const [visibility, setVisibility] = useState(companyCreatorOnly ? "COMPANY" : "BOARD");
+  // "Company" only becomes an option once a category that allows it is
+  // chosen, so a company member starts on the one they always have.
+  const [visibility, setVisibility] = useState(companyCreatorOnly ? "PRIVATE" : "BOARD");
   const [editAccess, setEditAccess] = useState("BOARD");
   const [externalOnly, setExternalOnly] = useState(false);
 
   const category = categories.find((item) => item.id === categoryId);
+  const production = productions.find((item) => item.id === productionId);
+
+  // The hub's own name for it. The file in Drive keeps whatever it is called
+  // there — the hub does not rename files it does not own.
+  const composed = applyNamingTemplate(namingTemplate, {
+    production: production?.abbreviation || production?.name || null,
+    category: category?.name,
+    title: title.trim() || "Untitled",
+    season: production?.season ?? currentSeason,
+  });
 
   function pickCategory(nextId: string) {
     setCategoryId(nextId);
@@ -117,15 +135,23 @@ export function DocumentRegisterForm({
           label="Name on the hub"
           htmlFor="title"
           required
-          hint="This is what members see in lists — it does not rename the file in Drive."
+          hint="The show, the shelf and the season are added by the hub's naming rule. The file itself keeps the name it already has in Drive."
         >
           <input
             id="title"
             name="title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
             className={inputClass}
-            placeholder="2025–26 season budget"
+            placeholder="Season budget"
             required
           />
+          <span className="mt-1.5 flex items-center gap-1.5 text-xs text-ink-500">
+            <Icon name="file" className="size-3.5 shrink-0" />
+            <span className="min-w-0 truncate">
+              Listed as <span className="font-medium text-ink-700">{composed}</span>
+            </span>
+          </span>
         </Field>
 
         <CategorySelect categories={categories} value={categoryId} onChange={pickCategory} />
@@ -135,6 +161,7 @@ export function DocumentRegisterForm({
           value={productionId}
           onChange={setProductionId}
           scope={category?.scope}
+          companyCreatorOnly={companyCreatorOnly}
         />
       </Card>
 
@@ -142,7 +169,7 @@ export function DocumentRegisterForm({
         <VisibilityPicker
           value={visibility}
           onChange={setVisibility}
-          groupEmail={groupEmail}
+          boardCount={boardCount}
           category={category}
           companyCreatorOnly={companyCreatorOnly}
         />
@@ -151,6 +178,7 @@ export function DocumentRegisterForm({
           onChange={setEditAccess}
           visibility={visibility}
           category={category}
+          companyCreatorOnly={companyCreatorOnly}
         />
         <DescriptionField />
         <TagsField />

@@ -123,9 +123,19 @@ async function collect() {
   };
 }
 
+/**
+ * JSON has no bigint, and `JSON.stringify` throws rather than guessing. The
+ * only bigints here are byte counts, which are far below the point a double
+ * stops being exact, so they go out as plain numbers — which is what older
+ * dumps already hold, and what a restore feeds back to Prisma.
+ */
+function plainNumbers(_key: string, value: unknown) {
+  return typeof value === "bigint" ? Number(value) : value;
+}
+
 async function main() {
   const dump = await collect();
-  const json = JSON.stringify(dump, null, 2);
+  const json = JSON.stringify(dump, plainNumbers, 2);
 
   if (toStdout) {
     process.stdout.write(json);

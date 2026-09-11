@@ -1,5 +1,5 @@
-import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
+import { docsApi, driveApi, formsApi, oauth2Api, sheetsApi, slidesApi } from "./lazy";
 import { DOC_TYPE_META } from "../constants";
 import { formatDate } from "../utils";
 import { driveClient } from "./oauth";
@@ -112,13 +112,15 @@ export class GoogleDriveProvider implements DriveProvider {
   }
 
   private async drive() {
-    return google.drive({ version: "v3", auth: await this.auth() });
+    const drive = await driveApi();
+    return drive({ version: "v3", auth: await this.auth() });
   }
 
   async accountEmail(): Promise<string | null> {
     try {
+      const oauth2 = await oauth2Api();
       const auth = await this.auth();
-      const info = await google.oauth2({ version: "v2", auth }).userinfo.get();
+      const info = await oauth2({ version: "v2", auth }).userinfo.get();
       return info.data.email?.toLowerCase() ?? null;
     } catch {
       return null;
@@ -189,7 +191,7 @@ export class GoogleDriveProvider implements DriveProvider {
          * description and no appProperties. The Drive call afterwards is what
          * files it where the hub wants it and labels it like everything else.
          */
-        const forms = google.forms({ version: "v1", auth: await this.auth() });
+        const forms = (await formsApi())({ version: "v1", auth: await this.auth() });
         const created = await forms.forms.create({
           requestBody: { info: { title: input.name, documentTitle: input.name } },
         });
@@ -265,9 +267,10 @@ export class GoogleDriveProvider implements DriveProvider {
       const requests = Object.entries(values).map(([token, value]) => ({
         replaceAllText: { containsText: { text: token, matchCase: true }, replaceText: value },
       }));
-      await google
-        .docs({ version: "v1", auth })
-        .documents.batchUpdate({ documentId: fileId, requestBody: { requests } });
+      await (await docsApi())({ version: "v1", auth }).documents.batchUpdate({
+        documentId: fileId,
+        requestBody: { requests },
+      });
       return;
     }
 
@@ -275,9 +278,10 @@ export class GoogleDriveProvider implements DriveProvider {
       const requests = Object.entries(values).map(([token, value]) => ({
         replaceAllText: { containsText: { text: token, matchCase: true }, replaceText: value },
       }));
-      await google
-        .slides({ version: "v1", auth })
-        .presentations.batchUpdate({ presentationId: fileId, requestBody: { requests } });
+      await (await slidesApi())({ version: "v1", auth }).presentations.batchUpdate({
+        presentationId: fileId,
+        requestBody: { requests },
+      });
       return;
     }
 
@@ -285,16 +289,17 @@ export class GoogleDriveProvider implements DriveProvider {
       const requests = Object.entries(values).map(([token, value]) => ({
         findReplace: { find: token, replacement: value, allSheets: true, matchCase: true },
       }));
-      await google
-        .sheets({ version: "v4", auth })
-        .spreadsheets.batchUpdate({ spreadsheetId: fileId, requestBody: { requests } });
+      await (await sheetsApi())({ version: "v4", auth }).spreadsheets.batchUpdate({
+        spreadsheetId: fileId,
+        requestBody: { requests },
+      });
     }
   }
 
   /** Prepend a small identity block to a blank Google Doc. */
   private async stampDocHeader(documentId: string, header: DocHeader) {
     const auth = await this.auth();
-    const docs = google.docs({ version: "v1", auth });
+    const docs = (await docsApi())({ version: "v1", auth });
 
     // A snapshot of how the document was filed. The hub stays the source of
     // truth, so the block points back at it rather than pretending to be live.
@@ -433,6 +438,38 @@ export class GoogleDriveProvider implements DriveProvider {
     }
   }
 
+  async listModifiedSince(
+    since: Date,
+    limit = 2000,
+  ): Promise<Array<{ id: string; modifiedTime: string | null }>> {
+    const drive = await this.drive();
+    const out: Array<{ id: string; modifiedTime: string | null }> = [];
+    let pageToken: string | undefined;
+    try {
+      do {
+        const res = await drive.files.list({
+          // Everything the hub account can reach, not just what it owns: plenty
+          // of a club's files are owned by the person who made them and shared
+          // with the hub.
+          q: `modifiedTime > '${since.toISOString()}' and trashed = false`,
+          fields: "nextPageToken, files(id,modifiedTime)",
+          orderBy: "modifiedTime desc",
+          pageSize: 1000,
+          pageToken,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+        for (const file of res.data.files ?? []) {
+          if (file.id) out.push({ id: file.id, modifiedTime: file.modifiedTime ?? null });
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+      } while (pageToken && out.length < limit);
+      return out.slice(0, limit);
+    } catch (error) {
+      wrap(error, "Asking Drive what has changed");
+    }
+  }
+
   async renameFile(fileId: string, name: string): Promise<void> {
     const drive = await this.drive();
     try {
@@ -511,18 +548,14 @@ export class GoogleDriveProvider implements DriveProvider {
     const revoked: string[] = [];
     const warnings: string[] = [];
 
-    const desired = new Map<string, { level: "READER" | "WRITER"; type: "user" | "group" }>();
-    desired.set(plan.creatorEmail.toLowerCase(), { level: "WRITER", type: "user" });
-    if (plan.visibility !== "PRIVATE" && plan.groupEmail) {
-      desired.set(plan.groupEmail.toLowerCase(), {
-        level: plan.groupCanEdit ? "WRITER" : "READER",
-        type: "group",
-      });
-    }
+    // Everybody the file should reach is named individually — there is no
+    // group permission to grant any more.
+    const desired = new Map<string, { level: "READER" | "WRITER" }>();
+    desired.set(plan.creatorEmail.toLowerCase(), { level: "WRITER" });
     for (const extra of plan.extra ?? []) {
       const email = extra.email.toLowerCase();
       if (desired.get(email)?.level === "WRITER") continue;
-      desired.set(email, { level: extra.level, type: "user" });
+      desired.set(email, { level: extra.level });
     }
 
     let existing: Array<{
@@ -550,7 +583,7 @@ export class GoogleDriveProvider implements DriveProvider {
     }
 
     const additive = plan.strategy === "additive";
-    const groupEmail = plan.groupEmail?.toLowerCase() ?? null;
+    const retiredGroup = plan.retireGroupEmail?.toLowerCase() ?? null;
 
     // 1. Reconcile what is already on the file.
     for (const perm of existing) {
@@ -577,11 +610,12 @@ export class GoogleDriveProvider implements DriveProvider {
           warnings.push(
             `${email} can already edit this through the shared drive or folder it lives in, so read-only access could not be applied to them.`,
           );
-        } else if (!wanted && (!additive || (email && email === groupEmail))) {
-          // Additive sharing only ever pulls the board group back, so that is
-          // the only inherited grant it needs to report as un-revokable —
-          // otherwise flipping a shared drive document to Private would look
-          // like it worked.
+        } else if (!wanted && (!additive || (email && email === retiredGroup))) {
+          // Additive sharing only ever pulls the retired board group back, so
+          // that is the only inherited grant it needs to report as
+          // un-revokable. Worth saying: a group inherited from a shared drive
+          // is access no member list can take away, which is the whole reason
+          // the group is being retired.
           warnings.push(
             `${email ?? perm.type ?? "Someone"} can reach this through the shared drive or folder it lives in, ` +
               "which cannot be undone on the file itself — change who has access there, or move the file out of it.",
@@ -616,9 +650,11 @@ export class GoogleDriveProvider implements DriveProvider {
         continue;
       }
 
-      // On a file the hub does not own, only ever pull the board group back.
+      // On a file the hub does not own, only ever pull the old board group
+      // back — its members are named on the file individually now, and leaving
+      // it in place would be access no member list can take away.
       const shouldRevoke = additive
-        ? Boolean(email && groupEmail && email === groupEmail && !wanted)
+        ? Boolean(email && retiredGroup && email === retiredGroup)
         : isLinkShare || !wanted || !roleMatches;
       if (!shouldRevoke) continue;
 
@@ -649,7 +685,7 @@ export class GoogleDriveProvider implements DriveProvider {
             const res = await drive.permissions.create({
               fileId,
               requestBody: {
-                type: spec.type,
+                type: "user",
                 role: spec.level === "WRITER" ? "writer" : "reader",
                 emailAddress: email,
               },

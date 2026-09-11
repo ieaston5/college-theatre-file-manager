@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import {
   canCreateDocuments,
   creatableCategoryIds,
@@ -24,6 +24,7 @@ export default async function NewDocumentPage({
   const viewer = await getViewerContext(user);
   if (!canCreateDocuments(viewer)) redirect("/no-access?need=board");
   const companyCreatorOnly = !viewer.isBoard;
+  const admin = isAdmin(user);
   const params = await searchParams;
   const setup = await getSetupState();
 
@@ -76,9 +77,11 @@ export default async function NewDocumentPage({
           icon="warning"
           title="Google Drive is not connected"
           action={
-            <Link href="/admin" className={buttonClass("secondary")}>
-              Connect
-            </Link>
+            admin ? (
+              <Link href="/admin" className={buttonClass("secondary")}>
+                Connect
+              </Link>
+            ) : null
           }
         >
           An admin needs to connect the hub's Google account before documents can be created.
@@ -88,7 +91,8 @@ export default async function NewDocumentPage({
       {env.driveMode === "mock" ? (
         <Banner tone="amber" icon="cloud_off" title="Simulated Drive">
           Nothing is written to Google while the hub runs in this mode — you will get a fake file so
-          you can see the whole flow. Connect a Google account in Admin to make it real.
+          you can see the whole flow.
+          {admin ? " Connect a Google account in Admin to make it real." : ""}
         </Banner>
       ) : null}
 
@@ -126,7 +130,7 @@ export default async function NewDocumentPage({
           }))}
           namingTemplate={setup.config.namingTemplate}
           currentSeason={setup.config.currentSeason}
-          groupEmail={setup.config.groupEmail}
+          boardCount={setup.boardCount}
           driveMode={env.driveMode}
           companyCreatorOnly={companyCreatorOnly}
           canvaMode={env.canvaMode}

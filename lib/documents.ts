@@ -16,6 +16,9 @@ import {
   type Visibility,
 } from "./constants";
 import { canvaProvider, extractCanvaDesignId, getCanvaAccount } from "./canva";
+// Re-exported so the existing callers keep working; anything that only needs
+// the rule should import it straight from lib/canva/freshness.
+export { canvaMirrorIsStale } from "./canva/freshness";
 import { canCreateDocuments, type Viewer } from "./access";
 import { putBytesToDrive } from "./google/upload";
 import {
@@ -31,6 +34,47 @@ export type DocumentServiceResult = {
   document: Document;
   warnings: string[];
 };
+
+// ---------------------------------------------------------------------------
+// Naming
+// ---------------------------------------------------------------------------
+
+/** The bits of the org config the naming rule reads. */
+export type NamingContext = {
+  namingTemplate: string;
+  currentSeason: string | null;
+};
+
+/**
+ * The one name a document has.
+ *
+ * The hub used to keep two: the file in Drive was named by the admin's rule
+ * ("[URINETOWN] Running budget — Budgets & finance") while the hub listed
+ * whatever the person typed ("Running budget"). Two names for one thing is a
+ * small lie that costs real time — you cannot tell from a hub list what a file
+ * is called in Drive, and a list of twenty bare titles tells you nothing about
+ * which show or shelf each belongs to.
+ *
+ * So the rule composes the hub title too, from `baseTitle`. Composing always
+ * from the base is what keeps it idempotent: re-filing a document to another
+ * show, or an admin editing the rule, recomposes the name rather than
+ * prefixing the prefixed thing again.
+ */
+export function documentName(
+  config: NamingContext,
+  input: {
+    baseTitle: string;
+    category: { name: string } | null | undefined;
+    production?: { name: string; abbreviation: string | null; season: string | null } | null;
+  },
+): string {
+  return applyNamingTemplate(config.namingTemplate, {
+    production: input.production?.abbreviation || input.production?.name || null,
+    category: input.category?.name,
+    title: input.baseTitle,
+    season: input.production?.season ?? config.currentSeason,
+  });
+}
 
 /** Find-or-create Tag rows for a comma-separated tag string. */
 async function tagIds(input: string | undefined): Promise<Array<{ id: string }>> {
@@ -134,11 +178,11 @@ type SharableDocument = Pick<
 >;
 
 /**
- * Every board member who should be able to reach a document, used when the
- * hub shares with people by name instead of with the Google Group. The point
- * of that mode: the hub cannot read a consumer Google Group's membership, so
- * with GROUP sharing "disable this member" leaves their Drive access intact.
- * Naming everybody costs more permissions but makes offboarding real.
+ * Every board member who should be able to reach a document — the member list
+ * is the access list. The hub cannot read a consumer Google Group's
+ * membership, so sharing board documents with the group meant "disable this
+ * member" left their Drive access untouched. Naming everybody costs one Drive
+ * permission per person per file, and in exchange offboarding is real.
  */
 async function boardRecipients(
   boardCanEdit: boolean,
@@ -157,7 +201,6 @@ async function boardRecipients(
 
 async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   const config = await getConfig();
-  const perMember = config.shareMode === "MEMBERS";
 
   // Edit access is the narrower ladder: who can change the file's contents, as
   // opposed to who can see it. Clamped to visibility so it can never exceed it.
@@ -169,9 +212,7 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
     prisma.user.findUnique({ where: { id: doc.creatorId } }),
     prisma.documentShare.findMany({ where: { documentId: doc.id }, include: { user: true } }),
     companyRecipients(doc),
-    doc.visibility === "PRIVATE" || !perMember
-      ? Promise.resolve([])
-      : boardRecipients(boardCanEdit),
+    doc.visibility === "PRIVATE" ? Promise.resolve([]) : boardRecipients(boardCanEdit),
   ]);
 
   const extra = shares.map((share) => ({
@@ -196,12 +237,10 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   return {
     visibility: doc.visibility as Visibility,
     creatorEmail: creator?.email ?? "",
-    // In per-member mode the group is deliberately left out of the plan, so a
-    // reconciling pass removes it from files that used to be shared with it.
-    groupEmail: perMember ? null : config.groupEmail,
-    // Whether the group gets write on *this* file now comes from the document,
-    // not from an org-wide toggle.
-    groupCanEdit: boardCanEdit,
+    // Never granted — passed so a pass over a file left over from group
+    // sharing takes that permission off it. Harmless on a file that never had
+    // one.
+    retireGroupEmail: config.groupEmail,
     extra,
     // Anything the hub made in its own Drive — created, uploaded or mirrored
     // from Canva — is reconciled, so dropping a document's visibility actually
@@ -281,10 +320,18 @@ export async function createDocument(
 
   const warnings: string[] = [];
 
+  // The same string names the file in Drive and the document on the hub.
+  const name = documentName(config, {
+    baseTitle: input.title,
+    category,
+    production,
+  });
+
   // 1. Reserve the hub record first so the Drive file can link back to it.
   const record = await prisma.document.create({
     data: {
-      title: input.title,
+      title: name,
+      baseTitle: input.title,
       description: input.description ?? null,
       docType: input.docType,
       source: "CREATED",
@@ -307,16 +354,10 @@ export async function createDocument(
 
   try {
     const folderId = await resolveFolder({ category, production });
-    const fileName = applyNamingTemplate(config.namingTemplate, {
-      production: production?.abbreviation || production?.name || null,
-      category: category.name,
-      title: input.title,
-      season: production?.season ?? config.currentSeason,
-    });
 
     const header: DocHeader | null = config.stampDocHeader
       ? {
-          title: input.title,
+          title: name,
           production: production?.name ?? null,
           category: category.name,
           owner: actor.name || actor.email,
@@ -328,7 +369,7 @@ export async function createDocument(
       : null;
 
     const file = await driveProvider().createDocument({
-      name: fileName,
+      name,
       docType: input.docType,
       parentFolderId: folderId,
       templateFileId: template?.googleFileId ?? null,
@@ -355,6 +396,7 @@ export async function createDocument(
         driveFolderId: folderId,
         driveOwnerEmail: file.ownerEmail ?? null,
         googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
+        lastEditedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
         lastSyncedAt: new Date(),
         // A form has two links and they must not be confused: the edit link
         // lets someone change the questions, the responder link is the one to
@@ -376,12 +418,6 @@ export async function createDocument(
     const sharing = await syncSharing(updated);
     warnings.push(...sharing.warnings);
 
-    if (input.visibility === "BOARD" && !config.groupEmail) {
-      warnings.push(
-        "No board Google Group is configured yet, so this document was not shared in Drive. An admin can set it in Admin → Settings.",
-      );
-    }
-
     await recordAudit({
       actor,
       action: "document.create",
@@ -390,8 +426,8 @@ export async function createDocument(
       summary:
         input.visibility === "PRIVATE"
           ? `Created a private ${DOC_TYPE_META[input.docType].short.toLowerCase()} in ${category.name}`
-          : `Created “${input.title}” in ${category.name}${production ? ` for ${production.name}` : ""}`,
-      metadata: { docType: input.docType, visibility: input.visibility, fileName },
+          : `Created “${name}” in ${category.name}${production ? ` for ${production.name}` : ""}`,
+      metadata: { docType: input.docType, visibility: input.visibility, fileName: name },
     });
 
     return { document: updated, warnings };
@@ -491,10 +527,13 @@ export async function recordUploadedDocument(
 
   const docType = docTypeFromMime(input.file.mimeType);
   const warnings: string[] = [];
+  const config = await getConfig();
 
   const document = await prisma.document.create({
     data: {
-      title: input.title,
+      // The extension belongs on the file in Drive, not on the title.
+      title: documentName(config, { baseTitle: input.title, category, production }),
+      baseTitle: input.title,
       description: input.description ?? null,
       docType,
       source: "CREATED",
@@ -511,6 +550,7 @@ export async function recordUploadedDocument(
       originalFileName: input.originalFileName,
       mimeType: input.file.mimeType,
       googleModifiedAt: input.file.modifiedTime ? new Date(input.file.modifiedTime) : new Date(),
+      lastEditedAt: input.file.modifiedTime ? new Date(input.file.modifiedTime) : new Date(),
       lastSyncedAt: new Date(),
       tags: { connect: await tagIds(input.tags) },
       metadata: JSON.stringify({
@@ -532,13 +572,6 @@ export async function recordUploadedDocument(
   const sharing = await syncSharing(document);
   warnings.push(...sharing.warnings);
 
-  const config = await getConfig();
-  if (input.visibility === "BOARD" && !config.groupEmail) {
-    warnings.push(
-      "No board Google Group is configured yet, so this file was not shared in Drive. An admin can set it in Admin → Settings.",
-    );
-  }
-
   await recordAudit({
     actor,
     action: "document.upload",
@@ -547,7 +580,7 @@ export async function recordUploadedDocument(
     summary:
       input.visibility === "PRIVATE"
         ? `Uploaded a private file to ${category.name}`
-        : `Uploaded “${input.title}” to ${category.name}${production ? ` for ${production.name}` : ""}`,
+        : `Uploaded “${document.title}” to ${category.name}${production ? ` for ${production.name}` : ""}`,
     metadata: { docType, sizeBytes: input.file.sizeBytes ?? null, originalFileName: input.originalFileName },
   });
 
@@ -573,6 +606,7 @@ export async function recordNewVersion(
       originalFileName,
       docType: docTypeFromMime(file.mimeType),
       googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
+      lastEditedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
       lastSyncedAt: new Date(),
       status: "ACTIVE",
     },
@@ -757,12 +791,13 @@ export async function mirrorCanvaDesign(
     );
   }
 
-  const title = (input.title?.trim() || design.title || "Canva design").slice(0, 160);
+  const baseTitle = (input.title?.trim() || design.title || "Canva design").slice(0, 160);
   const warnings: string[] = [];
 
   const document = await prisma.document.create({
     data: {
-      title,
+      title: documentName(config, { baseTitle, category, production }),
+      baseTitle,
       description: input.description ?? null,
       docType: "CANVA",
       source: "CANVA",
@@ -799,12 +834,6 @@ export async function mirrorCanvaDesign(
     );
   }
 
-  if (input.visibility === "BOARD" && !config.groupEmail) {
-    warnings.push(
-      "No board Google Group is configured yet, so the exported copy was not shared in Drive.",
-    );
-  }
-
   await recordAudit({
     actor,
     action: "canva.mirror",
@@ -813,7 +842,7 @@ export async function mirrorCanvaDesign(
     summary:
       input.visibility === "PRIVATE"
         ? `Mirrored a private Canva design into ${category.name}`
-        : `Mirrored the Canva design “${title}” into ${category.name}${production ? ` for ${production.name}` : ""}`,
+        : `Mirrored the Canva design “${document.title}” into ${category.name}${production ? ` for ${production.name}` : ""}`,
     metadata: { designId: design.id, format: input.format },
   });
 
@@ -854,11 +883,10 @@ export async function exportCanvaMirror(
 
   const meta = CANVA_FORMAT_META[exported.format];
   const driveName = withExtension(
-    applyNamingTemplate(config.namingTemplate, {
-      production: document.production?.abbreviation || document.production?.name || null,
-      category: document.category.name,
-      title: document.title,
-      season: document.production?.season ?? config.currentSeason,
+    documentName(config, {
+      baseTitle: document.baseTitle,
+      category: document.category,
+      production: document.production,
     }),
     meta.extension,
   );
@@ -905,6 +933,7 @@ export async function exportCanvaMirror(
       canvaDesignUpdatedAt: design?.updatedAt ?? document.canvaDesignUpdatedAt,
       canvaCheckedAt: new Date(),
       googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
+      lastEditedAt: file.modifiedTime ? new Date(file.modifiedTime) : new Date(),
       lastSyncedAt: new Date(),
     },
   });
@@ -947,16 +976,6 @@ export async function checkCanvaFreshness(documentId: string) {
   });
 }
 
-/** True when the Canva original has been edited since the hub's copy was made. */
-export function canvaMirrorIsStale(document: {
-  canvaExportedAt: Date | null;
-  canvaDesignUpdatedAt: Date | null;
-}): boolean {
-  if (!document.canvaExportedAt || !document.canvaDesignUpdatedAt) return false;
-  // A minute of slack: Canva's updated_at ticks over as the export is taken.
-  return document.canvaDesignUpdatedAt.getTime() > document.canvaExportedAt.getTime() + 60_000;
-}
-
 // ---------------------------------------------------------------------------
 // Register something that already exists
 // ---------------------------------------------------------------------------
@@ -977,7 +996,8 @@ export async function registerDocument(
     docType?: DocType;
   },
 ): Promise<DocumentServiceResult> {
-  const [category, production] = await Promise.all([
+  const [config, category, production] = await Promise.all([
+    getConfig(),
     prisma.category.findUnique({ where: { id: input.categoryId } }),
     input.productionId
       ? prisma.production.findUnique({ where: { id: input.productionId } })
@@ -1038,7 +1058,8 @@ export async function registerDocument(
 
   const document = await prisma.document.create({
     data: {
-      title: input.title,
+      title: documentName(config, { baseTitle: input.title, category, production }),
+      baseTitle: input.title,
       description: input.description ?? null,
       docType,
       source: fileId ? "REGISTERED" : "LINK",
@@ -1052,6 +1073,8 @@ export async function registerDocument(
       driveFolderId,
       driveOwnerEmail,
       googleModifiedAt,
+      // Nothing to go on for a plain link, so the hub's own clock stands in.
+      lastEditedAt: googleModifiedAt ?? new Date(),
       lastSyncedAt: fileId ? new Date() : null,
       tags: { connect: await tagIds(input.tags) },
       metadata: JSON.stringify({ registeredFrom: input.link, driveMode: env.driveMode }),
@@ -1071,7 +1094,7 @@ export async function registerDocument(
     summary:
       input.visibility === "PRIVATE"
         ? `Registered a private file in ${category.name}`
-        : `Registered “${input.title}” in ${category.name}`,
+        : `Registered “${document.title}” in ${category.name}`,
     metadata: { docType, source: document.source },
   });
 
@@ -1118,12 +1141,18 @@ export async function updateDocument(
   const warnings: string[] = [];
   const movedShelf =
     current.categoryId !== category.id || (current.productionId ?? null) !== (production?.id ?? null);
-  const renamed = current.title !== input.title;
+
+  // The name is composed, not typed: the form edits the base, and moving a
+  // document to another show or shelf recomposes it — which is the whole
+  // point of keeping the rule's inputs rather than its output.
+  const name = documentName(config, { baseTitle: input.title, category, production });
+  const renamed = current.title !== name;
 
   const document = await prisma.document.update({
     where: { id: current.id },
     data: {
-      title: input.title,
+      title: name,
+      baseTitle: input.title,
       description: input.description ?? null,
       categoryId: category.id,
       productionId: production?.id ?? null,
@@ -1149,12 +1178,10 @@ export async function updateDocument(
   if (document.googleFileId && hubOwnsFile) {
     const provider = driveProvider();
     if (renamed || movedShelf) {
-      const fileName = applyNamingTemplate(config.namingTemplate, {
-        production: production?.abbreviation || production?.name || null,
-        category: category.name,
-        title: input.title,
-        season: production?.season ?? config.currentSeason,
-      });
+      // Uploads keep their extension; a Google-native file has none.
+      const fileName = document.originalFileName
+        ? withExtension(name, document.originalFileName)
+        : name;
       try {
         await provider.renameFile(document.googleFileId, fileName);
       } catch (error) {
@@ -1282,16 +1309,77 @@ export async function syncDocument(actor: User | null, id: string) {
     return { changed: true, missing: true };
   }
 
+  const modifiedAt = file.modifiedTime ? new Date(file.modifiedTime) : document.googleModifiedAt;
   await prisma.document.update({
     where: { id },
     data: {
       webViewLink: file.webViewLink || document.webViewLink,
       driveOwnerEmail: file.ownerEmail ?? document.driveOwnerEmail,
-      googleModifiedAt: file.modifiedTime ? new Date(file.modifiedTime) : document.googleModifiedAt,
+      googleModifiedAt: modifiedAt,
+      ...(modifiedAt ? { lastEditedAt: modifiedAt } : {}),
       lastSyncedAt: new Date(),
     },
   });
   return { changed: true, missing: false };
+}
+
+// ---------------------------------------------------------------------------
+// Applying the naming rule to what is already here
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-compose every document's title from its base and the current rule.
+ *
+ * Two jobs in one: the retroactive pass for a hub whose titles predate the
+ * rule being applied to them at all, and the tidy-up after an admin edits the
+ * rule — a naming rule nobody can apply to what is already filed is only half
+ * a rule. Idempotent, so running it twice is a no-op, and it touches nothing
+ * in Drive: the files there are already named by the rule.
+ */
+export async function normaliseDocumentTitles(options?: {
+  /** Work out what would change without changing it. */
+  dryRun?: boolean;
+  /** Stop after this many rows; the caller can resume. */
+  limit?: number;
+}): Promise<{ scanned: number; changed: number; examples: Array<{ from: string; to: string }> }> {
+  const config = await getConfig();
+  const documents = await prisma.document.findMany({
+    select: {
+      id: true,
+      title: true,
+      baseTitle: true,
+      category: { select: { name: true } },
+      production: { select: { name: true, abbreviation: true, season: true } },
+    },
+    orderBy: { createdAt: "asc" },
+    ...(options?.limit ? { take: options.limit } : {}),
+  });
+
+  const examples: Array<{ from: string; to: string }> = [];
+  let changed = 0;
+
+  for (const document of documents) {
+    const next = documentName(config, {
+      baseTitle: document.baseTitle,
+      category: document.category,
+      production: document.production,
+    });
+    if (next === document.title) continue;
+    changed += 1;
+    if (examples.length < 5) examples.push({ from: document.title, to: next });
+    if (!options?.dryRun) {
+      await prisma.document.update({ where: { id: document.id }, data: { title: next } });
+    }
+  }
+
+  if (!options?.dryRun) {
+    await prisma.orgConfig.update({
+      where: { id: "singleton" },
+      data: { titlesNormalisedAt: new Date() },
+    });
+  }
+
+  return { scanned: documents.length, changed, examples };
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ export default async function AdminCategoriesPage({
         description="Categories are the shelves of the hub. Keep them few enough that people can scan the list, and describe clearly what belongs in each."
       >
         <CategoryForm
+          key={editing?.id ?? "new"}
           category={
             editing
               ? {

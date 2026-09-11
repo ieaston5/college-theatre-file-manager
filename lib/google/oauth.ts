@@ -1,18 +1,20 @@
-import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { prisma } from "../db";
 import { encrypt, randomToken, tryDecrypt } from "../crypto";
 import { driveRedirectUri, env, loginRedirectUri } from "../env";
 import { DRIVE_SCOPES, LOGIN_SCOPES } from "../constants";
+import { OAuth2Ctor, oauth2Api } from "./lazy";
 import { GoogleNotConnectedError } from "./types";
 
-function client(redirectUri: string): OAuth2Client {
+/** Async only because the Google client is loaded on demand — see ./lazy. */
+async function client(redirectUri: string): Promise<OAuth2Client> {
   if (!env.googleConfigured) {
     throw new Error(
       "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set in .env — see SETUP.md step 2.",
     );
   }
-  return new google.auth.OAuth2(env.googleClientId, env.googleClientSecret, redirectUri);
+  const OAuth2 = await OAuth2Ctor();
+  return new OAuth2(env.googleClientId, env.googleClientSecret, redirectUri);
 }
 
 // --- one-time state values --------------------------------------------------
@@ -38,8 +40,8 @@ export async function consumeOAuthState(state: string | null, purpose: "login" |
 
 // --- member sign-in ---------------------------------------------------------
 
-export function loginAuthUrl(state: string): string {
-  return client(loginRedirectUri()).generateAuthUrl({
+export async function loginAuthUrl(state: string): Promise<string> {
+  return (await client(loginRedirectUri())).generateAuthUrl({
     scope: LOGIN_SCOPES,
     include_granted_scopes: true,
     prompt: "select_account",
@@ -50,7 +52,7 @@ export function loginAuthUrl(state: string): string {
 export type GoogleIdentity = { sub: string; email: string; name?: string; picture?: string };
 
 export async function exchangeLoginCode(code: string): Promise<GoogleIdentity> {
-  const oauth = client(loginRedirectUri());
+  const oauth = await client(loginRedirectUri());
   const { tokens } = await oauth.getToken(code);
   if (!tokens.id_token) throw new Error("Google did not return an identity token.");
   const ticket = await oauth.verifyIdToken({
@@ -70,8 +72,8 @@ export async function exchangeLoginCode(code: string): Promise<GoogleIdentity> {
 
 // --- the hub's document-owning account --------------------------------------
 
-export function driveAuthUrl(state: string): string {
-  return client(driveRedirectUri()).generateAuthUrl({
+export async function driveAuthUrl(state: string): Promise<string> {
+  return (await client(driveRedirectUri())).generateAuthUrl({
     scope: DRIVE_SCOPES,
     access_type: "offline",
     prompt: "consent", // force a refresh token even on re-connect
@@ -81,7 +83,7 @@ export function driveAuthUrl(state: string): string {
 }
 
 export async function exchangeDriveCode(code: string) {
-  const oauth = client(driveRedirectUri());
+  const oauth = await client(driveRedirectUri());
   const { tokens } = await oauth.getToken(code);
   if (!tokens.refresh_token) {
     throw new Error(
@@ -123,7 +125,8 @@ export async function exchangeDriveCode(code: string) {
 
   if (!email) {
     try {
-      const info = await google.oauth2({ version: "v2", auth: oauth }).userinfo.get();
+      const oauth2 = await oauth2Api();
+      const info = await oauth2({ version: "v2", auth: oauth }).userinfo.get();
       email = (info.data.email ?? "").toLowerCase();
       name = info.data.name ?? name;
     } catch (error) {
@@ -188,7 +191,7 @@ export async function driveClient(): Promise<OAuth2Client> {
   const refreshToken = tryDecrypt(account?.refreshToken);
   if (!account || !refreshToken) throw new GoogleNotConnectedError();
 
-  const oauth = client(driveRedirectUri());
+  const oauth = await client(driveRedirectUri());
   oauth.setCredentials({
     refresh_token: refreshToken,
     access_token: tryDecrypt(account.accessToken) ?? undefined,

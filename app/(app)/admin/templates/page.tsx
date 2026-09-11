@@ -43,6 +43,7 @@ export default async function AdminTemplatesPage({
         description="The file stays where it is — the hub copies it every time someone picks it."
       >
         <TemplateForm
+          key={editing?.id ?? "new"}
           template={
             editing
               ? {

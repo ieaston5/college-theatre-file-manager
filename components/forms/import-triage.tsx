@@ -351,8 +351,8 @@ export function ImportTriage({
       <div className="rounded-xl border border-ink-200 bg-white p-3">
         <Toggle
           name="renameInDrive"
-          label="Rename these in Drive to match the hub's naming rule"
-          hint="Turns “urinetown light plot v2” into “[URINETOWN] urinetown light plot — Design & tech”, keeping any file extension. Needs edit access, which the hub only has on files it owns or has been given — anything it cannot rename keeps its current name and is listed afterwards. The file does not move folders either way."
+          label="Rename these in Drive too, to match the hub's naming rule"
+          hint="The hub lists them by its naming rule either way — “urinetown light plot v2” becomes “[URINETOWN] urinetown light plot — Design & tech”. This also renames the file itself, keeping any extension, so Drive matches. Needs edit access, which the hub only has on files it owns or has been given; anything it cannot rename keeps its current name in Drive and is listed afterwards. The file does not move folders either way."
         />
       </div>
 

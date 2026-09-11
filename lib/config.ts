@@ -1,18 +1,24 @@
+import { cache } from "react";
 import type { OrgConfig } from "@prisma/client";
 import { prisma } from "./db";
 import { env } from "./env";
-import { DRIVE_SCOPES } from "./constants";
+import { BOARD_ROLES, DRIVE_SCOPES } from "./constants";
 
-/** The single OrgConfig row, created on demand. */
-export async function getConfig(): Promise<OrgConfig> {
+/**
+ * The single OrgConfig row, created on demand.
+ *
+ * Memoised per request: the app layout reads it for the org name and footer,
+ * and the page inside it usually reads it again.
+ */
+export const getConfig = cache(async function getConfig(): Promise<OrgConfig> {
   const existing = await prisma.orgConfig.findUnique({ where: { id: "singleton" } });
   if (existing) return existing;
   return prisma.orgConfig.create({ data: { id: "singleton" } });
-}
+});
 
-export async function getDriveAccount() {
+export const getDriveAccount = cache(async function getDriveAccount() {
   return prisma.driveAccount.findUnique({ where: { id: "singleton" } });
-}
+});
 
 /**
  * Which scopes this build wants that the stored grant is missing.
@@ -42,12 +48,15 @@ export const SCOPE_LABELS: Record<string, string> = {
 };
 
 /** Everything a page needs to decide whether to nag about setup. */
-export async function getSetupState() {
-  const [config, account, categoryCount, memberCount] = await Promise.all([
+export const getSetupState = cache(async function getSetupState() {
+  const [config, account, categoryCount, memberCount, boardCount] = await Promise.all([
     getConfig(),
     getDriveAccount(),
     prisma.category.count({ where: { archived: false } }),
     prisma.user.count({ where: { status: { not: "DISABLED" } } }),
+    prisma.user.count({
+      where: { role: { in: [...BOARD_ROLES] }, status: { not: "DISABLED" } },
+    }),
   ]);
 
   /**
@@ -80,8 +89,13 @@ export async function getSetupState() {
      * upgraded needs to know to press Reconnect, so say so up front.
      */
     missingScopes: missingDriveScopes(account?.scope ?? null),
-    groupConfigured: Boolean(config.groupEmail),
     categoryCount,
     memberCount,
+    /**
+     * Everybody who gets a named Drive permission on a board document. Shown
+     * where somebody is about to choose Board visibility, because it is the
+     * honest answer to "who will be able to open this?".
+     */
+    boardCount,
   };
-}
+});

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
@@ -36,8 +37,14 @@ export async function clearSession() {
 /**
  * The signed-in user, or null. The row is re-read on every request so that
  * disabling someone in the admin console takes effect immediately.
+ *
+ * Memoised per request with React's cache(): rendering a page runs this from
+ * the layout, from the page, and often from a section inside it, and without
+ * the memo each of those was a signature verification and a round trip to the
+ * database for the same row. It still happens once per request, so the
+ * immediacy above is unchanged.
  */
-export async function getCurrentUser(): Promise<User | null> {
+export const getCurrentUser = cache(async function getCurrentUser(): Promise<User | null> {
   const token = (await cookies()).get(COOKIE)?.value;
   if (!token) return null;
 
@@ -53,7 +60,7 @@ export async function getCurrentUser(): Promise<User | null> {
   const user = await prisma.user.findUnique({ where: { id: uid } });
   if (!user || user.status === "DISABLED") return null;
   return user;
-}
+});
 
 /** Use in every authenticated page/action. Redirects to the sign-in screen. */
 export async function requireUser(): Promise<User> {

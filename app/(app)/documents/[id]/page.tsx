@@ -52,18 +52,22 @@ export default async function DocumentPage({
   const { id } = await params;
   const query = await searchParams;
 
-  const document = await prisma.document.findUnique({
-    where: { id },
-    include: {
-      category: true,
-      production: true,
-      creator: true,
-      tags: true,
-      shares: { include: { user: true, grantedBy: true } },
-    },
-  });
-
-  const viewer = await getViewerContext(user);
+  // Neither of these depends on the other, and the config is wanted either
+  // way, so they go together rather than one after another.
+  const [document, viewer, config] = await Promise.all([
+    prisma.document.findUnique({
+      where: { id },
+      include: {
+        category: true,
+        production: true,
+        creator: true,
+        tags: true,
+        shares: { include: { user: true, grantedBy: true } },
+      },
+    }),
+    getViewerContext(user),
+    getConfig(),
+  ]);
 
   // Deliberately identical whether the id is unknown or simply not yours: the
   // page reveals nothing, and asking is one click. Google Drive behaves the
@@ -92,7 +96,6 @@ export default async function DocumentPage({
     );
   }
 
-  const config = await getConfig();
   const canEdit = canEditDocument(viewer, document);
   const canRemove = canDeleteDocument(viewer, document);
   const visibility = VISIBILITY_META[document.visibility as Visibility];
@@ -114,9 +117,12 @@ export default async function DocumentPage({
     }
   })();
 
-  const companyAudience =
+  // The audience, the pending requests, the share picker and the history are
+  // independent of one another; awaiting them in turn cost four rounds of
+  // database latency on a page that needs one.
+  const [companyAudience, pendingRequests, shareableMembers, activity] = await Promise.all([
     document.visibility === "COMPANY"
-      ? await prisma.productionMember.findMany({
+      ? prisma.productionMember.findMany({
           where: {
             status: "ACTIVE",
             user: { status: { not: "DISABLED" } },
@@ -130,17 +136,14 @@ export default async function DocumentPage({
           },
           orderBy: [{ role: { sortOrder: "asc" } }, { createdAt: "asc" }],
         })
-      : [];
-
-  const pendingRequests = canEdit
-    ? await prisma.accessRequest.findMany({
-        where: { documentId: document.id, status: "PENDING" },
-        include: { user: { select: { name: true, email: true } } },
-        orderBy: { createdAt: "asc" },
-      })
-    : [];
-
-  const [shareableMembers, activity] = await Promise.all([
+      : [],
+    canEdit
+      ? prisma.accessRequest.findMany({
+          where: { documentId: document.id, status: "PENDING" },
+          include: { user: { select: { name: true, email: true } } },
+          orderBy: { createdAt: "asc" },
+        })
+      : [],
     canEdit
       ? prisma.user.findMany({
           where: {
@@ -200,7 +203,7 @@ export default async function DocumentPage({
               {visibility?.label ?? document.visibility}
             </Badge>
             <Badge tone="slate">{typeMeta.label}</Badge>
-            {document.pinned ? (
+            {document.pinned && viewer.isBoard ? (
               <Badge tone="amber" icon="pin">
                 Pinned
               </Badge>
@@ -354,56 +357,17 @@ export default async function DocumentPage({
               </span>
             </Row>
             <Row label="Created">{formatDateTime(document.createdAt)}</Row>
-            <Row label="Hub updated">{relativeTime(document.updatedAt)}</Row>
-            {document.googleModifiedAt ? (
-              <Row label="Drive changed">{relativeTime(document.googleModifiedAt)}</Row>
-            ) : null}
-            {canEdit && pendingRequests.length > 0 ? (
-        <Card className="border-amber-300">
-          <SectionHeader
-            icon="user-plus"
-            title={`${pendingRequests.length} ${
-              pendingRequests.length === 1 ? "person is" : "people are"
-            } asking for access`}
-            description="Granting adds them by name, here and in Drive."
-          />
-          <ul className="space-y-2">
-            {pendingRequests.map((request) => (
-              <li
-                key={request.id}
-                className="flex flex-wrap items-center gap-2 rounded-lg bg-ink-50 p-2.5"
-              >
-                <Avatar name={request.user.name} email={request.user.email} size={28} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-ink-900">
-                    {request.user.name ?? request.user.email}
-                  </span>
-                  <span className="block truncate text-xs text-ink-500">
-                    {request.message ?? request.user.email} · {relativeTime(request.createdAt)}
-                  </span>
-                </span>
-                <form action={decideAccessRequestAction}>
-                  <input type="hidden" name="id" value={request.id} />
-                  <input type="hidden" name="grant" value="true" />
-                  <button type="submit" className={buttonClass("primary", "text-xs")}>
-                    <Icon name="check" className="size-3.5" />
-                    Grant
-                  </button>
-                </form>
-                <form action={decideAccessRequestAction}>
-                  <input type="hidden" name="id" value={request.id} />
-                  <input type="hidden" name="grant" value="false" />
-                  <button type="submit" className={buttonClass("ghost", "text-xs")}>
-                    Decline
-                  </button>
-                </form>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
-
-      {isCanva ? (
+            {/* One "when did this last change", and for anything in Drive it
+                is Google's answer rather than the hub's. */}
+            <Row label="Last edited">
+              <span title={formatDateTime(document.lastEditedAt)}>
+                {relativeTime(document.lastEditedAt)}
+                {document.googleModifiedAt ? (
+                  <span className="text-ink-400"> · in Google</span>
+                ) : null}
+              </span>
+            </Row>
+            {isCanva ? (
               <Row label="Copy format">
                 {CANVA_FORMAT_META[(document.canvaExportFormat ?? "pdf") as CanvaExportFormat]
                   ?.label ?? document.canvaExportFormat}
@@ -421,12 +385,20 @@ export default async function DocumentPage({
             {document.originalFileName ? (
               <Row label="Uploaded as">{document.originalFileName}</Row>
             ) : null}
-            {document.driveOwnerEmail ? (
-              <Row label="Drive owner">{document.driveOwnerEmail}</Row>
-            ) : null}
-            {document.googleFileId ? <Row label="Drive folder">{folderPath}</Row> : null}
-            {document.lastSyncedAt ? (
-              <Row label="Last checked">{relativeTime(document.lastSyncedAt)}</Row>
+            {/* Where the file sits in the club's Drive, and who the hub last
+                talked to about it, is housekeeping for the people who do the
+                filing. Everyone else just opens the thing. */}
+            {viewer.isBoard ? (
+              <>
+                <Row label="Hub record updated">{relativeTime(document.updatedAt)}</Row>
+                {document.driveOwnerEmail ? (
+                  <Row label="Drive owner">{document.driveOwnerEmail}</Row>
+                ) : null}
+                {document.googleFileId ? <Row label="Drive folder">{folderPath}</Row> : null}
+                {document.lastSyncedAt ? (
+                  <Row label="Last checked">{relativeTime(document.lastSyncedAt)}</Row>
+                ) : null}
+              </>
             ) : null}
           </dl>
         </Card>
@@ -444,7 +416,7 @@ export default async function DocumentPage({
           {document.visibility === "COMPANY" ? (
             <div className="space-y-3 text-sm">
               <p className="text-ink-600">
-                Everyone with hub access can see this, plus{" "}
+                {viewer.isBoard ? "Everyone with hub access" : "The board"} can see this, plus{" "}
                 <span className="font-medium text-ink-800">
                   {companyAudience.length}{" "}
                   {companyAudience.length === 1 ? "person" : "people"}
@@ -481,17 +453,17 @@ export default async function DocumentPage({
                     </li>
                   ))}
                 </ul>
-              ) : (
+              ) : viewer.isBoard ? (
                 <p className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
                   Nobody on the company has a role that covers {document.category.name} yet, so
                   right now this is only visible to the board.
                 </p>
-              )}
+              ) : null}
 
               <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
-                In Google Drive each of them is added individually as a viewer — company members are
-                not in the board group. Take someone off the show and their access disappears with
-                them.
+                {viewer.isBoard
+                  ? "In Google Drive each of them is added individually as a viewer. Take someone off the show and their access disappears with them."
+                  : "Everyone listed here is added to the file in Google Drive by name, so it opens for them with the account they sign in with. Access ends when the show does."}
               </div>
             </div>
           ) : document.visibility === "BOARD" ? (
@@ -500,26 +472,20 @@ export default async function DocumentPage({
                 Everyone with hub access can see this document listed and open it.
               </p>
               <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
-                {config.groupEmail ? (
-                  <>
-                    In Google Drive it is shared with{" "}
-                    <span className="font-medium text-ink-800">{config.groupEmail}</span> as{" "}
-                    {config.groupCanEdit ? "editors" : "viewers"}. Nobody outside that group has
-                    access — there is no public link.
-                  </>
-                ) : (
-                  <>
-                    No board Google Group is configured yet, so this is only shared with its creator
-                    in Drive. An admin can add the group in Admin → Settings and re-apply sharing.
-                  </>
-                )}
+                In Google Drive each of them is added by name, from the hub&rsquo;s members list
+                {document.editAccess === "CREATOR_ONLY"
+                  ? " as viewers"
+                  : " — the board as editors, read-only members as viewers"}
+                . Nobody outside that list has access: no public link, and no group standing in for
+                one.
               </div>
             </div>
           ) : (
             <div className="space-y-3 text-sm">
               <p className="text-ink-600">
-                This is private. It is hidden from every other member's dashboard and is not shared
-                with the board group in Drive.
+                {viewer.isBoard
+                  ? "This is private. It is hidden from every other member's dashboard and is not shared with the rest of the board in Drive."
+                  : "This is private. Only the people listed below can see it — not the rest of the company, and not the board."}
               </p>
               <ul className="space-y-2">
                 <li className="flex items-center gap-2 rounded-lg bg-ink-50 p-2 text-sm">
@@ -617,7 +583,11 @@ export default async function DocumentPage({
           <SectionHeader
             icon="canva"
             title="Canva original"
-            description="Canva has no way to let the hub decide who opens a design, so the hub keeps an exported copy in Drive instead — and that copy follows this document's visibility. Canva stays where it is edited."
+            description={
+              canEdit
+                ? "Canva has no way to let the hub decide who opens a design, so the hub keeps an exported copy in Drive instead — and that copy follows this document's visibility. Canva stays where it is edited."
+                : "What you open here is a copy of a Canva design, so it is only as new as the last time somebody exported it."
+            }
           />
 
           <div className="space-y-3 text-sm">
@@ -636,11 +606,15 @@ export default async function DocumentPage({
                     "."
                   )}{" "}
                   {canvaStale
-                    ? "Re-export to bring the copy up to date — same link, same sharing, and Drive keeps the old version."
+                    ? canEdit
+                      ? "Re-export to bring the copy up to date — same link, same sharing, and Drive keeps the old version."
+                      : "So what you open may be out of date. Ask whoever filed it to re-export."
                     : "The copy is current."}
                 </>
-              ) : (
+              ) : canEdit ? (
                 "No copy has been exported yet, so nobody but the Canva editors can see this. Export one below."
+              ) : (
+                "No copy has been exported yet, so there is nothing to open here."
               )}
             </div>
 

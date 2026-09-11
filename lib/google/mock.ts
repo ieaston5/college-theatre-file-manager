@@ -155,6 +155,20 @@ export function readMockFile(id: string): MockFile | null {
   return load().files[id] ?? null;
 }
 
+/**
+ * Backdate a simulated file. Only the seed uses this: sample documents are
+ * spread over the past few days so the hub does not look like it was filled
+ * in one go, and the simulated Drive has to tell the same story — otherwise
+ * the scheduled check reads the simulation and flattens them all to "now".
+ */
+export function setMockModifiedTime(fileId: string, when: Date): void {
+  const state = load();
+  const file = state.files[fileId];
+  if (!file) return;
+  file.modifiedTime = when.toISOString();
+  save(state);
+}
+
 const BLOB_DIR = path.join(STORE_DIR, "blobs");
 
 /**
@@ -369,6 +383,17 @@ export class MockDriveProvider implements DriveProvider {
       }));
   }
 
+  async listModifiedSince(
+    since: Date,
+    limit = 2000,
+  ): Promise<Array<{ id: string; modifiedTime: string | null }>> {
+    return Object.values(load().files)
+      .filter((file) => !file.trashed && new Date(file.modifiedTime) > since)
+      .sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime))
+      .slice(0, limit)
+      .map((file) => ({ id: file.id, modifiedTime: file.modifiedTime }));
+  }
+
   async renameFile(fileId: string, name: string): Promise<void> {
     const state = load();
     const file = state.files[fileId];
@@ -419,9 +444,6 @@ export class MockDriveProvider implements DriveProvider {
 
     const desired = new Map<string, "reader" | "writer">();
     desired.set(plan.creatorEmail.toLowerCase(), "writer");
-    if (plan.visibility !== "PRIVATE" && plan.groupEmail) {
-      desired.set(plan.groupEmail.toLowerCase(), plan.groupCanEdit ? "writer" : "reader");
-    }
     for (const extra of plan.extra ?? []) {
       const email = extra.email.toLowerCase();
       if (desired.get(email) === "writer") continue;
@@ -429,7 +451,7 @@ export class MockDriveProvider implements DriveProvider {
     }
 
     const additive = plan.strategy === "additive";
-    const groupEmail = plan.groupEmail?.toLowerCase() ?? null;
+    const retiredGroup = plan.retireGroupEmail?.toLowerCase() ?? null;
     const revoked: string[] = [];
     const kept: MockPermission[] = [];
 
@@ -445,8 +467,9 @@ export class MockDriveProvider implements DriveProvider {
         desired.delete(email);
         continue;
       }
-      // Nobody wants this permission any more.
-      if (additive && email !== groupEmail) {
+      // Nobody wants this permission any more. On a file the hub does not own
+      // that means leaving it alone, except for the old board group.
+      if (additive && email !== retiredGroup) {
         kept.push(perm);
         continue;
       }
@@ -463,8 +486,7 @@ export class MockDriveProvider implements DriveProvider {
 
     for (const [email, role] of desired) {
       const id = newId("perm");
-      const isGroup = email === plan.groupEmail?.toLowerCase();
-      kept.push({ id, email, role, type: isGroup ? "group" : "user" });
+      kept.push({ id, email, role, type: "user" });
       granted.push({ email, level: role === "writer" ? "WRITER" : "READER", permissionId: id });
     }
 

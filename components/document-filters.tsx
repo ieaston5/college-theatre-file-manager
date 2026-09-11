@@ -11,12 +11,15 @@ export function DocumentFilters({
   categories,
   productions,
   showVisibility = true,
+  boardVisibility = true,
   lockedCategory,
   lockedProduction,
 }: {
   categories: Option[];
   productions: Option[];
   showVisibility?: boolean;
+  /** False for company members: "Board" would only ever return nothing. */
+  boardVisibility?: boolean;
   lockedCategory?: string;
   lockedProduction?: string;
 }) {
@@ -103,7 +106,9 @@ export function DocumentFilters({
           onChange={(event) => update("visibility", event.target.value)}
         >
           <option value="all">Any visibility</option>
-          {VISIBILITIES.map((visibility) => (
+          {VISIBILITIES.filter(
+            (visibility) => boardVisibility || visibility !== "BOARD",
+          ).map((visibility) => (
             <option key={visibility} value={visibility}>
               {VISIBILITY_META[visibility].label}
             </option>
@@ -143,7 +148,7 @@ export function DocumentFilters({
         value={params.get("sort") ?? "updated"}
         onChange={(event) => update("sort", event.target.value)}
       >
-        <option value="updated">Recently updated</option>
+        <option value="updated">Recently edited</option>
         <option value="created">Newest first</option>
         <option value="title">Name A–Z</option>
       </select>

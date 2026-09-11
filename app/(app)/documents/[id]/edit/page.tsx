@@ -1,8 +1,14 @@
 import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getConfig } from "@/lib/config";
-import { canEditDocument, canViewDocument, getViewerContext } from "@/lib/access";
+import { getSetupState } from "@/lib/config";
+import {
+  canEditDocument,
+  canViewDocument,
+  creatableCategoryIds,
+  creatableProductionIds,
+  getViewerContext,
+} from "@/lib/access";
 import { DocumentEditForm } from "@/components/forms/document-edit-form";
 import { PageHeader } from "@/components/ui";
 
@@ -18,16 +24,40 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
   if (!document || !canViewDocument(viewer, document)) notFound();
   if (!canEditDocument(viewer, document)) redirect(`/documents/${id}`);
 
-  const [config, categories, productions] = await Promise.all([
-    getConfig(),
+  /**
+   * A company member may only re-file a document where they could have filed
+   * it in the first place, so the pickers offer exactly that — plus wherever
+   * the document already is, so the form can render what it is looking at.
+   * The same envelope is enforced again when the form is saved.
+   */
+  const companyCreatorOnly = !viewer.isBoard;
+  const allowedCategoryIds = creatableCategoryIds(viewer);
+  const allowedProductionIds = creatableProductionIds(viewer);
+
+  const [setup, categories, productions] = await Promise.all([
+    getSetupState(),
     prisma.category.findMany({
-      where: { OR: [{ archived: false }, { id: document.categoryId }] },
+      where: {
+        OR: [
+          {
+            archived: false,
+            ...(allowedCategoryIds === null ? {} : { id: { in: allowedCategoryIds } }),
+          },
+          { id: document.categoryId },
+        ],
+      },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.production.findMany({
-      where: document.productionId
-        ? { OR: [{ status: { not: "ARCHIVED" } }, { id: document.productionId }] }
-        : { status: { not: "ARCHIVED" } },
+      where: {
+        OR: [
+          {
+            status: { not: "ARCHIVED" },
+            ...(allowedProductionIds === null ? {} : { id: { in: allowedProductionIds } }),
+          },
+          ...(document.productionId ? [{ id: document.productionId }] : []),
+        ],
+      },
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
     }),
   ]);
@@ -42,7 +72,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
       <DocumentEditForm
         document={{
           id: document.id,
-          title: document.title,
+          baseTitle: document.baseTitle,
           description: document.description,
           categoryId: document.categoryId,
           productionId: document.productionId,
@@ -71,7 +101,10 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           status: production.status,
           abbreviation: production.abbreviation,
         }))}
-        groupEmail={config.groupEmail}
+        boardCount={setup.boardCount}
+        namingTemplate={setup.config.namingTemplate}
+        currentSeason={setup.config.currentSeason}
+        companyCreatorOnly={companyCreatorOnly}
       />
     </div>
   );

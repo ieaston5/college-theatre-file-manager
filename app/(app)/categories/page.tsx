@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { categoryFilterFor, getViewerContext, visibleDocumentsWhere } from "@/lib/access";
+import { getViewerContext, visibleDocumentsWhere } from "@/lib/access";
+import { documentCountsByCategory, visibleCategories } from "@/lib/nav";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyState, PageHeader, buttonClass } from "@/components/ui";
 import { CATEGORY_SCOPE_META, type CategoryScope } from "@/lib/constants";
@@ -12,35 +13,28 @@ export default async function CategoriesPage() {
   const viewer = await getViewerContext(user);
   const where = visibleDocumentsWhere(viewer);
 
-  const [categories, counts, latest] = await Promise.all([
-    prisma.category.findMany({
-      where: categoryFilterFor(viewer),
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    }),
-    prisma.document.groupBy({
-      by: ["categoryId"],
-      where: { ...where, status: "ACTIVE" },
-      _count: { _all: true },
-      _max: { updatedAt: true },
-    }),
+  const [categories, stats, latest] = await Promise.all([
+    visibleCategories(viewer),
+    documentCountsByCategory(viewer),
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE" },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { lastEditedAt: "desc" },
       distinct: ["categoryId"],
       select: { categoryId: true, title: true, id: true },
     }),
   ]);
 
-  const stats = new Map(
-    counts.map((row) => [row.categoryId, { count: row._count._all, updated: row._max.updatedAt }]),
-  );
   const newest = new Map(latest.map((row) => [row.categoryId, row]));
 
   return (
     <div>
       <PageHeader
         title="Categories"
-        description="Every kind of information the board keeps, and where it lives."
+        description={
+          viewer.isBoard
+            ? "Every kind of information the board keeps, and where it lives."
+            : "The kinds of document that are shared with you, and what is in each."
+        }
         action={
           isAdmin(user) ? (
             <Link href="/admin/categories" className={buttonClass("secondary")}>
@@ -53,7 +47,9 @@ export default async function CategoriesPage() {
 
       {categories.length === 0 ? (
         <EmptyState icon="grid" title="No categories yet">
-          An admin sets these up in Admin → Categories.
+          {viewer.isBoard
+            ? "An admin sets these up in Admin → Categories."
+            : "Nothing has been shared with your role yet. Whoever runs your show can change that."}
         </EmptyState>
       ) : (
         <ul className="grid gap-3 md:grid-cols-2">
@@ -76,7 +72,11 @@ export default async function CategoriesPage() {
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-ink-900">{category.name}</span>
-                      <Badge tone="slate">{scope?.label ?? category.scope}</Badge>
+                      {/* Whether a category hangs off a show is a filing rule;
+                          it means nothing to somebody who only reads. */}
+                      {viewer.isBoard ? (
+                        <Badge tone="slate">{scope?.label ?? category.scope}</Badge>
+                      ) : null}
                     </span>
                     {category.description ? (
                       <span className="mt-1 block text-xs leading-relaxed text-ink-500">
@@ -85,7 +85,7 @@ export default async function CategoriesPage() {
                     ) : null}
                     <span className="mt-2 block text-xs text-ink-500">
                       {stat?.count ?? 0} {pluralize(stat?.count ?? 0, "document")}
-                      {stat?.updated ? ` · last touched ${relativeTime(stat.updated)}` : ""}
+                      {stat?.updated ? ` · last edited ${relativeTime(stat.updated)}` : ""}
                     </span>
                     {recent ? (
                       <span className="mt-1 block truncate text-xs text-ink-400">

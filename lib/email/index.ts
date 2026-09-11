@@ -1,7 +1,7 @@
-import { google } from "googleapis";
 import { prisma } from "../db";
 import { env } from "../env";
 import { getConfig, getDriveAccount } from "../config";
+import { gmailApi } from "../google/lazy";
 import { driveClient } from "../google/oauth";
 import type { Composed } from "./templates";
 
@@ -91,7 +91,8 @@ export async function sendEmail(options: SendOptions): Promise<SendResult> {
       .replace(/\//g, "_")
       .replace(/=+$/, "");
 
-    await google.gmail({ version: "v1", auth }).users.messages.send({
+    const gmail = await gmailApi();
+    await gmail({ version: "v1", auth }).users.messages.send({
       userId: "me",
       requestBody: { raw },
     });

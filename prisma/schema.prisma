@@ -6,8 +6,28 @@
 // stored as JSON text. That keeps the schema portable to Postgres (Pass 3)
 // without a rewrite.
 
+/// relationJoins makes Prisma fetch a record and its relations in one SQL
+/// statement rather than one statement per relation. Every document list on
+/// the hub includes the category, the production, the creator and the tags, so
+/// each list was five round trips to the database instead of one — and against
+/// a hosted Postgres a round trip costs tens of milliseconds whatever the query
+/// does. It is still a Prisma preview feature, but a long-standing one, it is
+/// only enabled for PostgreSQL, and the results it returns here are identical
+/// to the old strategy's, ordering included.
+///
+/// engineType = "client" builds a client that compiles queries itself and
+/// talks to Postgres through node-postgres, instead of shipping Prisma's
+/// native query engine. The engine is a 17.5 MB binary that was being copied
+/// into the serverless function of every one of the hub's forty routes and
+/// started afresh on every cold instance; the compiler that replaces it is
+/// under 2 MB. It needs the driver adapter that lib/db sets up — read the note
+/// there before changing the connection string, because a couple of the
+/// parameters in it mean different things to node-postgres than they did to
+/// the engine.
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+  engineType      = "client"
 }
 
 datasource db {
@@ -158,7 +178,15 @@ model Tag {
 
 model Document {
   id          String  @id @default(cuid())
+  /// The name everything shows: the hub's naming rule applied to `baseTitle`.
+  /// Stored rather than composed on read so that lists, search and sorting
+  /// all work on the same string the person sees.
   title       String
+  /// What the document is actually called, before the rule: what somebody
+  /// typed, or the tidied file name an import found. The rule is always
+  /// re-applied from this, so re-filing a document — or an admin changing the
+  /// rule — recomposes the name instead of stacking prefixes onto it.
+  baseTitle   String
   description String?
 
   /// DOC | SHEET | SLIDES | FORM | PDF | FOLDER | OTHER | LINK
@@ -194,13 +222,24 @@ model Document {
   /// reports no owner for them at all.
   driveId           String?
   driveName         String?
-  /// Bytes, for uploaded and mirrored files.
-  sizeBytes         Int?
+  /// Bytes, for uploaded, imported and mirrored files.
+  ///
+  /// BigInt rather than Int: uploads through the hub are capped at 100 MB,
+  /// but a registered or imported file is whatever Drive already holds, and
+  /// a rehearsal video clears the 2 GB ceiling of a 32-bit integer easily.
+  sizeBytes         BigInt?
   /// The name of the file as the uploader had it on their machine.
   originalFileName  String?
   mimeType          String?
   googleModifiedAt  DateTime?
   lastSyncedAt      DateTime?
+  /// When the document itself last changed, as opposed to when the hub's row
+  /// did: Google's modified time wherever the hub knows it, and the row's own
+  /// timestamp for the things Google has never seen (external links, a Canva
+  /// design with no export yet). Denormalised into its own indexed column
+  /// because it is the default sort for every list, and `COALESCE` of two
+  /// columns is not something an index can serve.
+  lastEditedAt      DateTime  @default(now())
   /// When the hub last pushed this document's permissions to Drive.
   sharingSyncedAt   DateTime?
 
@@ -242,6 +281,7 @@ model Document {
   @@index([visibility])
   @@index([status])
   @@index([updatedAt])
+  @@index([lastEditedAt])
   @@index([canvaDesignId])
 }
 
@@ -456,7 +496,9 @@ model ImportItem {
   driveName    String?
   webViewLink  String?
   folderPath   String?
-  sizeBytes    Int?
+  /// BigInt for the same reason as Document.sizeBytes: this is Drive's number
+  /// for a file nobody vetted, and one oversized file must not fail the scan.
+  sizeBytes    BigInt?
   modifiedAt   DateTime?
 
   guessedCategoryId   String?
@@ -506,17 +548,16 @@ model DriveAccount {
 model OrgConfig {
   id             String   @id @default("singleton")
   orgName        String   @default("Penn Players")
-  groupEmail     String? // the Google Group that "public" documents are shared with
-  groupCanEdit   Boolean  @default(true)
-  /// How board documents reach the board in Drive.
+  /// The board's Google Group. No longer an access mechanism: board documents
+  /// are shared with each member by name, taken from the member list, so that
+  /// disabling somebody on the hub removes their Drive access too — which is
+  /// impossible with a group, because the hub cannot read a consumer group's
+  /// membership.
   ///
-  /// GROUP   — shared with `groupEmail`. One permission per file, but the hub
-  ///           cannot see who is in a consumer Google Group, so access does
-  ///           not follow the hub's member list.
-  /// MEMBERS — shared with each active board member by name. Exactly matches
-  ///           the member list, so disabling somebody removes their Drive
-  ///           access too. Costs one permission per person per file.
-  shareMode      String   @default("GROUP")
+  /// Still recorded for two reasons: it is the address the board is written to,
+  /// and a sharing sweep needs to know it in order to take the old group
+  /// permission back off files that still carry one.
+  groupEmail     String?
   /// Marks the start of a re-share sweep; documents shared before this are
   /// still stale. Lets a long sweep resume instead of timing out.
   sharingSweepStartedAt DateTime?
@@ -538,6 +579,14 @@ model OrgConfig {
   canvaAutoRefresh   Boolean   @default(true)
   lastCronAt         DateTime?
   lastCanvaRefreshAt DateTime?
+  /// How far the scheduled Drive check has read. Everything Google says
+  /// changed after this has already been folded into the documents' edit
+  /// times, so the next run only has to ask about what is newer.
+  lastDriveScanAt    DateTime?
+  /// When the naming rule was last applied across every existing title.
+  /// Null means never, which is what triggers the one-off pass on a hub that
+  /// predates the rule being used for hub titles at all.
+  titlesNormalisedAt DateTime?
   updatedAt      DateTime @updatedAt
 }
 

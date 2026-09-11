@@ -5,11 +5,13 @@ import { canvaProvider, canvaReady, getCanvaAccount } from "@/lib/canva";
 import { disconnectCanvaAction } from "@/app/actions/canva";
 import { CANVA_SCOPES } from "@/lib/constants";
 import {
+  applyNamingRuleAction,
   bootstrapFoldersAction,
   disconnectDriveAction,
   reapplySharingAction,
   removeSampleDataAction,
 } from "@/app/actions/admin";
+import { normaliseDocumentTitles } from "@/lib/documents";
 import { ConfigForm, FormCard } from "@/components/forms/admin-forms";
 import { Icon } from "@/components/icons";
 import { Badge, Banner, Card, SectionHeader, buttonClass } from "@/components/ui";
@@ -30,6 +32,7 @@ export default async function AdminSettingsPage({
     canvaConnected,
     canvaMirrorCount,
     boardMemberCount,
+    outOfLine,
   ] = await Promise.all([
     prisma.document.count({ where: { googleFileId: { not: null } } }),
     prisma.document.count({ where: { metadata: { contains: '"sample":true' } } }),
@@ -39,6 +42,8 @@ export default async function AdminSettingsPage({
     prisma.user.count({
       where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
     }),
+    // What applying the naming rule would change, without changing it.
+    normaliseDocumentTitles({ dryRun: true }),
   ]);
 
   const canvaLabel =
@@ -375,9 +380,7 @@ export default async function AdminSettingsPage({
           boardCount={boardMemberCount}
           config={{
             orgName: setup.config.orgName,
-            shareMode: setup.config.shareMode,
             groupEmail: setup.config.groupEmail,
-            groupCanEdit: setup.config.groupCanEdit,
             namingTemplate: setup.config.namingTemplate,
             driveRootName: setup.config.driveRootName,
             currentSeason: setup.config.currentSeason,
@@ -385,6 +388,53 @@ export default async function AdminSettingsPage({
           }}
         />
       </FormCard>
+
+      <Card>
+        <SectionHeader
+          icon="tag"
+          title="Names on the hub"
+          description={
+            outOfLine.changed === 0
+              ? `All ${outOfLine.scanned} ${pluralize(
+                  outOfLine.scanned,
+                  "document",
+                )} are named by the rule above.`
+              : `${outOfLine.changed} of ${outOfLine.scanned} ${pluralize(
+                  outOfLine.scanned,
+                  "document",
+                )} are listed under a name the rule above would write differently.`
+          }
+        />
+        {outOfLine.changed > 0 ? (
+          <>
+            <ul className="mb-3 space-y-1.5 text-xs">
+              {outOfLine.examples.map((example) => (
+                <li key={example.from} className="rounded-lg bg-ink-50 px-3 py-2">
+                  <span className="text-ink-500 line-through">{example.from}</span>
+                  <Icon name="chevron-right" className="mx-1.5 inline size-3 text-ink-400" />
+                  <span className="font-medium text-ink-900">{example.to}</span>
+                </li>
+              ))}
+              {outOfLine.changed > outOfLine.examples.length ? (
+                <li className="px-3 text-ink-500">
+                  and {outOfLine.changed - outOfLine.examples.length} more
+                </li>
+              ) : null}
+            </ul>
+            <form action={applyNamingRuleAction}>
+              <button type="submit" className={buttonClass("secondary")}>
+                <Icon name="tag" className="size-4" />
+                Rename them to the rule
+              </button>
+            </form>
+            <p className="mt-3 text-xs leading-relaxed text-ink-500">
+              This changes what the hub lists, not the files in Drive — those are already named by
+              the rule when the hub creates or imports them. Nothing is lost: the hub keeps what
+              each document was called before the rule, and re-applies it from there.
+            </p>
+          </>
+        ) : null}
+      </Card>
 
       {sampleCount > 0 ? (
         <Card className="border-amber-200">
