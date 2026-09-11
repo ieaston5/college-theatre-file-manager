@@ -1,20 +1,59 @@
 /**
- * `googleapis`, loaded on first use rather than at import time.
+ * The Google API clients the hub uses, one package each, loaded on first use.
  *
- * The umbrella `googleapis` package pulls in the generated client for every
- * Google API there is; requiring it costs roughly half a second of CPU on a
- * warm machine and appreciably more on a cold serverless instance. Importing
- * it at the top of this module meant every route whose bundle reached the
- * Drive stack — which, through the document service, was most of the hub —
- * paid that on its first request, before a single query ran.
+ * Two things are going on here, both about cold starts.
  *
- * Nothing needs the namespace until the hub actually talks to Google, and all
- * of those call sites are already async, so the load can wait until then.
- * The promise is kept so the work happens at most once per server instance.
+ * The hub talks to seven Google APIs. The umbrella `googleapis` package ships
+ * the generated client for roughly two hundred and fifty of them, and the
+ * whole lot gets traced into the serverless function of every route that can
+ * reach the Drive stack: 28 MB of the 49 MB those functions weighed, all of
+ * which the host has to fetch and unpack before running a line of our code.
+ * The per-API packages below come to about 5 MB together, are generated from
+ * the same source by the same tool, and expose the identical clients.
+ *
+ * They are also loaded lazily. Evaluating the umbrella package cost the best
+ * part of a second; these cost tens of milliseconds, and nothing needs one
+ * until the hub actually calls Google, which is never during a page render.
+ * `import()` is memoised by the module system, so the cost is paid once per
+ * server instance.
+ *
+ * Each accessor returns the same factory the old `google.<api>` property was:
+ * call it with `{ version, auth }` exactly as before.
  */
-let pending: Promise<typeof import("googleapis")> | null = null;
 
-export async function googleApis() {
-  pending ??= import("googleapis");
-  return (await pending).google;
+export async function driveApi() {
+  return (await import("@googleapis/drive")).drive;
+}
+
+export async function docsApi() {
+  return (await import("@googleapis/docs")).docs;
+}
+
+export async function sheetsApi() {
+  return (await import("@googleapis/sheets")).sheets;
+}
+
+export async function slidesApi() {
+  return (await import("@googleapis/slides")).slides;
+}
+
+export async function formsApi() {
+  return (await import("@googleapis/forms")).forms;
+}
+
+export async function oauth2Api() {
+  return (await import("@googleapis/oauth2")).oauth2;
+}
+
+export async function gmailApi() {
+  return (await import("@googleapis/gmail")).gmail;
+}
+
+/**
+ * The OAuth2 client constructor. Every one of these packages re-exports the
+ * same `auth` helper from google-auth-library, so which it comes from does not
+ * matter; oauth2 is the smallest of them.
+ */
+export async function OAuth2Ctor() {
+  return (await import("@googleapis/oauth2")).auth.OAuth2;
 }

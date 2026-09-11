@@ -74,12 +74,19 @@ const config: NextConfig = {
   // the default .next, which is what hosts like Vercel expect.
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   /**
-   * `googleapis` is left to Node rather than bundled. It is a very large
-   * package and it is only reached through lib/google/lazy, which imports it
-   * on demand; letting the bundler at it pulls it back into the build graph
-   * and slows every build for no gain at runtime.
+   * The Google clients are left to Node rather than bundled. They are only
+   * reached through lib/google/lazy, which imports them on demand; letting the
+   * bundler at them pulls them back into the build graph and undoes that.
    */
-  serverExternalPackages: ["googleapis"],
+  serverExternalPackages: [
+    "@googleapis/drive",
+    "@googleapis/docs",
+    "@googleapis/sheets",
+    "@googleapis/slides",
+    "@googleapis/forms",
+    "@googleapis/oauth2",
+    "@googleapis/gmail",
+  ],
   experimental: {
     // Server actions are used for every mutation in this app.
     serverActions: { bodySizeLimit: "2mb" },

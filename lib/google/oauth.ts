@@ -3,18 +3,18 @@ import { prisma } from "../db";
 import { encrypt, randomToken, tryDecrypt } from "../crypto";
 import { driveRedirectUri, env, loginRedirectUri } from "../env";
 import { DRIVE_SCOPES, LOGIN_SCOPES } from "../constants";
-import { googleApis } from "./lazy";
+import { OAuth2Ctor, oauth2Api } from "./lazy";
 import { GoogleNotConnectedError } from "./types";
 
-/** Async only because `googleapis` is loaded on demand — see ./lazy. */
+/** Async only because the Google client is loaded on demand — see ./lazy. */
 async function client(redirectUri: string): Promise<OAuth2Client> {
   if (!env.googleConfigured) {
     throw new Error(
       "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set in .env — see SETUP.md step 2.",
     );
   }
-  const google = await googleApis();
-  return new google.auth.OAuth2(env.googleClientId, env.googleClientSecret, redirectUri);
+  const OAuth2 = await OAuth2Ctor();
+  return new OAuth2(env.googleClientId, env.googleClientSecret, redirectUri);
 }
 
 // --- one-time state values --------------------------------------------------
@@ -125,8 +125,8 @@ export async function exchangeDriveCode(code: string) {
 
   if (!email) {
     try {
-      const google = await googleApis();
-      const info = await google.oauth2({ version: "v2", auth: oauth }).userinfo.get();
+      const oauth2 = await oauth2Api();
+      const info = await oauth2({ version: "v2", auth: oauth }).userinfo.get();
       email = (info.data.email ?? "").toLowerCase();
       name = info.data.name ?? name;
     } catch (error) {

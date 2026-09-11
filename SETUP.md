@@ -322,10 +322,33 @@ postgresql://postgres.abcdefghijklmnop:PASSWORD@aws-0-us-east-1.pooler.supabase.
 postgresql://postgres.abcdefghijklmnop:PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres
 ```
 
-Copy them from the dashboard rather than typing them from the above: the region
-prefix varies (`aws-0-`, `aws-1-`, …) and `abcdefghijklmnop` stands for your own
-project reference. The shape is worth knowing so you can tell the three strings
-apart at a glance:
+### `connection_limit` is also a speed setting
+
+`connection_limit=1` above is deliberately cautious, and it is the right place
+to start. It is worth knowing what it costs, because it is the single largest
+influence on how quickly a page appears.
+
+It caps the hub at one database connection per running instance. Every page
+here fires its queries as a batch — the dashboard's eighteen, for instance —
+and with a limit of one they cannot overlap: they queue, and the page waits out
+one network round trip after another. Measured against a database held at a
+20ms round trip, the dashboard takes **441ms** with `connection_limit=1` and
+**136ms** without it, with the queries and the output identical either way. The
+other pages behave the same, at roughly a third of the time.
+
+Raising it is a question about your database rather than about the hub. The
+transaction pooler this table points `DATABASE_URL` at exists precisely to
+multiplex many short-lived connections, so a handful per instance is what it is
+built for; the number to stay inside is your plan's pooler connection
+allowance, divided by however many instances you expect to be serving at once.
+Something in the range of 5 to 10 is a reasonable thing to try, watching the
+pooler's connection count as you go. If you see connection or pool-timeout
+errors, put it back.
+
+Copy the strings from the dashboard rather than typing them from the above: the
+region prefix varies (`aws-0-`, `aws-1-`, …) and `abcdefghijklmnop` stands for
+your own project reference. The shape is worth knowing so you can tell the
+three strings apart at a glance:
 
 | | Username | Host | Port |
 | --- | --- | --- | --- |

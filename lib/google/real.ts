@@ -1,5 +1,5 @@
 import type { OAuth2Client } from "google-auth-library";
-import { googleApis } from "./lazy";
+import { docsApi, driveApi, formsApi, oauth2Api, sheetsApi, slidesApi } from "./lazy";
 import { DOC_TYPE_META } from "../constants";
 import { formatDate } from "../utils";
 import { driveClient } from "./oauth";
@@ -107,15 +107,15 @@ export class GoogleDriveProvider implements DriveProvider {
   }
 
   private async drive() {
-    const google = await googleApis();
-    return google.drive({ version: "v3", auth: await this.auth() });
+    const drive = await driveApi();
+    return drive({ version: "v3", auth: await this.auth() });
   }
 
   async accountEmail(): Promise<string | null> {
     try {
-      const google = await googleApis();
+      const oauth2 = await oauth2Api();
       const auth = await this.auth();
-      const info = await google.oauth2({ version: "v2", auth }).userinfo.get();
+      const info = await oauth2({ version: "v2", auth }).userinfo.get();
       return info.data.email?.toLowerCase() ?? null;
     } catch {
       return null;
@@ -180,7 +180,7 @@ export class GoogleDriveProvider implements DriveProvider {
          * description and no appProperties. The Drive call afterwards is what
          * files it where the hub wants it and labels it like everything else.
          */
-        const forms = (await googleApis()).forms({ version: "v1", auth: await this.auth() });
+        const forms = (await formsApi())({ version: "v1", auth: await this.auth() });
         const created = await forms.forms.create({
           requestBody: { info: { title: input.name, documentTitle: input.name } },
         });
@@ -249,7 +249,6 @@ export class GoogleDriveProvider implements DriveProvider {
   }
 
   private async fillPlaceholders(fileId: string, docType: string, header: DocHeader) {
-    const google = await googleApis();
     const auth = await this.auth();
     const values = this.placeholderValues(header);
 
@@ -257,9 +256,10 @@ export class GoogleDriveProvider implements DriveProvider {
       const requests = Object.entries(values).map(([token, value]) => ({
         replaceAllText: { containsText: { text: token, matchCase: true }, replaceText: value },
       }));
-      await google
-        .docs({ version: "v1", auth })
-        .documents.batchUpdate({ documentId: fileId, requestBody: { requests } });
+      await (await docsApi())({ version: "v1", auth }).documents.batchUpdate({
+        documentId: fileId,
+        requestBody: { requests },
+      });
       return;
     }
 
@@ -267,9 +267,10 @@ export class GoogleDriveProvider implements DriveProvider {
       const requests = Object.entries(values).map(([token, value]) => ({
         replaceAllText: { containsText: { text: token, matchCase: true }, replaceText: value },
       }));
-      await google
-        .slides({ version: "v1", auth })
-        .presentations.batchUpdate({ presentationId: fileId, requestBody: { requests } });
+      await (await slidesApi())({ version: "v1", auth }).presentations.batchUpdate({
+        presentationId: fileId,
+        requestBody: { requests },
+      });
       return;
     }
 
@@ -277,17 +278,17 @@ export class GoogleDriveProvider implements DriveProvider {
       const requests = Object.entries(values).map(([token, value]) => ({
         findReplace: { find: token, replacement: value, allSheets: true, matchCase: true },
       }));
-      await google
-        .sheets({ version: "v4", auth })
-        .spreadsheets.batchUpdate({ spreadsheetId: fileId, requestBody: { requests } });
+      await (await sheetsApi())({ version: "v4", auth }).spreadsheets.batchUpdate({
+        spreadsheetId: fileId,
+        requestBody: { requests },
+      });
     }
   }
 
   /** Prepend a small identity block to a blank Google Doc. */
   private async stampDocHeader(documentId: string, header: DocHeader) {
-    const google = await googleApis();
     const auth = await this.auth();
-    const docs = google.docs({ version: "v1", auth });
+    const docs = (await docsApi())({ version: "v1", auth });
 
     // A snapshot of how the document was filed. The hub stays the source of
     // truth, so the block points back at it rather than pretending to be live.
