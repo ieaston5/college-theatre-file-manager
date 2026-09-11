@@ -14,9 +14,20 @@
 /// does. It is still a Prisma preview feature, but a long-standing one, it is
 /// only enabled for PostgreSQL, and the results it returns here are identical
 /// to the old strategy's, ordering included.
+///
+/// engineType = "client" builds a client that compiles queries itself and
+/// talks to Postgres through node-postgres, instead of shipping Prisma's
+/// native query engine. The engine is a 17.5 MB binary that was being copied
+/// into the serverless function of every one of the hub's forty routes and
+/// started afresh on every cold instance; the compiler that replaces it is
+/// under 2 MB. It needs the driver adapter that lib/db sets up — read the note
+/// there before changing the connection string, because a couple of the
+/// parameters in it mean different things to node-postgres than they did to
+/// the engine.
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["relationJoins"]
+  engineType      = "client"
 }
 
 datasource db {

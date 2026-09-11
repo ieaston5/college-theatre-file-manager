@@ -23,12 +23,13 @@ process.env.DRIVE_MODE = "mock";
 process.env.SESSION_SECRET ??= "seed-only-session-secret-value-not-used";
 process.env.APP_ENCRYPTION_KEY ??= "seed-only-encryption-key-not-used";
 
-import { PrismaClient } from "@prisma/client";
+// The shared client rather than one of its own: it is configured with the
+// driver adapter the schema's engineType now requires, and lib/documents —
+// which this script calls — writes through it anyway.
+import { prisma } from "../lib/db";
 import { createDocument } from "../lib/documents";
 import { driveProvider, ensureRootFolders } from "../lib/google";
 import { slugify } from "../lib/utils";
-
-const prisma = new PrismaClient();
 
 const SAMPLE_DOMAIN = "pennplayers.example";
 
