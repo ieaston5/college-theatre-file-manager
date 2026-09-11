@@ -607,6 +607,12 @@ nothing to apply. Commit it.
 **A change to an environment variable had no effect.** They are read at build
 and boot. Redeploy.
 
+**The host's log shows `[DEP0169] DeprecationWarning: url.parse()` at error
+level.** Harmless, and not yours: it comes from inside Google's client library,
+and Vercel files anything Node writes to stderr — warnings included — as an
+error. Judge a request by its status code, not by whether a line appeared. A
+successful server action still logs `200`.
+
 **`P1000: Authentication failed against database server … credentials for
 `postgres` are not valid`.** Nine times in ten the connection string still
 contains Supabase's placeholder — the literal text `[YOUR-PASSWORD]`, square

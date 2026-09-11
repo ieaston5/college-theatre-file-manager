@@ -136,6 +136,8 @@ export type ScanResult = {
     /** Shortcuts whose target is not shared with the hub account. */
     shortcutsUnreadable: number;
     foldersVisited: number;
+    /** Subfolders below the depth limit, which were not looked in. */
+    notLookedIn: string[];
   };
 };
 
@@ -172,6 +174,7 @@ export async function scanDriveFolder(
   let shortcutsFollowed = 0;
   let shortcutsUnreadable = 0;
   let foldersVisited = 0;
+  const tooDeep: string[] = [];
 
   const queue: Array<{ id: string; path: string; depth: number }> = [
     { id: options.folderId, path: options.folderName ?? "", depth: 0 },
@@ -220,6 +223,10 @@ export async function scanDriveFolder(
             path: folder.path ? `${folder.path} / ${entry.name}` : entry.name,
             depth: folder.depth + 1,
           });
+        } else if (options.includeSubfolders) {
+          // Deeper than the walk goes. Counted, because an import that
+          // quietly stopped four levels down would look complete.
+          tooDeep.push(folder.path ? `${folder.path} / ${entry.name}` : entry.name);
         }
         continue;
       }
@@ -280,6 +287,7 @@ export async function scanDriveFolder(
       shortcutsFollowed,
       shortcutsUnreadable,
       foldersVisited,
+      notLookedIn: tooDeep.length,
     },
   });
 
@@ -295,6 +303,7 @@ export async function scanDriveFolder(
       shortcutsFollowed,
       shortcutsUnreadable,
       foldersVisited,
+      notLookedIn: tooDeep,
     },
   };
 }

@@ -202,18 +202,40 @@ export async function startScanAction(_prev: ActionState, form: FormData): Promi
     }
     const followed = result.diagnostics.shortcutsFollowed;
     const unreadable = result.diagnostics.shortcutsUnreadable;
+    const notLookedIn = result.diagnostics.notLookedIn;
+
+    const warnings: string[] = [];
+    if (unreadable > 0) {
+      warnings.push(
+        `${unreadable} ${unreadable === 1 ? "shortcut points" : "shortcuts point"} at ${
+          unreadable === 1 ? "a file" : "files"
+        } ${hubEmail} cannot open, so ${unreadable === 1 ? "it was" : "they were"} left out. Sharing a shortcut does not share what it points at.`,
+      );
+    }
+    // An import that stopped part-way through a deep archive must not look
+    // finished: these folders were never opened.
+    if (notLookedIn.length > 0) {
+      warnings.push(
+        `${notLookedIn.length} ${
+          notLookedIn.length === 1 ? "subfolder is" : "subfolders are"
+        } deeper than this scan goes (four levels), so ${
+          notLookedIn.length === 1 ? "it was" : "they were"
+        } not opened: ${notLookedIn.slice(0, 5).join(", ")}${
+          notLookedIn.length > 5 ? ", …" : ""
+        }. Scan ${notLookedIn.length === 1 ? "it" : "them"} separately to bring those files in.`,
+      );
+    }
+    if (result.found >= 400) {
+      warnings.push(
+        "The scan stopped at 400 files, which is its per-scan limit. File these, then scan again to continue.",
+      );
+    }
+
     return {
       ok: `Found ${result.found} ${result.found === 1 ? "file" : "files"} in ${folder.name}${
         result.duplicates > 0 ? `, ${result.duplicates} already on the hub` : ""
       }${followed > 0 ? `, following ${followed} ${followed === 1 ? "shortcut" : "shortcuts"} to the real file` : ""}.`,
-      warnings:
-        unreadable > 0
-          ? [
-              `${unreadable} ${unreadable === 1 ? "shortcut points" : "shortcuts point"} at ${
-                unreadable === 1 ? "a file" : "files"
-              } ${hubEmail} cannot open, so ${unreadable === 1 ? "it was" : "they were"} left out. Sharing a shortcut does not share what it points at.`,
-            ]
-          : [],
+      warnings,
       documentId: result.batchId,
     };
   } catch (error) {
