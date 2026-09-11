@@ -20,8 +20,9 @@ export default async function AdminRolloverPage() {
     <div className="space-y-6">
       <Banner tone="sky" icon="refresh" title="Do this once a year, when the board changes">
         Everything here is opt-in per show and per person. Nothing is deleted: archiving hides a
-        show and ends its company's access, and disabling somebody keeps every document they filed
-        while blocking their sign-in.
+        show and ends its company's access, and retiring somebody keeps every document they filed.
+        Anyone still cast or crewed on a show that is staying keeps that show — they lose the board,
+        not the hub.
       </Banner>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -89,7 +90,7 @@ export default async function AdminRolloverPage() {
           <li className="flex gap-2">
             <span className="text-ink-400">·</span>
             With group sharing it cannot remove anybody from the Google Group. Switch to per-member
-            sharing and disabling somebody takes their Drive access with it.
+            sharing and taking somebody off the board takes their Drive access with it.
           </li>
         </ul>
       </Card>

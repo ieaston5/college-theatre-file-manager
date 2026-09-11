@@ -53,7 +53,11 @@ export function DocumentEditForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
-    if (visibility === "COMPANY" && !next.companyVisible) setVisibility("BOARD");
+    // A company member cannot publish to the board, so private is the only
+    // place a board-only category can land for them.
+    if (visibility === "COMPANY" && !next.companyVisible) {
+      setVisibility(companyCreatorOnly ? "PRIVATE" : "BOARD");
+    }
     if (next.scope === "STANDING") setProductionId("none");
     if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
   }
@@ -89,6 +93,7 @@ export function DocumentEditForm({
           value={productionId}
           onChange={setProductionId}
           scope={category?.scope}
+          companyCreatorOnly={companyCreatorOnly}
         />
       </Card>
 
@@ -105,15 +110,23 @@ export function DocumentEditForm({
           onChange={setEditAccess}
           visibility={visibility}
           category={category}
+          companyCreatorOnly={companyCreatorOnly}
         />
         <DescriptionField defaultValue={document.description ?? undefined} />
         <TagsField defaultValue={document.tags} />
-        <Toggle
-          name="pinned"
-          label="Pin to the top of the dashboard"
-          hint="Use sparingly — for the two or three things everyone needs this week."
-          defaultChecked={document.pinned}
-        />
+        {/* Pinning surfaces a document on the board's dashboard, which a
+            company member never sees — so it is not offered to them, and the
+            existing state is carried through untouched. */}
+        {companyCreatorOnly ? (
+          document.pinned ? <input type="hidden" name="pinned" value="true" /> : null
+        ) : (
+          <Toggle
+            name="pinned"
+            label="Pin to the top of the dashboard"
+            hint="Use sparingly — for the two or three things everyone needs this week."
+            defaultChecked={document.pinned}
+          />
+        )}
       </Card>
 
       <div className="flex flex-wrap items-center justify-end gap-2">

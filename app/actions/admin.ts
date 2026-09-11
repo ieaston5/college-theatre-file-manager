@@ -381,6 +381,58 @@ export async function saveMemberAction(_prev: ActionState, form: FormData): Prom
   }
 }
 
+/**
+ * Take somebody off the board without taking them off the hub.
+ *
+ * A board term ending is not the same thing as leaving the club: plenty of
+ * outgoing board members are still cast or crewed on a current show, and
+ * disabling the account would cut them off from the schedule and the script
+ * they are entitled to. Dropping the role to COMPANY keeps exactly the access
+ * their production memberships grant and nothing else — if they are on no
+ * current show, that is nothing at all.
+ */
+export async function stepDownFromBoardAction(form: FormData) {
+  const actor = await assertRole("ADMIN");
+  const id = String(form.get("id") ?? "");
+  if (id === actor.id) {
+    throw new Error("You cannot take yourself off the board — ask another admin.");
+  }
+
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) throw new Error("That person is no longer on the hub.");
+  if (target.role === "ADMIN") {
+    const admins = await prisma.user.count({
+      where: { role: "ADMIN", status: "ACTIVE", id: { not: id } },
+    });
+    if (admins === 0) throw new Error("That is the only admin — promote someone else first.");
+  }
+
+  await prisma.user.update({ where: { id }, data: { role: "COMPANY" } });
+  const kept = await prisma.productionMember.count({
+    where: { userId: id, status: "ACTIVE", production: { status: { not: "ARCHIVED" } } },
+  });
+
+  // Board documents are shared per person in that mode, so Drive has to be
+  // told as well. Marking the sweep beats re-sharing hundreds of files here.
+  const config = await getConfig();
+  if (config.shareMode === "MEMBERS" && !config.sharingSweepStartedAt) {
+    await prisma.orgConfig.update({
+      where: { id: "singleton" },
+      data: { sharingSweepStartedAt: new Date() },
+    });
+  }
+  await recordAudit({
+    actor,
+    action: "member.board.stepdown",
+    targetType: "User",
+    targetId: id,
+    summary: `Took ${target.email} off the board${
+      kept > 0 ? ` — they keep company access to ${kept} current ${kept === 1 ? "show" : "shows"}` : ""
+    }`,
+  });
+  refreshEverywhere();
+}
+
 export async function setMemberStatusAction(form: FormData) {
   const actor = await assertRole("ADMIN");
   const id = String(form.get("id") ?? "");

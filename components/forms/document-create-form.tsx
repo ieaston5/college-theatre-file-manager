@@ -111,7 +111,13 @@ export function DocumentCreateForm({
   const [mode, setMode] = useState<CreationMode>("DOC");
   /** Whether the person picked the file type, as opposed to inheriting it. */
   const [typeChosenByHand, setTypeChosenByHand] = useState(false);
-  const [visibility, setVisibility] = useState<string>(companyCreatorOnly ? "COMPANY" : "BOARD");
+  // A company member has no board option, and "Company" is only on the table
+  // once a category that allows it is chosen — so until then, private.
+  const [visibility, setVisibility] = useState<string>(() => {
+    if (!companyCreatorOnly) return "BOARD";
+    const initial = categories.find((item) => item.id === defaultCategoryId);
+    return initial?.companyVisible ? "COMPANY" : "PRIVATE";
+  });
   const [editAccess, setEditAccess] = useState<string>("BOARD");
   const [templateId, setTemplateId] = useState("blank");
   const [canvaFormat, setCanvaFormat] = useState<CanvaExportFormat>("pdf");
@@ -501,6 +507,7 @@ export function DocumentCreateForm({
           value={productionId}
           onChange={setProductionId}
           scope={category?.scope}
+          companyCreatorOnly={companyCreatorOnly}
         />
 
         {!isUpload && !isCanva && availableTemplates.length > 0 ? (
@@ -542,6 +549,7 @@ export function DocumentCreateForm({
           onChange={setEditAccess}
           visibility={visibility}
           category={category}
+          companyCreatorOnly={companyCreatorOnly}
         />
         <DescriptionField />
         <TagsField />

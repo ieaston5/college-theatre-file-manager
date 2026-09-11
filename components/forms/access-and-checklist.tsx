@@ -119,6 +119,7 @@ export type RolloverMember = {
   lastLoginAt: string | null;
   privateCount: number;
   ownedInDriveCount: number;
+  activeMemberships: number;
 };
 
 /**
@@ -221,8 +222,8 @@ export function RolloverForm({
 
       {members.length > 0 ? (
         <Field
-          label={`Board members to disable (${pickedMembers.length} of ${members.length})`}
-          hint="Suggested because they have not signed in for months. Disabling keeps everything they filed and blocks their sign-in — nothing is deleted."
+          label={`Board members to retire (${pickedMembers.length} of ${members.length})`}
+          hint="Suggested because they have not signed in for months. Everything they filed stays — nothing is deleted. Anyone still cast or crewed on a show that survives this rollover is taken off the board but left on that show, rather than being locked out of it."
         >
           <ul className="space-y-1.5">
             {members.map((member) => (
@@ -251,6 +252,12 @@ export function RolloverForm({
                         : ""}
                     </span>
                   </span>
+                  {member.activeMemberships > 0 ? (
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">
+                      keeps {member.activeMemberships}{" "}
+                      {pluralize(member.activeMemberships, "show")}
+                    </span>
+                  ) : null}
                   {member.privateCount > 0 ? (
                     <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
                       {member.privateCount} private
@@ -265,7 +272,7 @@ export function RolloverForm({
 
       {handover.length > 0 ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <p className="font-semibold">Ask these people before you disable them</p>
+          <p className="font-semibold">Ask these people before you retire them</p>
           <p className="mt-1 text-xs leading-relaxed">
             Private documents belong to the person who filed them. The hub cannot read them, hand
             them over or reassign them — not even for an admin. Anything the club needs next year

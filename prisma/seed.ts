@@ -59,7 +59,8 @@ const CATEGORIES = [
     color: "#0ea5e9",
     scope: "BOTH",
     defaultDocType: "SHEET",
-    description: "Rehearsal calendars, tech week schedules, the season calendar.",
+    description:
+      "When you are called and where: rehearsal calendars, tech week, and the season at a glance.",
     sortOrder: 20,
   },
   {
@@ -72,7 +73,8 @@ const CATEGORIES = [
     color: "#6366f1",
     scope: "PRODUCTION",
     defaultDocType: "DOC",
-    description: "Nightly reports from stage management. One document per rehearsal.",
+    description:
+      "What happened at each rehearsal — absences, injuries and notes for every department. One per night, from stage management.",
     sortOrder: 30,
   },
   {
@@ -85,7 +87,7 @@ const CATEGORIES = [
     color: "#7c3aed",
     scope: "BOTH",
     defaultDocType: "SHEET",
-    description: "Cast, crew and vendor contacts. Keep phone numbers out of group chats.",
+    description: "How to reach everyone on the show, in one place instead of six group chats.",
     sortOrder: 40,
   },
   {
@@ -98,7 +100,8 @@ const CATEGORIES = [
     color: "#b45309",
     scope: "PRODUCTION",
     defaultDocType: "DOC",
-    description: "Perusal scripts, cut lists and score annotations. Mind the licence terms.",
+    description:
+      "The script, the score, sides and the current cut list. Read them here rather than from whichever copy got forwarded to you.",
     sortOrder: 50,
   },
   {
@@ -123,7 +126,8 @@ const CATEGORIES = [
     color: "#ea580c",
     scope: "PRODUCTION",
     defaultDocType: "DOC",
-    description: "Light plots, sound cues, set drawings, tech riders and load-in plans.",
+    description:
+      "How the show gets built and run: light plots, sound cues, set drawings, riders and load-in plans.",
     sortOrder: 70,
   },
   {
@@ -135,7 +139,8 @@ const CATEGORIES = [
     color: "#0d9488",
     scope: "PRODUCTION",
     defaultDocType: "SHEET",
-    description: "Piece lists, measurements, props tracking and the borrow/return log.",
+    description:
+      "What you are wearing and carrying, who it belongs to, and what has to go back after closing.",
     sortOrder: 80,
   },
   {
@@ -192,7 +197,8 @@ const CATEGORIES = [
     color: "#4f46e5",
     scope: "STANDING",
     defaultDocType: "DOC",
-    description: "How each board role works. Written for whoever takes over next year.",
+    description:
+      "How things are done here — guides for the job you are doing, and what to hand on to whoever does it next.",
     sortOrder: 130,
   },
   {
@@ -257,7 +263,7 @@ type DocSpec = {
   category: string;
   production?: string;
   docType: "DOC" | "SHEET" | "SLIDES";
-  visibility?: "PRIVATE" | "BOARD";
+  visibility?: "PRIVATE" | "COMPANY" | "BOARD";
   creator: string; // member email or "admin"
   description?: string;
   tags?: string;
@@ -298,6 +304,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Schedules & calendars",
     production: "Urinetown",
     docType: "SHEET",
+    visibility: "COMPANY",
     creator: `maya.o@${SAMPLE_DOMAIN}`,
     description: "Who is called when, through opening. Changes are announced in the group chat.",
     tags: "weekly",
@@ -308,6 +315,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Schedules & calendars",
     production: "Urinetown",
     docType: "SHEET",
+    visibility: "COMPANY",
     creator: `diego.salas@${SAMPLE_DOMAIN}`,
     description: "Load-in through final dress, hour by hour.",
     tags: "tech, load-in",
@@ -317,6 +325,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Rehearsal reports",
     production: "Urinetown",
     docType: "DOC",
+    visibility: "COMPANY",
     creator: `maya.o@${SAMPLE_DOMAIN}`,
     description: "Act I blocking. Two absences, one prop request.",
   },
@@ -325,6 +334,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Rehearsal reports",
     production: "Urinetown",
     docType: "DOC",
+    visibility: "COMPANY",
     creator: `maya.o@${SAMPLE_DOMAIN}`,
   },
   {
@@ -332,6 +342,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Contact sheets",
     production: "Urinetown",
     docType: "SHEET",
+    visibility: "COMPANY",
     creator: `maya.o@${SAMPLE_DOMAIN}`,
     description: "Phone, email and emergency contact for everyone on the show.",
     tags: "contacts",
@@ -366,6 +377,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Design & tech",
     production: "Urinetown",
     docType: "SHEET",
+    visibility: "COMPANY",
     creator: `diego.salas@${SAMPLE_DOMAIN}`,
     description: "Channel hookup, dimmer assignments and focus notes.",
     tags: "lighting",
@@ -375,6 +387,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Design & tech",
     production: "Urinetown",
     docType: "SHEET",
+    visibility: "COMPANY",
     creator: `diego.salas@${SAMPLE_DOMAIN}`,
   },
   {
@@ -390,6 +403,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Costumes & props",
     production: "Urinetown",
     docType: "SHEET",
+    visibility: "COMPANY",
     creator: `maya.o@${SAMPLE_DOMAIN}`,
     description: "Borrowed, bought, built — and what has to go back after closing.",
     tags: "props, returns",
@@ -399,6 +413,7 @@ const DOCUMENTS: DocSpec[] = [
     category: "Costumes & props",
     production: "Urinetown",
     docType: "SHEET",
+    visibility: "COMPANY",
     creator: `sam.w@${SAMPLE_DOMAIN}`,
   },
   {

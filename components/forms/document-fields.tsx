@@ -94,11 +94,14 @@ export function ProductionSelect({
   value,
   onChange,
   scope,
+  companyCreatorOnly,
 }: {
   productions: FormProduction[];
   value: string;
   onChange: (value: string) => void;
   scope: string | undefined;
+  /** A company member filing for their own show. */
+  companyCreatorOnly?: boolean;
 }) {
   const standing = scope === "STANDING";
   const required = scope === "PRODUCTION";
@@ -113,7 +116,9 @@ export function ProductionSelect({
           ? "This category is organisation-wide, so it is not attached to a show."
           : required
             ? "Documents in this category always belong to a show."
-            : "Leave as “Not tied to a show” for things like board minutes or the constitution."
+            : companyCreatorOnly
+              ? "Leave as “Not tied to a show” only if it is not about one production in particular."
+              : "Leave as “Not tied to a show” for things like board minutes or the constitution."
       }
     >
       <select
@@ -173,18 +178,30 @@ export function VisibilityPicker({
       label="Who should see it?"
       required
       hint={
-        <>
-          {groupEmail
-            ? `Board documents are shared with ${groupEmail} in Google Drive. Nobody outside that group gets access.`
-            : "No board Google Group is set yet, so board documents will show on the hub but will not be shared in Drive until an admin adds one."}
-          {category && !category.companyVisible ? (
-            <>
-              {" "}
-              {category.name} is board-only, so it is never offered to a production company. An
-              admin can change that per category.
-            </>
-          ) : null}
-        </>
+        /* A company member never files for the board, so the board's Drive
+           group and the board-only categories are not their problem. */
+        companyCreatorOnly ? (
+          !category ? (
+            "Pick a category above and this will say who “Company” reaches."
+          ) : category.companyVisible ? (
+            "“Company” reaches the people on this show whose role covers this category — plus the board, who can see everything. “Private” keeps it to you until you say otherwise."
+          ) : (
+            "Only you can see this one. Whoever runs the show can open the category up to the company if it should be shared."
+          )
+        ) : (
+          <>
+            {groupEmail
+              ? `Board documents are shared with ${groupEmail} in Google Drive. Nobody outside that group gets access.`
+              : "No board Google Group is set yet, so board documents will show on the hub but will not be shared in Drive until an admin adds one."}
+            {category && !category.companyVisible ? (
+              <>
+                {" "}
+                {category.name} is board-only, so it is never offered to a production company. An
+                admin can change that per category.
+              </>
+            ) : null}
+          </>
+        )
       }
     >
       <RadioCards
@@ -196,11 +213,13 @@ export function VisibilityPicker({
           value: visibility,
           label: VISIBILITY_META[visibility].label,
           description:
-            visibility === "COMPANY" && typeof companyCount === "number"
-              ? `${VISIBILITY_META[visibility].blurb} About ${companyCount} ${
-                  companyCount === 1 ? "person" : "people"
-                } right now.`
-              : VISIBILITY_META[visibility].blurb,
+            visibility === "PRIVATE" && companyCreatorOnly
+              ? "Only you, and anyone you add by hand. Nobody else on the show sees it listed."
+              : visibility === "COMPANY" && typeof companyCount === "number"
+                ? `${VISIBILITY_META[visibility].blurb} About ${companyCount} ${
+                    companyCount === 1 ? "person" : "people"
+                  } right now.`
+                : VISIBILITY_META[visibility].blurb,
           icon: VISIBILITY_META[visibility].icon,
           tint: VISIBILITY_TINT[visibility],
         }))}
@@ -219,11 +238,14 @@ export function EditAccessPicker({
   onChange,
   visibility,
   category,
+  companyCreatorOnly,
 }: {
   value: string;
   onChange: (value: string) => void;
   visibility: string;
   category?: FormCategory;
+  /** A company member filing for their own show. */
+  companyCreatorOnly?: boolean;
 }) {
   const options = allowedEditAccess(visibility);
 
@@ -257,7 +279,10 @@ export function EditAccessPicker({
         options={options.map((option) => ({
           value: option,
           label: EDIT_ACCESS_META[option].label,
-          description: EDIT_ACCESS_META[option].blurb,
+          description:
+            option === "BOARD" && companyCreatorOnly
+              ? "You and the board can change the file. Everyone else it is shared with only reads it."
+              : EDIT_ACCESS_META[option].blurb,
           icon: EDIT_ACCESS_META[option].icon,
           tint: EDIT_ACCESS_META[option].tint,
         }))}

@@ -70,6 +70,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "role.update": "Updated a production role",
   "member.invite": "Invited a member",
   "member.update": "Updated a member",
+  "member.board.stepdown": "Took a member off the board",
   "member.disable": "Disabled a member",
   "member.enable": "Re-enabled a member",
   "import.scan": "Scanned a Drive folder",

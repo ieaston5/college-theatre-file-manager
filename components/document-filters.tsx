@@ -11,12 +11,15 @@ export function DocumentFilters({
   categories,
   productions,
   showVisibility = true,
+  boardVisibility = true,
   lockedCategory,
   lockedProduction,
 }: {
   categories: Option[];
   productions: Option[];
   showVisibility?: boolean;
+  /** False for company members: "Board" would only ever return nothing. */
+  boardVisibility?: boolean;
   lockedCategory?: string;
   lockedProduction?: string;
 }) {
@@ -103,7 +106,9 @@ export function DocumentFilters({
           onChange={(event) => update("visibility", event.target.value)}
         >
           <option value="all">Any visibility</option>
-          {VISIBILITIES.map((visibility) => (
+          {VISIBILITIES.filter(
+            (visibility) => boardVisibility || visibility !== "BOARD",
+          ).map((visibility) => (
             <option key={visibility} value={visibility}>
               {VISIBILITY_META[visibility].label}
             </option>

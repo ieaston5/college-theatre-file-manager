@@ -32,10 +32,10 @@ export default async function NoAccessPage({
   const body = need === "admin"
     ? "Your account does not have the admin role, so this part of the hub is hidden. Ask a current admin if you need it."
     : need
-      ? "Your role on the hub is read-only, so you can open what has been shared with you but cannot file anything new. Whoever runs your show can change that if you need it."
+      ? "Your role is read-only, so you can open everything that has been shared with you but cannot file anything new. An admin — or whoever runs your show — can change that if you need it."
       : reason === "disabled"
-      ? "Your access to the hub was disabled — usually because a board term ended. An admin can turn it back on."
-      : `The hub only opens for board members who have been added by an admin.${
+      ? "Your account was switched off by an admin. If you are still working on a show and this is a mistake, ask them — a board term ending on its own does not close an account."
+      : `The hub opens for board members an admin has added, and for cast and crew who have been added to a show.${
           email ? ` Nothing is set up for ${email} yet.` : ""
         }`;
 

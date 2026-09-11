@@ -45,6 +45,11 @@ export async function runRolloverAction(_prev: ActionState, form: FormData): Pro
     if (result.disabledMembers.length > 0) {
       parts.push(`disabled ${result.disabledMembers.length}`);
     }
+    if (result.steppedDownMembers.length > 0) {
+      parts.push(
+        `took ${result.steppedDownMembers.length} off the board but left them on their shows`,
+      );
+    }
     if (result.foldersMoved > 0) parts.push(`moved ${result.foldersMoved} Drive folders`);
     if (newSeason) parts.push(`set the season to ${newSeason}`);
 

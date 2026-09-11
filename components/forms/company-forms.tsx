@@ -143,10 +143,17 @@ export function AddCompanyMembersForm({
   );
 }
 
-/** One row of the company list, editable in place. */
+/**
+ * One row of the company list, editable in place by whoever runs the show.
+ *
+ * Everyone on a production can see who else is on it, but only the people who
+ * may actually change a membership get the pencil: offering it to a cast
+ * member and then refusing the save is worse than not offering it at all.
+ */
 export function MembershipRow({
   membership,
   roles,
+  canEdit,
   onRemove,
 }: {
   membership: {
@@ -159,6 +166,8 @@ export function MembershipRow({
     lastLoginAt: string | null;
   };
   roles: RoleOption[];
+  /** Whether this viewer may change the person's part or role. */
+  canEdit: boolean;
   onRemove: React.ReactNode;
 }) {
   const [state, formAction] = useActionState(updateMembershipAction, emptyState);
@@ -166,7 +175,7 @@ export function MembershipRow({
 
   const role = roles.find((item) => item.id === membership.roleId);
 
-  if (!editing) {
+  if (!editing || !canEdit) {
     return (
       <li className="flex flex-wrap items-center gap-3 px-4 py-2.5">
         <Avatar name={membership.userName} email={membership.userEmail} size={32} />
@@ -185,14 +194,16 @@ export function MembershipRow({
           <div className="truncate text-xs text-ink-500">{membership.userEmail}</div>
         </div>
         <Badge tone={role ? "green" : "rose"}>{role?.name ?? "No role"}</Badge>
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className={buttonClass("ghost", "px-2")}
-          aria-label={`Edit ${membership.userEmail}`}
-        >
-          <Icon name="pencil" className="size-4" />
-        </button>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className={buttonClass("ghost", "px-2")}
+            aria-label={`Edit ${membership.userEmail}`}
+          >
+            <Icon name="pencil" className="size-4" />
+          </button>
+        ) : null}
         {onRemove}
       </li>
     );

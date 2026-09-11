@@ -62,10 +62,12 @@ export default async function DocumentsPage({
           value: production.slug,
           label: production.name,
         }))}
+        boardVisibility={viewer.isBoard}
       />
 
       <DocumentList
         documents={documents as DocumentListItem[]}
+        showPinned={viewer.isBoard}
         empty={
           <EmptyState
             icon="search"

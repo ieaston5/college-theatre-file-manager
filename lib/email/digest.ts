@@ -121,6 +121,7 @@ export async function buildDigestFor(user: {
     orgName: config.orgName,
     appUrl: env.appUrl,
     name: user.name,
+    isBoard: viewer.isBoard,
     since,
     changedCount,
     changed: changed.map((document) => ({

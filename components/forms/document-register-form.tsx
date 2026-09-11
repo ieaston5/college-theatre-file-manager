@@ -36,7 +36,9 @@ export function DocumentRegisterForm({
   const [state, formAction] = useActionState(registerDocumentAction, emptyState);
   const [categoryId, setCategoryId] = useState("");
   const [productionId, setProductionId] = useState("none");
-  const [visibility, setVisibility] = useState(companyCreatorOnly ? "COMPANY" : "BOARD");
+  // "Company" only becomes an option once a category that allows it is
+  // chosen, so a company member starts on the one they always have.
+  const [visibility, setVisibility] = useState(companyCreatorOnly ? "PRIVATE" : "BOARD");
   const [editAccess, setEditAccess] = useState("BOARD");
   const [externalOnly, setExternalOnly] = useState(false);
 
@@ -135,6 +137,7 @@ export function DocumentRegisterForm({
           value={productionId}
           onChange={setProductionId}
           scope={category?.scope}
+          companyCreatorOnly={companyCreatorOnly}
         />
       </Card>
 
@@ -151,6 +154,7 @@ export function DocumentRegisterForm({
           onChange={setEditAccess}
           visibility={visibility}
           category={category}
+          companyCreatorOnly={companyCreatorOnly}
         />
         <DescriptionField />
         <TagsField />

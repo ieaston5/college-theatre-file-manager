@@ -49,7 +49,7 @@ export default async function CategoryPage({
   return (
     <div>
       <PageHeader
-        eyebrow={scope?.label}
+        eyebrow={viewer.isBoard ? scope?.label : undefined}
         title={
           <span className="flex items-center gap-2.5">
             <span
@@ -61,7 +61,7 @@ export default async function CategoryPage({
             {category.name}
           </span>
         }
-        description={category.description ?? scope?.blurb}
+        description={category.description ?? (viewer.isBoard ? scope?.blurb : undefined)}
         action={
           canCreateDocuments(viewer) ? (
             <Link
@@ -75,21 +75,25 @@ export default async function CategoryPage({
         }
       />
 
+      {/* Everything except the count describes how the category behaves when
+          you file into it — noise for somebody who is only reading. */}
       <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-ink-500">
         <Badge tone="slate">
           {total} {pluralize(total, "document")}
         </Badge>
-        {category.defaultDocType ? (
-          <Badge tone="slate" icon={DOC_TYPE_META[category.defaultDocType as "DOC"]?.icon}>
-            Usually a {DOC_TYPE_META[category.defaultDocType as "DOC"]?.label}
-          </Badge>
+        {viewer.isBoard ? (
+          <>
+            {category.defaultDocType ? (
+              <Badge tone="slate" icon={DOC_TYPE_META[category.defaultDocType as "DOC"]?.icon}>
+                Usually a {DOC_TYPE_META[category.defaultDocType as "DOC"]?.label}
+              </Badge>
+            ) : null}
+            <Badge tone={category.defaultVisibility === "PRIVATE" ? "amber" : "indigo"}>
+              Defaults to {category.defaultVisibility === "PRIVATE" ? "private" : "board"}
+            </Badge>
+            <span>Drive folder: {category.folderName ?? category.name}</span>
+          </>
         ) : null}
-        <Badge tone={category.defaultVisibility === "PRIVATE" ? "amber" : "indigo"}>
-          Defaults to {category.defaultVisibility === "PRIVATE" ? "private" : "board"}
-        </Badge>
-        <span>
-          Drive folder: {category.folderName ?? category.name}
-        </span>
       </div>
 
       <DocumentFilters
@@ -99,11 +103,13 @@ export default async function CategoryPage({
           label: production.name,
         }))}
         lockedCategory={category.slug}
+        boardVisibility={viewer.isBoard}
       />
 
       <DocumentList
         documents={documents as DocumentListItem[]}
         showCategory={false}
+        showPinned={viewer.isBoard}
         empty={
           <EmptyState
             icon={category.icon}
@@ -121,7 +127,9 @@ export default async function CategoryPage({
             }
           >
             {category.description ??
-              "Anything created in this category shows up here for the whole board."}
+              (viewer.isBoard
+                ? "Anything created in this category shows up here for the whole board."
+                : "Anything shared with you in this category shows up here.")}
           </EmptyState>
         }
       />

@@ -30,7 +30,11 @@ export default async function CategoriesPage() {
     <div>
       <PageHeader
         title="Categories"
-        description="Every kind of information the board keeps, and where it lives."
+        description={
+          viewer.isBoard
+            ? "Every kind of information the board keeps, and where it lives."
+            : "The kinds of document that are shared with you, and what is in each."
+        }
         action={
           isAdmin(user) ? (
             <Link href="/admin/categories" className={buttonClass("secondary")}>
@@ -43,7 +47,9 @@ export default async function CategoriesPage() {
 
       {categories.length === 0 ? (
         <EmptyState icon="grid" title="No categories yet">
-          An admin sets these up in Admin → Categories.
+          {viewer.isBoard
+            ? "An admin sets these up in Admin → Categories."
+            : "Nothing has been shared with your role yet. Whoever runs your show can change that."}
         </EmptyState>
       ) : (
         <ul className="grid gap-3 md:grid-cols-2">
@@ -66,7 +72,11 @@ export default async function CategoriesPage() {
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-ink-900">{category.name}</span>
-                      <Badge tone="slate">{scope?.label ?? category.scope}</Badge>
+                      {/* Whether a category hangs off a show is a filing rule;
+                          it means nothing to somebody who only reads. */}
+                      {viewer.isBoard ? (
+                        <Badge tone="slate">{scope?.label ?? category.scope}</Badge>
+                      ) : null}
                     </span>
                     {category.description ? (
                       <span className="mt-1 block text-xs leading-relaxed text-ink-500">

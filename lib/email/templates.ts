@@ -112,6 +112,8 @@ export type DigestData = {
   orgName: string;
   appUrl: string;
   name: string | null;
+  /** Company members get the same news without the board's to-do list. */
+  isBoard: boolean;
   since: Date;
   /** The full count; `changed` is only the first few, for display. */
   changedCount: number;
@@ -155,14 +157,20 @@ export function weeklyDigest(input: DigestData): Composed {
   // The useful half of a digest is what *hasn't* happened.
   const gaps: string[] = [];
   if (input.quietCategories.length > 0) {
-    gaps.push(`Nothing filed in a fortnight: ${input.quietCategories.join(", ")}.`);
+    gaps.push(
+      input.isBoard
+        ? `Nothing filed in a fortnight: ${input.quietCategories.join(", ")}.`
+        : `Nothing new in a fortnight: ${input.quietCategories.join(", ")}.`,
+    );
   }
   for (const entry of input.emptyForProduction) {
     gaps.push(`${entry.production} still has nothing in: ${entry.categories.join(", ")}.`);
   }
   if (input.staleCanva.length > 0) {
     gaps.push(
-      `Canva designs edited since the hub's copy was made: ${input.staleCanva.join(", ")}. Re-export them so the company sees the current version.`,
+      input.isBoard
+        ? `Canva designs edited since the hub's copy was made: ${input.staleCanva.join(", ")}. Re-export them so the company sees the current version.`
+        : `These have been edited in Canva since the hub's copy was made, so what you open may be behind: ${input.staleCanva.join(", ")}.`,
     );
   }
   if (input.notSignedIn > 0) {

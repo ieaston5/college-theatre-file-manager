@@ -156,7 +156,9 @@ export function Sidebar(props: SidebarProps) {
       ) : null}
 
       <div className="mt-auto space-y-3">
-        {props.driveMode === "mock" ? (
+        {/* Connecting Google is an admin job, so the nag — and the link into
+            Admin — only goes to the people who can act on it. */}
+        {props.driveMode === "mock" && props.isAdmin ? (
           <Link
             href="/admin"
             onClick={() => setOpen(false)}
