@@ -402,3 +402,14 @@ export const TEMPLATE_TOKENS = [
 export const LOGIN_SCOPES = ["openid", "email", "profile"];
 
 export const STANDING_BUCKET = "Organisation-wide";
+
+/**
+ * How many imported files the hub files in one request.
+ *
+ * Each one is a database write, a Drive sharing pass and a label, so a whole
+ * triage screen at once is both too long for a single request and impossible
+ * to report on. Filing goes a slice at a time instead, which is what lets the
+ * page show real progress; this is the size of a slice, small enough that the
+ * count visibly moves.
+ */
+export const IMPORT_FILE_CHUNK = 5;

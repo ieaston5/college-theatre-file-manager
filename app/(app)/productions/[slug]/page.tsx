@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isAdmin, requireUser } from "@/lib/auth";
@@ -6,6 +7,7 @@ import {
   canCreateDocuments,
   categoryFilterFor,
   getViewerContext,
+  visibleDocumentsWhere,
   visibleProductionIds,
 } from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
@@ -16,8 +18,13 @@ import {
   toggleChecklistItemAction,
 } from "@/app/actions/rollover";
 import { AddChecklistItemForm } from "@/components/forms/access-and-checklist";
-import { DocumentFilters } from "@/components/document-filters";
+import { DocumentFilters, Filtered, FilteringProvider } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
+import {
+  DocumentResultsSkeleton,
+  filterKey,
+  type DocumentQuery,
+} from "@/components/document-results";
 import { Icon } from "@/components/icons";
 import { Badge, Card, EmptyState, PageHeader, SectionHeader, Stat, buttonClass } from "@/components/ui";
 import { PRODUCTION_STATUS_META, type ProductionStatus } from "@/lib/constants";
@@ -46,8 +53,29 @@ export default async function ProductionPage({
   // fetched for them.
   const canManage = canCreateDocuments(viewer);
 
-  const [{ documents, total }, categories, companyCount, companyByRole, checklist] = await Promise.all([
-    queryDocuments(viewer, query, { extra: { productionId: production.id }, take: 200 }),
+  // The list is started and handed to the section below rather than awaited
+  // here, so the show's heading, tiles and filter bar are on screen while it
+  // is still being fetched.
+  const documents = queryDocuments(viewer, query, {
+    extra: { productionId: production.id },
+    take: 200,
+  });
+
+  const [filed, categories, companyCount, companyByRole, checklist] = await Promise.all([
+    /**
+     * What is filed against this show, per category — the tiles' numbers.
+     *
+     * Counted separately from the list rather than derived from it, for two
+     * reasons: the tiles describe the show and should not change when somebody
+     * narrows the list to one category, and a count does not have to wait for
+     * two hundred rows and their categories, productions, creators and tags to
+     * come back.
+     */
+    prisma.document.groupBy({
+      by: ["categoryId"],
+      where: { ...visibleDocumentsWhere(viewer), status: "ACTIVE", productionId: production.id },
+      _count: { _all: true },
+    }),
     prisma.category.findMany({
       where: { ...categoryFilterFor(viewer), scope: { in: ["PRODUCTION", "BOTH"] } },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -70,15 +98,9 @@ export default async function ProductionPage({
   });
 
   const meta = PRODUCTION_STATUS_META[production.status as ProductionStatus];
-  const byCategory = new Map<string, DocumentListItem[]>();
-  for (const document of documents as DocumentListItem[]) {
-    const list = byCategory.get(document.categoryId) ?? [];
-    list.push(document);
-    byCategory.set(document.categoryId, list);
-  }
-
-  const missing = categories.filter((category) => !byCategory.has(category.id));
-  const filtersActive = Boolean(query.q || query.category || query.type || query.visibility || query.mine);
+  const filedIn = new Set(filed.map((row) => row.categoryId));
+  const total = filed.reduce((sum, row) => sum + row._count._all, 0);
+  const missing = categories.filter((category) => !filedIn.has(category.id));
 
   return (
     <div className="space-y-7">
@@ -146,7 +168,7 @@ export default async function ProductionPage({
         <Stat label="Documents" value={total} icon="folder" />
         {canManage ? (
           <>
-            <Stat label="Categories used" value={byCategory.size} icon="grid" />
+            <Stat label="Categories used" value={filedIn.size} icon="grid" />
             <Stat
               label="Not started"
               value={missing.length}
@@ -177,75 +199,36 @@ export default async function ProductionPage({
         />
       </div>
 
-      <DocumentFilters
-        categories={categories.map((category) => ({
-          value: category.slug,
-          label: category.name,
-        }))}
-        productions={[]}
-        lockedProduction={production.slug}
-        boardVisibility={viewer.isBoard}
-      />
+      <FilteringProvider>
+        <DocumentFilters
+          categories={categories.map((category) => ({
+            value: category.slug,
+            label: category.name,
+          }))}
+          productions={[]}
+          lockedProduction={production.slug}
+          boardVisibility={viewer.isBoard}
+        />
 
-      {documents.length === 0 ? (
-        <EmptyState
-          icon="theater"
-          title={filtersActive ? "Nothing matches those filters" : `Nothing filed for ${production.name} yet`}
-          action={
-            canCreateDocuments(viewer) ? (
-              <Link
-                href={`/documents/new?production=${production.slug}`}
-                className={buttonClass("primary")}
-              >
-                <Icon name="plus" className="size-4" />
-                Create the first document
-              </Link>
-            ) : null
-          }
-        >
-          {canManage
-            ? "Budgets, rehearsal reports, contact sheets — anything filed against this show lands here."
-            : "The schedule, the script, the contact sheet — whatever the production team posts for this show turns up here."}
-        </EmptyState>
-      ) : (
-        <div className="space-y-6">
-          {categories
-            .filter((category) => byCategory.has(category.id))
-            .map((category) => (
-              <section key={category.id}>
-                <SectionHeader
-                  icon={category.icon}
-                  title={
-                    <Link href={`/categories/${category.slug}`} className="hover:underline">
-                      {category.name}
-                    </Link>
-                  }
-                  description={`${byCategory.get(category.id)!.length} ${pluralize(
-                    byCategory.get(category.id)!.length,
-                    "document",
-                  )}`}
-                  action={
-                    canCreateDocuments(viewer) ? (
-                      <Link
-                        href={`/documents/new?category=${category.slug}&production=${production.slug}`}
-                        className={buttonClass("ghost")}
-                      >
-                        <Icon name="plus" className="size-3.5" />
-                        Add
-                      </Link>
-                    ) : null
-                  }
-                />
-                <DocumentList
-                  documents={byCategory.get(category.id)!}
-                  showCategory={false}
-                  showProduction={false}
-                  showPinned={viewer.isBoard}
-                />
-              </section>
-            ))}
-        </div>
-      )}
+        {/* The boundary lets the frame go out ahead of the query on the first
+            render; Filtered fades the shelves already on screen while a filter
+            change is in flight, which React otherwise leaves looking current. */}
+        <Filtered>
+          <Suspense key={filterKey(query)} fallback={<DocumentResultsSkeleton rows={8} />}>
+            <ProductionShelves
+              documents={documents}
+              categories={categories}
+              production={production}
+              filtersActive={Boolean(
+                query.q || query.category || query.type || query.visibility || query.mine,
+              )}
+              canCreate={canCreateDocuments(viewer)}
+              canManage={canManage}
+              showPinned={viewer.isBoard}
+            />
+          </Suspense>
+        </Filtered>
+      </FilteringProvider>
 
       {/* The checklist is the production team's to-do list — rights, budget
           sign-off, load-in — and several of its items point at categories the
@@ -375,6 +358,108 @@ export default async function ProductionPage({
           </form>
         </Card>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The show's documents, one shelf per category, once they arrive.
+ *
+ * Separated from the page so that everything above it — the heading, the
+ * tiles, the filter bar — renders without waiting for two hundred rows. It
+ * takes the query as a promise for the same reason: the page starts it, this
+ * awaits it, and React streams the result into the boundary around it.
+ */
+async function ProductionShelves({
+  documents,
+  categories,
+  production,
+  filtersActive,
+  canCreate,
+  canManage,
+  showPinned,
+}: {
+  documents: DocumentQuery;
+  categories: Array<{ id: string; name: string; slug: string; icon: string }>;
+  production: { name: string; slug: string };
+  filtersActive: boolean;
+  canCreate: boolean;
+  canManage: boolean;
+  showPinned: boolean;
+}) {
+  const { documents: rows } = await documents;
+
+  const byCategory = new Map<string, DocumentListItem[]>();
+  for (const document of rows) {
+    byCategory.set(document.categoryId, [
+      ...(byCategory.get(document.categoryId) ?? []),
+      document,
+    ]);
+  }
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon="theater"
+        title={
+          filtersActive ? "Nothing matches those filters" : `Nothing filed for ${production.name} yet`
+        }
+        action={
+          canCreate ? (
+            <Link
+              href={`/documents/new?production=${production.slug}`}
+              className={buttonClass("primary")}
+            >
+              <Icon name="plus" className="size-4" />
+              Create the first document
+            </Link>
+          ) : null
+        }
+      >
+        {canManage
+          ? "Budgets, rehearsal reports, contact sheets — anything filed against this show lands here."
+          : "The schedule, the script, the contact sheet — whatever the production team posts for this show turns up here."}
+      </EmptyState>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {categories
+        .filter((category) => byCategory.has(category.id))
+        .map((category) => {
+          const shelf = byCategory.get(category.id)!;
+          return (
+            <section key={category.id}>
+              <SectionHeader
+                icon={category.icon}
+                title={
+                  <Link href={`/categories/${category.slug}`} className="hover:underline">
+                    {category.name}
+                  </Link>
+                }
+                description={`${shelf.length} ${pluralize(shelf.length, "document")}`}
+                action={
+                  canCreate ? (
+                    <Link
+                      href={`/documents/new?category=${category.slug}&production=${production.slug}`}
+                      className={buttonClass("ghost")}
+                    >
+                      <Icon name="plus" className="size-3.5" />
+                      Add
+                    </Link>
+                  ) : null
+                }
+              />
+              <DocumentList
+                documents={shelf}
+                showCategory={false}
+                showProduction={false}
+                showPinned={showPinned}
+              />
+            </section>
+          );
+        })}
     </div>
   );
 }

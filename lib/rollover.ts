@@ -3,7 +3,7 @@ import { prisma } from "./db";
 import { getConfig } from "./config";
 import { recordAudit } from "./audit";
 import { driveProvider, ensureRootFolders } from "./google";
-import { resyncCompanySharing } from "./documents";
+import { kickSharingQueue, queueAllSharing, queueCompanySharing } from "./sharing";
 
 /**
  * Season rollover.
@@ -104,7 +104,7 @@ export type RolloverResult = {
   /** Kept on the hub as company members because they are still on a show. */
   steppedDownMembers: string[];
   foldersMoved: number;
-  documentsResynced: number;
+  documentsQueued: number;
   warnings: string[];
 };
 
@@ -123,7 +123,7 @@ export async function runRollover(
   const disabledMembers: string[] = [];
   const steppedDownMembers: string[] = [];
   let foldersMoved = 0;
-  let documentsResynced = 0;
+  let documentsQueued = 0;
 
   // 1. Archive the shows. Company access ends with the show, in the hub and
   //    in Drive — getViewerContext ignores archived productions and the
@@ -158,13 +158,9 @@ export async function runRollover(
       }
     }
 
-    const resync = await resyncCompanySharing({ productionId: showId });
-    documentsResynced += resync.total;
-    if (resync.failures > 0) {
-      warnings.push(
-        `${resync.failures} of ${show.name}'s documents could not be re-shared; run the sweep in Admin → Sharing.`,
-      );
-    }
+    // Archiving a show ends its company's access, so this is a revocation:
+    // queued urgently, ahead of anything that only hands access out.
+    documentsQueued += await queueCompanySharing({ productionId: showId, urgent: true });
   }
 
   // 2. Retire the departing board. Their documents stay; their board access
@@ -230,20 +226,23 @@ export async function runRollover(
     data: { lastRolloverAt: new Date() },
   });
 
-  // Either way the board is smaller than Drive thinks it is, so mark
-  // everything stale rather than re-sharing hundreds of files inline.
+  // Either way the board is smaller than Drive thinks it is, so every shared
+  // document goes in the queue rather than being re-shared inline.
   const retired = disabledMembers.length + steppedDownMembers.length;
   if (retired > 0) {
-    await prisma.orgConfig.update({
-      where: { id: "singleton" },
-      data: { sharingSweepStartedAt: new Date() },
-    });
+    const queued = await queueAllSharing({ urgent: true });
     warnings.push(
       `${retired} ${
         retired === 1 ? "person is" : "people are"
-      } off the board. Run the sweep in Admin → Sharing to take their Drive access to board documents away.`,
+      } off the board, so their Drive access to board documents is being taken away: ${queued} ${
+        queued === 1 ? "document is" : "documents are"
+      } queued for re-sharing, which runs in the background. Admin → Sharing shows how far it has got.`,
     );
   }
+
+  // One nudge for everything this rollover queued; the rest is the scheduled
+  // run's and the admin page's to finish.
+  kickSharingQueue();
 
   await recordAudit({
     actor,
@@ -259,7 +258,7 @@ export async function runRollover(
     disabledMembers,
     steppedDownMembers,
     foldersMoved,
-    documentsResynced,
+    documentsQueued,
     warnings,
   };
 }

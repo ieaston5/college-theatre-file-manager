@@ -4,14 +4,14 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { assertRole } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { resyncCompanySharing } from "@/lib/documents";
+import { kickSharingQueue, queueCompanySharing } from "@/lib/sharing";
 import {
   addCompanyMembersSchema,
   firstError,
   membershipSchema,
   productionRoleSchema,
 } from "@/lib/validation";
-import { parsePeopleInput, slugify } from "@/lib/utils";
+import { parsePeopleInput, pluralize, slugify } from "@/lib/utils";
 import { env } from "@/lib/env";
 import { getConfig } from "@/lib/config";
 import { companyWelcome, sendEmailQuietly } from "@/lib/email";
@@ -19,6 +19,31 @@ import { bool, text, toActionState, type ActionState } from "./shared";
 
 function refreshEverywhere() {
   revalidatePath("/", "layout");
+}
+
+/**
+ * Hand Drive's half of an access change to the queue, and start draining it
+ * behind the response.
+ *
+ * Returns the sentence to add to the confirmation, or null when there was
+ * nothing to re-share. The wording carries as much weight as the mechanism: on
+ * the hub the change has already happened, Drive is a moment behind, and
+ * nobody has to sit and watch it — so the message says all three rather than
+ * leaving somebody wondering whether closing the tab broke something.
+ */
+async function catchDriveUp(options: {
+  /** Limit to one show's company documents; omit for every one of them. */
+  productionId?: string;
+  /** Access being taken away, which jumps the queue. See lib/sharing.ts. */
+  urgent?: boolean;
+}): Promise<string | null> {
+  const queued = await queueCompanySharing(options);
+  if (queued === 0) return null;
+  kickSharingQueue();
+  return `Drive is catching up on ${queued} ${pluralize(
+    queued,
+    "document",
+  )} in the background — it carries on without you, so you can leave this page.`;
 }
 
 /**
@@ -57,7 +82,6 @@ export async function addCompanyMembersAction(
 
     let added = 0;
     let updated = 0;
-    const warnings: string[] = [];
     const newcomers: Array<{ email: string; name: string | null }> = [];
 
     for (const person of people) {
@@ -132,13 +156,11 @@ export async function addCompanyMembersAction(
       });
     }
 
-    // Give the new people access to what is already filed.
-    const resync = await resyncCompanySharing({ productionId: production.id });
-    if (resync.failures > 0) {
-      warnings.push(
-        `${resync.failures} of ${resync.total} documents could not be re-shared in Drive. Try “Re-share with the company” again in a minute.`,
-      );
-    }
+    // Give the new people access to what is already filed. Queued, so adding
+    // a company of twenty-five returns as soon as they are on the hub — which
+    // is the moment they can sign in and see the list — rather than after
+    // Drive has been told about every one of them on every document.
+    const catchUp = await catchDriveUp({ productionId: production.id });
 
     await recordAudit({
       actor,
@@ -152,17 +174,15 @@ export async function addCompanyMembersAction(
     });
 
     refreshEverywhere();
-    return {
-      ok:
-        added > 0
-          ? `${added} ${added === 1 ? "person" : "people"} added to ${production.name}${
-              updated > 0 ? `, ${updated} updated` : ""
-            }. They can sign in with Google straight away.`
-          : `${updated} ${updated === 1 ? "person was" : "people were"} already on ${
-              production.name
-            } — their role has been updated.`,
-      warnings,
-    };
+    const summary =
+      added > 0
+        ? `${added} ${added === 1 ? "person" : "people"} added to ${production.name}${
+            updated > 0 ? `, ${updated} updated` : ""
+          }. They can sign in with Google straight away.`
+        : `${updated} ${updated === 1 ? "person was" : "people were"} already on ${
+            production.name
+          } — their role has been updated.`;
+    return { ok: catchUp ? `${summary} ${catchUp}` : summary };
   } catch (error) {
     return toActionState(error);
   }
@@ -187,9 +207,18 @@ export async function updateMembershipAction(
       include: { user: true, production: true, role: true },
     });
 
-    // A different role means a different set of categories, so Drive access
-    // has to follow.
-    await resyncCompanySharing({ productionId: membership.productionId });
+    /**
+     * A different role means a different set of categories, so Drive access
+     * has to follow — but not while somebody waits for it.
+     *
+     * This is the change that used to take the longest in the whole hub: one
+     * dropdown, and then a request that re-shared every company document of
+     * the show, one Google call per person per file, before it would answer.
+     * The membership row itself is a single write, and it is what decides what
+     * the person sees on the hub, so the save is finished the moment it lands.
+     * Drive catches up behind the response.
+     */
+    const catchUp = await catchDriveUp({ productionId: membership.productionId });
 
     await recordAudit({
       actor,
@@ -201,7 +230,13 @@ export async function updateMembershipAction(
       }`,
     });
     refreshEverywhere();
-    return { ok: "Updated." };
+    return {
+      ok: catchUp
+        ? `Saved — ${membership.user.name ?? membership.user.email} is now ${
+            membership.role?.name ?? "unassigned"
+          }. ${catchUp}`
+        : "Updated.",
+    };
   } catch (error) {
     return toActionState(error);
   }
@@ -217,8 +252,17 @@ export async function removeMembershipAction(form: FormData) {
   if (!membership) return;
 
   await prisma.productionMember.delete({ where: { id } });
-  // Revokes their Drive access to that production's company documents.
-  await resyncCompanySharing({ productionId: membership.productionId });
+  /**
+   * Revokes their Drive access to that production's company documents.
+   *
+   * Queued like every other access change, but marked urgent so it goes to the
+   * front: they have already stopped seeing the documents listed on the hub,
+   * and the only thing outstanding is Drive still letting them open a file
+   * they have a link to. Taking access away should never queue behind work
+   * that merely hands access out.
+   */
+  await queueCompanySharing({ productionId: membership.productionId, urgent: true });
+  kickSharingQueue();
 
   await recordAudit({
     actor,
@@ -237,15 +281,16 @@ export async function resyncProductionSharingAction(form: FormData) {
   const production = await prisma.production.findUnique({ where: { id: productionId } });
   if (!production) return;
 
-  const result = await resyncCompanySharing({ productionId });
+  const queued = await queueCompanySharing({ productionId });
+  kickSharingQueue();
   await recordAudit({
     actor,
     action: "company.resync",
     targetType: "Production",
     targetId: productionId,
-    summary: `Re-shared ${result.total} company ${
-      result.total === 1 ? "document" : "documents"
-    } for ${production.name}${result.failures ? ` (${result.failures} failed)` : ""}`,
+    summary: `Queued ${queued} company ${pluralize(queued, "document")} for re-sharing on ${
+      production.name
+    }`,
   });
   refreshEverywhere();
 }
@@ -304,8 +349,9 @@ export async function saveProductionRoleAction(
     }
 
     // Category changes move who can see what, so Drive has to be brought back
-    // into line across every production.
-    const resync = await resyncCompanySharing({});
+    // into line across every production — which is the widest access change
+    // the hub has, and the one it is least sensible to make somebody watch.
+    const catchUp = await catchDriveUp({});
 
     await recordAudit({
       actor,
@@ -320,9 +366,9 @@ export async function saveProductionRoleAction(
 
     refreshEverywhere();
     return {
-      ok: `“${role.name}” saved. ${resync.total} company ${
-        resync.total === 1 ? "document" : "documents"
-      } re-shared to match.`,
+      ok: catchUp
+        ? `“${role.name}” saved, and it decides what these people see on the hub from now. ${catchUp}`
+        : `“${role.name}” saved.`,
       warnings:
         rejected > 0
           ? [

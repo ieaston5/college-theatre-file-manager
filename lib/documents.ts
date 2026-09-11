@@ -280,8 +280,14 @@ export async function syncSharing(
     return { granted: [], revoked: [], warnings: ["Could not find the creator's email address."] };
   }
   const result = await driveProvider().applySharing(doc.googleFileId, plan);
+  // Pushed, so it is no longer waiting: clearing the queue mark here means a
+  // document synced by any other route — an edit, a visibility change — drops
+  // out of the queue instead of being pushed a second time for nothing.
   await prisma.document
-    .update({ where: { id: doc.id }, data: { sharingSyncedAt: new Date() } })
+    .update({
+      where: { id: doc.id },
+      data: { sharingSyncedAt: new Date(), sharingDirtyAt: null },
+    })
     .catch(() => {});
 
   // Keep the recorded permission ids in step with Drive.
@@ -455,54 +461,9 @@ export async function createDocument(
   }
 }
 
-/**
- * Re-push sharing for everything a production's company can see. Called when
- * somebody joins or leaves a production, or when a role's categories change —
- * without this, a new cast member would be on the hub but locked out of the
- * files in Drive.
- *
- * Documents filed against no show are included even though no company can see
- * them: a company document needs a production, so anything left over from
- * before that rule has Drive grants to hand back, and the reconciling sync is
- * what takes them off.
- */
-export async function resyncCompanySharing(options: {
-  productionId?: string;
-}): Promise<{ total: number; failures: number }> {
-  const documents = await prisma.document.findMany({
-    where: {
-      visibility: "COMPANY",
-      status: "ACTIVE",
-      googleFileId: { not: null },
-      ...(options.productionId
-        ? { OR: [{ productionId: options.productionId }, { productionId: null }] }
-        : {}),
-    },
-    select: {
-      id: true,
-      visibility: true,
-      source: true,
-      creatorId: true,
-      categoryId: true,
-      productionId: true,
-      editAccess: true,
-      googleFileId: true,
-      docType: true,
-    },
-    take: 500,
-  });
-
-  let failures = 0;
-  for (const document of documents) {
-    try {
-      await syncSharing(document);
-    } catch (error) {
-      failures += 1;
-      console.error("[sharing] could not resync", document.id, error);
-    }
-  }
-  return { total: documents.length, failures };
-}
+// Re-pushing sharing across many documents at once — after a membership
+// change, a role's categories moving, or a board member leaving — is queued
+// rather than done inline. See lib/sharing.ts for why, and for the queue.
 
 // ---------------------------------------------------------------------------
 // Uploads
@@ -644,106 +605,6 @@ export async function recordNewVersion(
   });
 
   return document;
-}
-
-/**
- * Re-share a chunk of documents, resumably.
- *
- * Per-member sharing turns one permission per file into one per person per
- * file, so re-sharing a season's worth of documents is hundreds of Google
- * calls — far more than a single request should attempt. This does a bounded
- * slice and reports what is left, so the caller can keep going until done and
- * nothing times out half-way.
- */
-export async function runSharingSweep(options?: { chunk?: number }): Promise<{
-  processed: number;
-  remaining: number;
-  total: number;
-  failures: number;
-}> {
-  const chunk = options?.chunk ?? 12;
-  const config = await getConfig();
-
-  const startedAt =
-    config.sharingSweepStartedAt ??
-    (await prisma.orgConfig.update({
-      where: { id: "singleton" },
-      data: { sharingSweepStartedAt: new Date() },
-    })).sharingSweepStartedAt!;
-
-  const scope = {
-    status: "ACTIVE" as const,
-    googleFileId: { not: null },
-    visibility: { not: "PRIVATE" as const },
-  };
-  const staleWhere = {
-    ...scope,
-    OR: [{ sharingSyncedAt: null }, { sharingSyncedAt: { lt: startedAt } }],
-  };
-
-  const [total, batch] = await Promise.all([
-    prisma.document.count({ where: scope }),
-    prisma.document.findMany({
-      where: staleWhere,
-      select: {
-        id: true,
-        visibility: true,
-        source: true,
-        creatorId: true,
-        categoryId: true,
-        productionId: true,
-        editAccess: true,
-        googleFileId: true,
-        docType: true,
-      },
-      take: chunk,
-    }),
-  ]);
-
-  let failures = 0;
-  for (const document of batch) {
-    try {
-      await syncSharing(document);
-    } catch (error) {
-      failures += 1;
-      console.error("[sharing] sweep failed for", document.id, error);
-      // Mark it done anyway so one broken file cannot stall the sweep.
-      await prisma.document
-        .update({ where: { id: document.id }, data: { sharingSyncedAt: new Date() } })
-        .catch(() => {});
-    }
-  }
-
-  const remaining = await prisma.document.count({ where: staleWhere });
-  if (remaining === 0) {
-    await prisma.orgConfig.update({
-      where: { id: "singleton" },
-      data: { sharingSweepStartedAt: null },
-    });
-  }
-
-  return { processed: batch.length, remaining, total, failures };
-}
-
-/** How many documents are waiting on the current sweep, if one is running. */
-export async function sharingSweepStatus() {
-  const config = await getConfig();
-  if (!config.sharingSweepStartedAt) return { running: false, remaining: 0, total: 0 };
-  const scope = {
-    status: "ACTIVE" as const,
-    googleFileId: { not: null },
-    visibility: { not: "PRIVATE" as const },
-  };
-  const [remaining, total] = await Promise.all([
-    prisma.document.count({
-      where: {
-        ...scope,
-        OR: [{ sharingSyncedAt: null }, { sharingSyncedAt: { lt: config.sharingSweepStartedAt } }],
-      },
-    }),
-    prisma.document.count({ where: scope }),
-  ]);
-  return { running: true, remaining, total };
 }
 
 // ---------------------------------------------------------------------------

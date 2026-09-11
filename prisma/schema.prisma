@@ -242,6 +242,23 @@ model Document {
   lastEditedAt      DateTime  @default(now())
   /// When the hub last pushed this document's permissions to Drive.
   sharingSyncedAt   DateTime?
+  /// Set when something has changed who should be able to open this file —
+  /// somebody joined a show, a role's categories moved, a member left the
+  /// board — and Drive has not been told yet. Non-null means "in the re-share
+  /// queue"; the queue is drained in the background and cleared per document
+  /// as each one is pushed.
+  ///
+  /// This column exists because per-member sharing makes one Google call per
+  /// person per file: changing one person's role on a show of twenty company
+  /// documents is hundreds of calls, and doing them inline meant the person
+  /// who pressed Save sat and watched a spinner for the whole lot. Writing the
+  /// intention down is a single statement, so the save returns at once and the
+  /// calls happen after the response.
+  ///
+  /// The timestamp is the queue's order — oldest first — which also lets an
+  /// urgent change (somebody's access being *removed*) be backdated so it
+  /// drains ahead of work that was already waiting.
+  sharingDirtyAt    DateTime?
 
   /// Canva mirrors: the hub keeps an exported copy of a Canva design in Drive
   /// so the hub's own permission model applies to it. Canva's API cannot set
@@ -283,6 +300,7 @@ model Document {
   @@index([updatedAt])
   @@index([lastEditedAt])
   @@index([canvaDesignId])
+  @@index([sharingDirtyAt])
 }
 
 /// An individual grant on top of a document's visibility. Used to let a
@@ -558,8 +576,13 @@ model OrgConfig {
   /// and a sharing sweep needs to know it in order to take the old group
   /// permission back off files that still carry one.
   groupEmail     String?
-  /// Marks the start of a re-share sweep; documents shared before this are
-  /// still stale. Lets a long sweep resume instead of timing out.
+  /// When the current re-share pass began, or null when nothing is waiting.
+  ///
+  /// The work itself is tracked per document (see Document.sharingDirtyAt);
+  /// this is the denominator's anchor, so progress can be reported as "so many
+  /// of so many done" rather than a spinner: everything pushed since this
+  /// moment is finished work, everything still marked dirty is not. Cleared
+  /// when the queue empties.
   sharingSweepStartedAt DateTime?
   /// Tokens: {production} {category} {title} {date} {season}
   namingTemplate String   @default("[{production}] {title} — {category}")

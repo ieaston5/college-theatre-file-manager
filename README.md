@@ -69,7 +69,10 @@ about to use it, rather than whenever the host next calls.
 **Finding.** The dashboard is organised by *type of information* (the sidebar),
 crossed with *production*. Every category and show has its own page; there is
 one search box over titles, descriptions, tags, categories and shows; filters
-for type, visibility, "filed by me" and archived.
+for type, visibility, "filed by me" and archived. A filter is a URL, so a
+filtered list is shareable and the back button works — and it applies the
+moment it is clicked: the control moves at once, the list streams in behind a
+skeleton, and nothing waits for a round trip before acknowledging the click.
 
 Lists are ordered and labelled by when each document was last *edited* — what
 Google says about the file, not when the hub's own record was last written, so
@@ -95,6 +98,14 @@ a company at all. Budgets, casting, box office, governance, grants and venue
 are board-only out of the box, so they are never even offered as "Company" and
 never appear to a company member. Adding somebody to a show backfills their
 Drive access to everything already filed; removing them revokes it.
+
+Nobody waits for that. Drive needs one permission per person per file, so an
+access change — a new cast member, somebody moved between roles, a role's
+categories edited — is saved in one write and the affected documents go into a
+queue that is pushed to Drive immediately after the response. What people see
+*on the hub* changes the instant Save returns; the page says how much of Drive
+is still catching up, and the catch-up finishes whether or not anybody stays to
+look at it.
 
 A company document is always one show's document. Somebody is in the company of
 a production, not of the hub, so "Company" is only offered for a document
@@ -125,7 +136,7 @@ hub creates, so nothing disappears when a board member graduates. Existing
 files can be registered (link + metadata) without changing their ownership.
 
 **On its own.** One scheduled request to `/api/cron` (Vercel Cron, or anything
-else that can call a URL on a timer) finishes re-share sweeps, re-exports Canva
+else that can call a URL on a timer) finishes the re-share queue, re-exports Canva
 copies whose originals have moved on and gone quiet, and sends the weekly
 digest on the chosen day. Every job decides for itself whether there is
 anything to do, so a missed run costs nothing and a double run does nothing

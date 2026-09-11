@@ -20,6 +20,7 @@ import { extractDriveFileId, pluralize, slugify } from "@/lib/utils";
 import { env } from "@/lib/env";
 import { ROLE_META } from "@/lib/constants";
 import { boardWelcome, sendEmail } from "@/lib/email";
+import { kickSharingQueue, queueAllSharing } from "@/lib/sharing";
 import { bool, text, toActionState, type ActionState } from "./shared";
 
 function refreshEverywhere() {
@@ -413,15 +414,10 @@ export async function stepDownFromBoardAction(form: FormData) {
   });
 
   // Board documents carry a Drive permission per person on the members list,
-  // so Drive has to be told as well. Marking the sweep beats re-sharing
-  // hundreds of files inline.
-  const config = await getConfig();
-  if (!config.sharingSweepStartedAt) {
-    await prisma.orgConfig.update({
-      where: { id: "singleton" },
-      data: { sharingSweepStartedAt: new Date() },
-    });
-  }
+  // so Drive has to be told as well. Queued urgently — this is access being
+  // taken away — and drained behind the response.
+  await queueAllSharing({ urgent: true });
+  kickSharingQueue();
   await recordAudit({
     actor,
     action: "member.board.stepdown",
@@ -452,6 +448,14 @@ export async function setMemberStatusAction(form: FormData) {
     where: { id },
     data: { status: disable ? "DISABLED" : "ACTIVE" },
   });
+
+  // Board documents are shared with each member by name, so hub status and
+  // Drive access are two separate facts: queue the documents so the second one
+  // follows the first. Urgent when disabling — that is the whole point of
+  // disabling somebody — and ordinary when re-enabling.
+  await queueAllSharing({ urgent: disable });
+  kickSharingQueue();
+
   await recordAudit({
     actor,
     action: disable ? "member.disable" : "member.enable",
@@ -522,20 +526,17 @@ export async function saveConfigAction(_prev: ActionState, form: FormData): Prom
     const groupChanged = before.groupEmail !== (parsed.data.groupEmail ?? null);
 
     if (groupChanged) {
-      const affected = await prisma.document.count({
-        where: { visibility: { not: "PRIVATE" }, googleFileId: { not: null }, status: "ACTIVE" },
-      });
+      // Queued rather than re-shared inline: per-member sharing is one Google
+      // call per person per file, and clearing the old group's permission is
+      // not something to make an admin watch.
+      const affected = await queueAllSharing();
       if (affected > 0) {
-        // Start a sweep rather than trying to re-share everything inline:
-        // per-member sharing is one Google call per person per file.
-        await prisma.orgConfig.update({
-          where: { id: "singleton" },
-          data: { sharingSweepStartedAt: new Date() },
-        });
+        kickSharingQueue();
         warnings.push(
-          `The board's group address changed, so ${affected} existing document${
-            affected === 1 ? "" : "s"
-          } need another pass to clear the old group's access. Run the sweep in “Sharing in Drive” below — it can be stopped and resumed.`,
+          `The board's group address changed, so ${affected} existing ${pluralize(
+            affected,
+            "document",
+          )} need another pass to clear the old group's access. That is running in the background now; “Sharing in Drive” below shows how far it has got.`,
         );
       }
     }
@@ -577,39 +578,22 @@ export async function disconnectDriveAction() {
   redirect("/admin?disconnected=1");
 }
 
-/** Re-push every board document's sharing (after changing the group address). */
+/**
+ * Re-push every document's sharing (after changing the group address).
+ *
+ * Queues the lot and starts draining it behind the response. It used to push
+ * up to five hundred documents inline, which on a real hub is thousands of
+ * Google calls in one request — long past any serverless timeout, and with
+ * nothing written down to say how far it had got when the request was killed.
+ */
 export async function reapplySharingAction(): Promise<void> {
   const actor = await assertRole("ADMIN");
-  const { syncSharing } = await import("@/lib/documents");
-  const documents = await prisma.document.findMany({
-    where: { googleFileId: { not: null }, status: "ACTIVE" },
-    select: {
-      id: true,
-      visibility: true,
-      source: true,
-      creatorId: true,
-      googleFileId: true,
-      docType: true,
-      categoryId: true,
-      productionId: true,
-      editAccess: true,
-    },
-    take: 500,
-  });
-  let failures = 0;
-  for (const document of documents) {
-    try {
-      await syncSharing(document);
-    } catch {
-      failures += 1;
-    }
-  }
+  const queued = await queueAllSharing();
+  kickSharingQueue();
   await recordAudit({
     actor,
     action: "config.update",
-    summary: `Re-applied sharing on ${documents.length} document${documents.length === 1 ? "" : "s"}${
-      failures ? ` (${failures} failed)` : ""
-    }`,
+    summary: `Queued ${queued} ${pluralize(queued, "document")} for re-sharing in Drive`,
   });
   refreshEverywhere();
 }

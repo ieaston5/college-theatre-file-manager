@@ -289,6 +289,7 @@ export default async function AdminImportPage({
               }
             />
             <ImportTriage
+              batchId={batch.id}
               items={pending.map((item) => ({
                 id: item.id,
                 name: item.name,
