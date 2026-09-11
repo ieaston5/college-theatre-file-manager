@@ -102,7 +102,17 @@ export function DocumentRow({
           <span className="text-ink-300">·</span>
           <span title={visibility?.label}>{typeMeta(document.docType).short}</span>
           <span className="text-ink-300">·</span>
-          <span>updated {relativeTime(document.updatedAt)}</span>
+          {/* When the document itself last changed — Google's answer for
+              anything in Drive, so it matches what the file says there. */}
+          <span
+            title={
+              document.googleModifiedAt
+                ? `Last edited in Google ${relativeTime(document.googleModifiedAt)}`
+                : undefined
+            }
+          >
+            edited {relativeTime(document.lastEditedAt)}
+          </span>
           <span className="text-ink-300 max-sm:hidden">·</span>
           <span className="max-sm:hidden">{document.creator.name ?? document.creator.email}</span>
         </div>

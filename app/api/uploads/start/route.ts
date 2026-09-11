@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth";
 import { canCreateDocuments, canEditDocument, getViewerContext } from "@/lib/access";
-import { assertCreationAllowed } from "@/lib/documents";
+import { assertCreationAllowed, documentName } from "@/lib/documents";
 import { getConfig } from "@/lib/config";
 import { resolveFolder } from "@/lib/google";
 import { openResumableCreate, openResumableUpdate } from "@/lib/google/upload";
@@ -11,7 +11,7 @@ import { UPLOADED_DOC_TYPES, type DocType } from "@/lib/constants";
 import { firstError, uploadStartSchema } from "@/lib/validation";
 import { randomToken } from "@/lib/crypto";
 import { rateLimit, tooManyMessage } from "@/lib/rate-limit";
-import { applyNamingTemplate, fileNameToTitle, withExtension } from "@/lib/utils";
+import { fileNameToTitle, withExtension } from "@/lib/utils";
 
 /**
  * Authorises an upload and hands back somewhere to send the bytes.
@@ -109,12 +109,7 @@ export async function POST(request: NextRequest) {
           : Promise.resolve(null),
       ]);
       const driveName = withExtension(
-        applyNamingTemplate(config.namingTemplate, {
-          production: production?.abbreviation || production?.name || null,
-          category: category?.name,
-          title: document.title,
-          season: production?.season ?? config.currentSeason,
-        }),
+        documentName(config, { baseTitle: document.baseTitle, category, production }),
         input.fileName,
       );
 
@@ -197,12 +192,7 @@ export async function POST(request: NextRequest) {
     const title = (input.title?.trim() || fileNameToTitle(input.fileName)).slice(0, 160);
     const driveFolderId = await resolveFolder({ category, production });
     const driveName = withExtension(
-      applyNamingTemplate(config.namingTemplate, {
-        production: production?.abbreviation || production?.name || null,
-        category: category.name,
-        title,
-        season: production?.season ?? config.currentSeason,
-      }),
+      documentName(config, { baseTitle: title, category, production }),
       input.fileName,
     );
 

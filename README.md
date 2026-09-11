@@ -24,7 +24,9 @@ while `ALLOW_DEV_LOGIN=true`). `ieaston@upenn.edu` is seeded as the admin.
 **Creating.** A single form: name, type (Doc / Sheet / Slides / **Form** /
 **upload a file**), category, production, who can see it. From that the hub
 
-- names the file from a rule you control, e.g. `[URINETOWN] Running budget — Budgets & finance`
+- names it from a rule you control, e.g. `[URINETOWN] Running budget — Budgets & finance`
+  — the same name in Drive and on the hub, so a list of twenty says which show
+  and which shelf each thing belongs to without opening anything
 - creates it in `Penn Players Hub / Productions / Urinetown / Budgets & finance`
 - optionally copies one of your templates and fills in `{{TITLE}}`, `{{PRODUCTION}}`, `{{CATEGORY}}`, `{{OWNER}}`, `{{DATE}}`
 - stamps a small header into new Docs so a file found in Drive still explains itself
@@ -68,6 +70,12 @@ about to use it, rather than whenever the host next calls.
 crossed with *production*. Every category and show has its own page; there is
 one search box over titles, descriptions, tags, categories and shows; filters
 for type, visibility, "filed by me" and archived.
+
+Lists are ordered and labelled by when each document was last *edited* — what
+Google says about the file, not when the hub's own record was last written, so
+"edited yesterday" means somebody typed in it yesterday. A scheduled job asks
+Drive once per run for everything that has changed since the last one, which
+keeps that honest without a Google call per row of every page.
 
 **Access.** Nobody can see the hub unless they have been added. Board roles:
 `ADMIN` (settings, members, categories, productions, Google), `BOARD` (create

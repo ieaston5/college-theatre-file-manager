@@ -18,7 +18,7 @@ export default async function CategoriesPage() {
     documentCountsByCategory(viewer),
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE" },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { lastEditedAt: "desc" },
       distinct: ["categoryId"],
       select: { categoryId: true, title: true, id: true },
     }),
@@ -85,7 +85,7 @@ export default async function CategoriesPage() {
                     ) : null}
                     <span className="mt-2 block text-xs text-ink-500">
                       {stat?.count ?? 0} {pluralize(stat?.count ?? 0, "document")}
-                      {stat?.updated ? ` · last touched ${relativeTime(stat.updated)}` : ""}
+                      {stat?.updated ? ` · last edited ${relativeTime(stat.updated)}` : ""}
                     </span>
                     {recent ? (
                       <span className="mt-1 block truncate text-xs text-ink-400">

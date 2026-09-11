@@ -178,7 +178,15 @@ model Tag {
 
 model Document {
   id          String  @id @default(cuid())
+  /// The name everything shows: the hub's naming rule applied to `baseTitle`.
+  /// Stored rather than composed on read so that lists, search and sorting
+  /// all work on the same string the person sees.
   title       String
+  /// What the document is actually called, before the rule: what somebody
+  /// typed, or the tidied file name an import found. The rule is always
+  /// re-applied from this, so re-filing a document — or an admin changing the
+  /// rule — recomposes the name instead of stacking prefixes onto it.
+  baseTitle   String
   description String?
 
   /// DOC | SHEET | SLIDES | FORM | PDF | FOLDER | OTHER | LINK
@@ -215,6 +223,13 @@ model Document {
   mimeType          String?
   googleModifiedAt  DateTime?
   lastSyncedAt      DateTime?
+  /// When the document itself last changed, as opposed to when the hub's row
+  /// did: Google's modified time wherever the hub knows it, and the row's own
+  /// timestamp for the things Google has never seen (external links, a Canva
+  /// design with no export yet). Denormalised into its own indexed column
+  /// because it is the default sort for every list, and `COALESCE` of two
+  /// columns is not something an index can serve.
+  lastEditedAt      DateTime  @default(now())
   /// When the hub last pushed this document's permissions to Drive.
   sharingSyncedAt   DateTime?
 
@@ -256,6 +271,7 @@ model Document {
   @@index([visibility])
   @@index([status])
   @@index([updatedAt])
+  @@index([lastEditedAt])
   @@index([canvaDesignId])
 }
 
@@ -547,6 +563,14 @@ model OrgConfig {
   canvaAutoRefresh   Boolean   @default(true)
   lastCronAt         DateTime?
   lastCanvaRefreshAt DateTime?
+  /// How far the scheduled Drive check has read. Everything Google says
+  /// changed after this has already been folded into the documents' edit
+  /// times, so the next run only has to ask about what is newer.
+  lastDriveScanAt    DateTime?
+  /// When the naming rule was last applied across every existing title.
+  /// Null means never, which is what triggers the one-off pass on a hub that
+  /// predates the rule being used for hub titles at all.
+  titlesNormalisedAt DateTime?
   updatedAt      DateTime @updatedAt
 }
 

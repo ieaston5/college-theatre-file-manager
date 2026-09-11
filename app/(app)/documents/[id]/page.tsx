@@ -357,10 +357,16 @@ export default async function DocumentPage({
               </span>
             </Row>
             <Row label="Created">{formatDateTime(document.createdAt)}</Row>
-            <Row label="Hub updated">{relativeTime(document.updatedAt)}</Row>
-            {document.googleModifiedAt ? (
-              <Row label="Drive changed">{relativeTime(document.googleModifiedAt)}</Row>
-            ) : null}
+            {/* One "when did this last change", and for anything in Drive it
+                is Google's answer rather than the hub's. */}
+            <Row label="Last edited">
+              <span title={formatDateTime(document.lastEditedAt)}>
+                {relativeTime(document.lastEditedAt)}
+                {document.googleModifiedAt ? (
+                  <span className="text-ink-400"> · in Google</span>
+                ) : null}
+              </span>
+            </Row>
             {isCanva ? (
               <Row label="Copy format">
                 {CANVA_FORMAT_META[(document.canvaExportFormat ?? "pdf") as CanvaExportFormat]
@@ -384,6 +390,7 @@ export default async function DocumentPage({
                 filing. Everyone else just opens the thing. */}
             {viewer.isBoard ? (
               <>
+                <Row label="Hub record updated">{relativeTime(document.updatedAt)}</Row>
                 {document.driveOwnerEmail ? (
                   <Row label="Drive owner">{document.driveOwnerEmail}</Row>
                 ) : null}

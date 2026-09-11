@@ -46,7 +46,10 @@ What to click through:
     Five categories instead of fourteen, one show, no budgets, no casting, no
     create button. Then try **Wes Kaplan** (Lighting Designer): he gets design
     and costumes, and no script.
-11. **Admin → Settings** — the file naming rule has a live preview.
+11. **Admin → Settings** — the file naming rule has a live preview, and
+    directly under it the hub says how many existing titles the rule would
+    write differently, with a button to rename them. Edit the rule, save, and
+    watch the count change.
 
 Everything you change here carries over to stage 2. Only the sample documents
 are throwaway (Admin → Settings → **Remove sample data**).

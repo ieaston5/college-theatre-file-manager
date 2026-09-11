@@ -87,6 +87,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "rollover.run": "Rolled the season over",
   "cron.run": "Scheduled run",
   "config.update": "Updated settings",
+  "config.retitle": "Applied the naming rule to existing titles",
   "drive.connect": "Connected the Google account",
   "drive.disconnect": "Disconnected the Google account",
   "drive.bootstrap": "Created the Drive folder structure",

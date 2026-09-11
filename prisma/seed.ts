@@ -29,6 +29,7 @@ process.env.APP_ENCRYPTION_KEY ??= "seed-only-encryption-key-not-used";
 import { prisma } from "../lib/db";
 import { createDocument } from "../lib/documents";
 import { driveProvider, ensureRootFolders } from "../lib/google";
+import { setMockModifiedTime } from "../lib/google/mock";
 import { slugify } from "../lib/utils";
 
 const SAMPLE_DOMAIN = "pennplayers.example";
@@ -853,6 +854,7 @@ async function main() {
       const category = categories.get(spec.category);
       if (!category) throw new Error(`Unknown sample category: ${spec.category}`);
 
+      const spread = new Date(Date.now() - created * 7 * 60 * 60 * 1000);
       const { document } = await createDocument(creator as never, {
         title: spec.title,
         description: spec.description,
@@ -870,10 +872,16 @@ async function main() {
           status: spec.archived ? "ARCHIVED" : "ACTIVE",
           source: spec.registered ? "REGISTERED" : "CREATED",
           metadata: JSON.stringify({ sample: true, createdVia: "seed" }),
-          // Spread the timestamps out so "recently updated" looks real.
-          updatedAt: new Date(Date.now() - created * 7 * 60 * 60 * 1000),
+          // Spread the timestamps out so "recently edited" looks real. The
+          // edit time is what the hub sorts and labels by, and for a real
+          // document it comes from Drive — here the simulated file and the
+          // hub row are given the same made-up past.
+          updatedAt: spread,
+          googleModifiedAt: spread,
+          lastEditedAt: spread,
         },
       });
+      if (document.googleFileId) setMockModifiedTime(document.googleFileId, spread);
       created += 1;
     }
     console.log(`   created ${created} sample documents`);

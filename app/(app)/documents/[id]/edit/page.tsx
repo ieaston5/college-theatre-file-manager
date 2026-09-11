@@ -72,7 +72,7 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
       <DocumentEditForm
         document={{
           id: document.id,
-          title: document.title,
+          baseTitle: document.baseTitle,
           description: document.description,
           categoryId: document.categoryId,
           productionId: document.productionId,
@@ -102,6 +102,8 @@ export default async function EditDocumentPage({ params }: { params: Promise<{ i
           abbreviation: production.abbreviation,
         }))}
         groupEmail={config.groupEmail}
+        namingTemplate={config.namingTemplate}
+        currentSeason={config.currentSeason}
         companyCreatorOnly={companyCreatorOnly}
       />
     </div>

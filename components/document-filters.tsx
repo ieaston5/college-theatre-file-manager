@@ -148,7 +148,7 @@ export function DocumentFilters({
         value={params.get("sort") ?? "updated"}
         onChange={(event) => update("sort", event.target.value)}
       >
-        <option value="updated">Recently updated</option>
+        <option value="updated">Recently edited</option>
         <option value="created">Newest first</option>
         <option value="title">Name A–Z</option>
       </select>

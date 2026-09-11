@@ -16,7 +16,7 @@ import {
   templateSchema,
 } from "@/lib/validation";
 import { isSimulatedDriveId } from "@/lib/google/oauth";
-import { extractDriveFileId, slugify } from "@/lib/utils";
+import { extractDriveFileId, pluralize, slugify } from "@/lib/utils";
 import { env } from "@/lib/env";
 import { ROLE_META } from "@/lib/constants";
 import { boardWelcome, sendEmail } from "@/lib/email";
@@ -458,6 +458,32 @@ export async function setMemberStatusAction(form: FormData) {
     targetId: id,
     summary: `${disable ? "Disabled" : "Re-enabled"} ${member.email}`,
   });
+  refreshEverywhere();
+}
+
+/**
+ * Bring every existing title into line with the naming rule.
+ *
+ * Offered rather than done silently on save: an admin editing the rule is
+ * often mid-thought, and renaming three hundred documents under them is not
+ * something to do on a keystroke. Safe to run twice — the name is composed
+ * from the stored base title, so a second pass changes nothing.
+ */
+export async function applyNamingRuleAction(): Promise<void> {
+  const actor = await assertRole("ADMIN");
+  const { normaliseDocumentTitles } = await import("@/lib/documents");
+  const result = await normaliseDocumentTitles();
+  if (result.changed > 0) {
+    await recordAudit({
+      actor,
+      action: "config.retitle",
+      summary: `Applied the naming rule to ${result.changed} of ${result.scanned} ${pluralize(
+        result.scanned,
+        "title",
+      )}`,
+      metadata: { examples: result.examples },
+    });
+  }
   refreshEverywhere();
 }
 

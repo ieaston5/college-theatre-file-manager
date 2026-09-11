@@ -3,9 +3,9 @@ import { prisma } from "./db";
 import { driveProvider } from "./google";
 import { docTypeFromMime, type Visibility } from "./constants";
 import { recordAudit } from "./audit";
-import { syncSharing } from "./documents";
+import { documentName, syncSharing } from "./documents";
 import { getConfig } from "./config";
-import { applyNamingTemplate, driveViewLink, withExtension } from "./utils";
+import { driveViewLink, withExtension } from "./utils";
 
 /**
  * Bringing the existing pile in.
@@ -339,19 +339,20 @@ export type FileDecision = {
  * The canonical Drive name for an imported file: the hub's naming rule, with
  * the original file's extension kept so operating systems still recognise it.
  */
-async function canonicalDriveName(input: {
-  title: string;
-  originalName: string;
-  category: { name: string };
-  production: { name: string; abbreviation: string | null; season: string | null } | null;
-}): Promise<string> {
-  const config = await getConfig();
+function canonicalDriveName(
+  config: { namingTemplate: string; currentSeason: string | null },
+  input: {
+    baseTitle: string;
+    originalName: string;
+    category: { name: string };
+    production: { name: string; abbreviation: string | null; season: string | null } | null;
+  },
+): string {
   return withExtension(
-    applyNamingTemplate(config.namingTemplate, {
-      production: input.production?.abbreviation || input.production?.name || null,
-      category: input.category.name,
-      title: input.title,
-      season: input.production?.season ?? config.currentSeason,
+    documentName(config, {
+      baseTitle: input.baseTitle,
+      category: input.category,
+      production: input.production,
     }),
     input.originalName,
   );
@@ -377,6 +378,7 @@ export async function fileImportItems(
   let filed = 0;
   let renamed = 0;
   const provider = driveProvider();
+  const config = await getConfig();
 
   for (const decision of decisions) {
     const item = await prisma.importItem.findUnique({ where: { id: decision.itemId } });
@@ -410,11 +412,16 @@ export async function fileImportItems(
       const production = decision.productionId
         ? await prisma.production.findUnique({ where: { id: decision.productionId } })
         : null;
-      const title = cleanTitle(item.name);
+      // What the file is called, tidied; the hub's naming rule turns that into
+      // the name it is listed under, the same one canonicalDriveName produces
+      // for the file itself.
+      const baseTitle = cleanTitle(item.name);
+      const title = documentName(config, { baseTitle, category, production });
 
       const document = await prisma.document.create({
         data: {
           title,
+          baseTitle,
           docType: docTypeFromMime(item.mimeType),
           source: "REGISTERED",
           visibility: decision.visibility,
@@ -428,6 +435,7 @@ export async function fileImportItems(
           mimeType: item.mimeType,
           originalFileName: item.name,
           googleModifiedAt: item.modifiedAt,
+          lastEditedAt: item.modifiedAt ?? new Date(),
           lastSyncedAt: new Date(),
           metadata: JSON.stringify({
             createdVia: "import",
@@ -461,8 +469,8 @@ export async function fileImportItems(
       // needs edit access on a file the hub usually does not own, so a refusal
       // is reported rather than treated as a failure to file.
       if (options?.renameInDrive) {
-        const driveName = await canonicalDriveName({
-          title,
+        const driveName = canonicalDriveName(config, {
+          baseTitle,
           originalName: item.name,
           category,
           production,

@@ -75,6 +75,8 @@ export default async function RegisterDocumentPage() {
           abbreviation: production.abbreviation,
         }))}
         groupEmail={setup.config.groupEmail}
+        namingTemplate={setup.config.namingTemplate}
+        currentSeason={setup.config.currentSeason}
         hubAccountEmail={setup.account?.email ?? null}
         driveMode={env.driveMode}
         companyCreatorOnly={companyCreatorOnly}

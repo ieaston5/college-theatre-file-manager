@@ -484,7 +484,7 @@ export function DocumentCreateForm({
               ? "Several files selected — each one keeps its own name. Clear the extra files if you want to name one yourself."
               : isCanva
                 ? "Leave blank to use the design's own name in Canva."
-                : "Plain language, no need to add the show or the date — the hub adds those."
+                : "Plain language: the show, the shelf and the season are added by the hub's naming rule, on the hub and in Drive alike."
           }
         >
           <input
@@ -558,7 +558,7 @@ export function DocumentCreateForm({
       <div className="card flex flex-wrap items-center justify-between gap-3 bg-ink-50 p-4">
         <div className="min-w-0 text-sm">
           <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-            Will be {isUpload ? "uploaded as" : isCanva ? "kept in Drive as" : "created as"}
+            Will be listed and {isUpload ? "uploaded" : isCanva ? "kept in Drive" : "created"} as
           </div>
           <div className="mt-0.5 flex items-center gap-2 font-medium text-ink-800">
             <Icon name={previewIcon} className="size-4 shrink-0" />

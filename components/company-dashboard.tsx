@@ -35,7 +35,7 @@ export async function CompanyDashboard({
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE" },
       include: DOCUMENT_LIST_INCLUDE,
-      orderBy: { updatedAt: "desc" },
+      orderBy: { lastEditedAt: "desc" },
       take: 10,
     }),
     prisma.document.groupBy({
