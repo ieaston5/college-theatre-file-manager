@@ -96,12 +96,19 @@ are board-only out of the box, so they are never even offered as "Company" and
 never appear to a company member. Adding somebody to a show backfills their
 Drive access to everything already filed; removing them revokes it.
 
+A company document is always one show's document. Somebody is in the company of
+a production, not of the hub, so "Company" is only offered for a document
+attached to a show, and it reaches that show's company and nobody else's —
+another show's cast never sees it, and neither does anybody whose company
+membership is elsewhere. Something that is not about a particular production is
+the board's.
+
 Three visibility levels on every document:
 
 | | Who |
 |---|---|
 | **Private** | the creator, plus anyone they add by hand |
-| **Company** | the board, plus people on that production whose role covers this category |
+| **Company** | the board, plus people on *that* production whose role covers this category |
 | **Board** | everyone with board access |
 
 Mirrored Canva designs obey the same three levels, because what is being shared

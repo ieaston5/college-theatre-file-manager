@@ -490,6 +490,10 @@ export async function fileImportItems(
       if (decision.visibility === "COMPANY" && !category.companyVisible) {
         throw new Error(`${category.name} is not shared with companies`);
       }
+      if (decision.visibility === "COMPANY" && !decision.productionId) {
+        // "Company" is one show's company, so there has to be a show.
+        throw new Error("a company document has to be attached to a production");
+      }
 
       const existing = await prisma.document.findUnique({
         where: { googleFileId: item.googleFileId },

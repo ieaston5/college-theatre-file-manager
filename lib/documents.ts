@@ -104,6 +104,11 @@ async function companyRecipients(doc: {
   productionId?: string | null;
 }): Promise<string[]> {
   if (doc.visibility !== "COMPANY") return [];
+  // No show, no company. A document filed against no production has no company
+  // to belong to, so nobody outside the board reaches it — and returning
+  // nobody here is what makes a reconciling sync take the grants back off one
+  // that was shared more widely before the rule changed.
+  if (!doc.productionId) return [];
 
   const members = await prisma.productionMember.findMany({
     where: {
@@ -113,7 +118,7 @@ async function companyRecipients(doc: {
       // ignores archived productions, so without this Drive would keep
       // granting access the hub had stopped showing.
       production: { status: { not: "ARCHIVED" } },
-      ...(doc.productionId ? { productionId: doc.productionId } : {}),
+      productionId: doc.productionId,
       role: { archived: false, categories: { some: { id: doc.categoryId } } },
     },
     select: { user: { select: { email: true } } },
@@ -123,16 +128,25 @@ async function companyRecipients(doc: {
 
 /**
  * "Company" is only available where an admin has opened the category up to
- * companies. Enforced here as well as in the form, so an old page or a hand
- * made request cannot put a budget in front of the cast.
+ * companies, and only for a document attached to a show — the show is the
+ * company. Enforced here as well as in the form, so an old page or a hand made
+ * request cannot put a budget in front of the cast, or file something as
+ * "Company" that no company can actually see.
  */
 function assertVisibilityAllowed(
   category: { name: string; companyVisible: boolean },
   visibility: string,
+  hasProduction: boolean,
 ) {
-  if (visibility === "COMPANY" && !category.companyVisible) {
+  if (visibility !== "COMPANY") return;
+  if (!category.companyVisible) {
     throw new Error(
       `${category.name} is not shared with production companies. Pick Board or Private — or ask an admin to open the category up to companies.`,
+    );
+  }
+  if (!hasProduction) {
+    throw new Error(
+      `“Company” means the people on one show, so a company document has to be attached to a production. Attach it to a show, or file it for the board.`,
     );
   }
 }
@@ -158,6 +172,9 @@ export function assertCreationAllowed(
   const membership = viewer.memberships.find(
     (entry) => entry.canCreate && entry.productionId === input.productionId,
   );
+  // Filing against no show at all is still allowed for something they keep to
+  // themselves; "Company" is refused by assertVisibilityAllowed, because
+  // without a show there is no company for it to reach.
   const orgWideAllowed =
     !input.productionId &&
     viewer.memberships.some(
@@ -316,7 +333,7 @@ export async function createDocument(
     throw new Error(`${category.name} is an organisation-wide category — leave the production blank.`);
   }
   if (input.productionId && !production) throw new Error("That production no longer exists.");
-  assertVisibilityAllowed(category, input.visibility);
+  assertVisibilityAllowed(category, input.visibility, Boolean(production));
 
   const warnings: string[] = [];
 
@@ -444,8 +461,10 @@ export async function createDocument(
  * without this, a new cast member would be on the hub but locked out of the
  * files in Drive.
  *
- * Organisation-wide company documents are included, because a first
- * membership is what unlocks the handbooks.
+ * Documents filed against no show are included even though no company can see
+ * them: a company document needs a production, so anything left over from
+ * before that rule has Drive grants to hand back, and the reconciling sync is
+ * what takes them off.
  */
 export async function resyncCompanySharing(options: {
   productionId?: string;
@@ -520,10 +539,10 @@ export async function recordUploadedDocument(
 ): Promise<DocumentServiceResult> {
   const category = await prisma.category.findUnique({ where: { id: input.categoryId } });
   if (!category) throw new Error("That category no longer exists.");
-  assertVisibilityAllowed(category, input.visibility);
   const production = input.productionId
     ? await prisma.production.findUnique({ where: { id: input.productionId } })
     : null;
+  assertVisibilityAllowed(category, input.visibility, Boolean(production));
 
   const docType = docTypeFromMime(input.file.mimeType);
   const warnings: string[] = [];
@@ -773,7 +792,7 @@ export async function mirrorCanvaDesign(
   if (category.scope === "STANDING" && production) {
     throw new Error(`${category.name} is an organisation-wide category — leave the production blank.`);
   }
-  assertVisibilityAllowed(category, input.visibility);
+  assertVisibilityAllowed(category, input.visibility, Boolean(production));
 
   const existing = await prisma.document.findFirst({ where: { canvaDesignId: designId } });
   if (existing) {
@@ -1007,7 +1026,7 @@ export async function registerDocument(
   if (category.scope === "PRODUCTION" && !production) {
     throw new Error(`Documents in ${category.name} have to be attached to a production.`);
   }
-  assertVisibilityAllowed(category, input.visibility);
+  assertVisibilityAllowed(category, input.visibility, Boolean(production));
 
   const warnings: string[] = [];
   const provider = driveProvider();
@@ -1136,7 +1155,7 @@ export async function updateDocument(
   if (category.scope === "PRODUCTION" && !production) {
     throw new Error(`Documents in ${category.name} have to be attached to a production.`);
   }
-  assertVisibilityAllowed(category, input.visibility);
+  assertVisibilityAllowed(category, input.visibility, Boolean(production));
 
   const warnings: string[] = [];
   const movedShelf =

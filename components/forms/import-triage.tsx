@@ -7,6 +7,7 @@ import { DOC_TYPE_META, VISIBILITIES, VISIBILITY_META, docTypeFromMime } from "@
 import { cn, formatBytes, relativeTime } from "@/lib/utils";
 import { Icon } from "../icons";
 import { Badge, buttonClass, selectClass } from "../ui";
+import { hasProduction } from "./document-fields";
 import { FormBanner, SubmitButton, Toggle } from "./form-bits";
 
 export type TriageItem = {
@@ -60,12 +61,16 @@ export function ImportTriage({
     Object.fromEntries(
       items.map((item) => {
         const category = categories.find((entry) => entry.id === item.guessedCategoryId);
+        const productionId = item.guessedProductionId ?? "none";
+        const guessed = category?.defaultVisibility ?? "BOARD";
         return [
           item.id,
           {
             categoryId: item.guessedCategoryId ?? "",
-            productionId: item.guessedProductionId ?? "none",
-            visibility: category?.defaultVisibility ?? "BOARD",
+            productionId,
+            // A category whose default is Company still lands on Board when
+            // the file is not going onto a show.
+            visibility: guessed === "COMPANY" && !hasProduction(productionId) ? "BOARD" : guessed,
             selected: Boolean(item.guessedCategoryId),
           },
         ];
@@ -96,12 +101,17 @@ export function ImportTriage({
           ...(bulkProduction ? { productionId: bulkProduction } : {}),
           ...(bulkVisibility ? { visibility: bulkVisibility } : {}),
         };
-        // A category that must not be company-visible cannot stay on Company.
         const category = categories.find((entry) => entry.id === next[id].categoryId);
-        if (next[id].visibility === "COMPANY" && category && !category.companyVisible) {
+        if (category?.scope === "STANDING") next[id] = { ...next[id], productionId: "none" };
+        // A category that must not be company-visible cannot stay on Company —
+        // and nor can a file going onto no show, because "Company" means the
+        // people on one show.
+        if (
+          next[id].visibility === "COMPANY" &&
+          ((category && !category.companyVisible) || !hasProduction(next[id].productionId))
+        ) {
           next[id] = { ...next[id], visibility: "BOARD" };
         }
-        if (category?.scope === "STANDING") next[id] = { ...next[id], productionId: "none" };
       }
       return next;
     });
@@ -289,15 +299,17 @@ export function ImportTriage({
                     const nextCategory = categories.find(
                       (entry) => entry.id === event.target.value,
                     );
+                    const nextProductionId =
+                      nextCategory?.scope === "STANDING" ? "none" : row.productionId;
+                    const companyGone =
+                      (nextCategory && !nextCategory.companyVisible) ||
+                      !hasProduction(nextProductionId);
                     update(item.id, {
                       categoryId: event.target.value,
                       selected: true,
                       visibility:
-                        row.visibility === "COMPANY" && nextCategory && !nextCategory.companyVisible
-                          ? "BOARD"
-                          : row.visibility,
-                      productionId:
-                        nextCategory?.scope === "STANDING" ? "none" : row.productionId,
+                        row.visibility === "COMPANY" && companyGone ? "BOARD" : row.visibility,
+                      productionId: nextProductionId,
                     });
                   }}
                   className={cn(compact, "w-40", !row.categoryId && "border-amber-300")}
@@ -314,7 +326,16 @@ export function ImportTriage({
                 <select
                   name={`production:${item.id}`}
                   value={row.productionId}
-                  onChange={(event) => update(item.id, { productionId: event.target.value })}
+                  onChange={(event) =>
+                    update(item.id, {
+                      productionId: event.target.value,
+                      // Taking the show off takes "Company" with it.
+                      visibility:
+                        row.visibility === "COMPANY" && !hasProduction(event.target.value)
+                          ? "BOARD"
+                          : row.visibility,
+                    })
+                  }
                   disabled={category?.scope === "STANDING"}
                   className={cn(compact, "w-36")}
                   aria-label={`Production for ${item.name}`}
@@ -335,7 +356,9 @@ export function ImportTriage({
                   aria-label={`Visibility for ${item.name}`}
                 >
                   {VISIBILITIES.filter(
-                    (visibility) => visibility !== "COMPANY" || category?.companyVisible,
+                    (visibility) =>
+                      visibility !== "COMPANY" ||
+                      (category?.companyVisible && hasProduction(row.productionId)),
                   ).map((visibility) => (
                     <option key={visibility} value={visibility}>
                       {VISIBILITY_META[visibility].label}

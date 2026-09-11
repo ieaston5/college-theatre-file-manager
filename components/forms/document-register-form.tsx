@@ -15,6 +15,8 @@ import {
   ProductionSelect,
   TagsField,
   VisibilityPicker,
+  companyVisibilityAvailable,
+  hasProduction,
   type FormCategory,
   type FormProduction,
 } from "./document-fields";
@@ -64,14 +66,27 @@ export function DocumentRegisterForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
-    const wanted =
-      next.defaultVisibility === "COMPANY" && !next.companyVisible
-        ? "BOARD"
-        : next.defaultVisibility;
-    setVisibility(companyCreatorOnly && wanted === "BOARD" ? "COMPANY" : wanted);
+    // The category decides whether the document is on a show at all, and
+    // "Company" means the people on one show — so settle that first.
+    let nextProductionId = productionId;
+    if (next.scope === "STANDING") nextProductionId = "none";
+    if (next.scope === "PRODUCTION" && productionId === "none") nextProductionId = "";
+    if (nextProductionId !== productionId) setProductionId(nextProductionId);
+
+    const companyOk = companyVisibilityAvailable(next, hasProduction(nextProductionId));
+    let wanted = next.defaultVisibility;
+    if (wanted === "COMPANY" && !companyOk) wanted = "BOARD";
+    if (wanted === "BOARD" && companyCreatorOnly) wanted = companyOk ? "COMPANY" : "PRIVATE";
+    setVisibility(wanted);
     setEditAccess(next.defaultEditAccess);
-    if (next.scope === "STANDING") setProductionId("none");
-    if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
+  }
+
+  function pickProduction(nextId: string) {
+    setProductionId(nextId);
+    // No show, no company.
+    if (visibility === "COMPANY" && !hasProduction(nextId)) {
+      setVisibility(companyCreatorOnly ? "PRIVATE" : "BOARD");
+    }
   }
 
   if (state.documentId && !state.error) {
@@ -159,7 +174,7 @@ export function DocumentRegisterForm({
         <ProductionSelect
           productions={productions}
           value={productionId}
-          onChange={setProductionId}
+          onChange={pickProduction}
           scope={category?.scope}
           companyCreatorOnly={companyCreatorOnly}
         />
@@ -171,6 +186,7 @@ export function DocumentRegisterForm({
           onChange={setVisibility}
           boardCount={boardCount}
           category={category}
+          hasProduction={hasProduction(productionId)}
           companyCreatorOnly={companyCreatorOnly}
         />
         <EditAccessPicker

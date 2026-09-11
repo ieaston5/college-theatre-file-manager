@@ -121,12 +121,15 @@ export default async function DocumentPage({
   // independent of one another; awaiting them in turn cost four rounds of
   // database latency on a page that needs one.
   const [companyAudience, pendingRequests, shareableMembers, activity] = await Promise.all([
-    document.visibility === "COMPANY"
+    // No show, no company: a company document reaches the people on the
+    // production it is filed against, so one with no production has no
+    // audience beyond the board.
+    document.visibility === "COMPANY" && document.productionId
       ? prisma.productionMember.findMany({
           where: {
             status: "ACTIVE",
             user: { status: { not: "DISABLED" } },
-            ...(document.productionId ? { productionId: document.productionId } : {}),
+            productionId: document.productionId,
             role: { archived: false, categories: { some: { id: document.categoryId } } },
           },
           include: {
@@ -415,25 +418,31 @@ export default async function DocumentPage({
 
           {document.visibility === "COMPANY" ? (
             <div className="space-y-3 text-sm">
-              <p className="text-ink-600">
-                {viewer.isBoard ? "Everyone with hub access" : "The board"} can see this, plus{" "}
-                <span className="font-medium text-ink-800">
-                  {companyAudience.length}{" "}
-                  {companyAudience.length === 1 ? "person" : "people"}
-                </span>{" "}
-                working on{" "}
-                {document.production ? (
+              {document.production ? (
+                <p className="text-ink-600">
+                  {viewer.isBoard ? "Everyone with hub access" : "The board"} can see this, plus{" "}
+                  <span className="font-medium text-ink-800">
+                    {companyAudience.length}{" "}
+                    {companyAudience.length === 1 ? "person" : "people"}
+                  </span>{" "}
+                  working on{" "}
                   <Link
                     href={`/productions/${document.production.slug}/company`}
                     className="font-medium text-brand-700 hover:underline"
                   >
                     {document.production.name}
                   </Link>
-                ) : (
-                  "a current production"
-                )}
-                .
-              </p>
+                  .
+                </p>
+              ) : (
+                /* A company document belongs to one show's company. Without a
+                   show there is no company, so this one goes no further than
+                   the board however it is labelled. */
+                <p className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+                  This is not attached to a show, so no company can see it — only the board can.
+                  Attach it to a production and that show&rsquo;s company gets it.
+                </p>
+              )}
 
               {companyAudience.length > 0 ? (
                 <ul className="max-h-56 space-y-1.5 overflow-y-auto scroll-slim">
@@ -453,18 +462,20 @@ export default async function DocumentPage({
                     </li>
                   ))}
                 </ul>
-              ) : viewer.isBoard ? (
+              ) : viewer.isBoard && document.production ? (
                 <p className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
                   Nobody on the company has a role that covers {document.category.name} yet, so
                   right now this is only visible to the board.
                 </p>
               ) : null}
 
-              <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
-                {viewer.isBoard
-                  ? "In Google Drive each of them is added individually as a viewer. Take someone off the show and their access disappears with them."
-                  : "Everyone listed here is added to the file in Google Drive by name, so it opens for them with the account they sign in with. Access ends when the show does."}
-              </div>
+              {document.production ? (
+                <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
+                  {viewer.isBoard
+                    ? "In Google Drive each of them is added individually as a viewer. Take someone off the show and their access disappears with them."
+                    : "Everyone listed here is added to the file in Google Drive by name, so it opens for them with the account they sign in with. Access ends when the show does."}
+                </div>
+              ) : null}
             </div>
           ) : document.visibility === "BOARD" ? (
             <div className="space-y-3 text-sm">

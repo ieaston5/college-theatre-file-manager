@@ -27,6 +27,8 @@ import {
   ProductionSelect,
   TagsField,
   VisibilityPicker,
+  companyVisibilityAvailable,
+  hasProduction,
   type FormCategory,
   type FormProduction,
   type FormTemplate,
@@ -112,11 +114,14 @@ export function DocumentCreateForm({
   /** Whether the person picked the file type, as opposed to inheriting it. */
   const [typeChosenByHand, setTypeChosenByHand] = useState(false);
   // A company member has no board option, and "Company" is only on the table
-  // once a category that allows it is chosen — so until then, private.
+  // once a category that allows it and a show to share it with are both
+  // chosen — so until then, private.
   const [visibility, setVisibility] = useState<string>(() => {
     if (!companyCreatorOnly) return "BOARD";
     const initial = categories.find((item) => item.id === defaultCategoryId);
-    return initial?.companyVisible ? "COMPANY" : "PRIVATE";
+    return companyVisibilityAvailable(initial, hasProduction(defaultProductionId ?? "none"))
+      ? "COMPANY"
+      : "PRIVATE";
   });
   const [editAccess, setEditAccess] = useState<string>("BOARD");
   const [templateId, setTemplateId] = useState("blank");
@@ -162,6 +167,15 @@ export function DocumentCreateForm({
     isUpload && files.length > 0 ? docTypeFromMime(files[0].type) : "OTHER";
   const previewIcon = isUpload ? DOC_TYPE_META[uploadDocType].icon : MODE_COPY[mode].icon;
 
+  function pickProduction(nextId: string) {
+    setProductionId(nextId);
+    // Taking the show off takes "Company" with it: a company document is one
+    // show's document, so there has to be a show for it to belong to.
+    if (visibility === "COMPANY" && !hasProduction(nextId)) {
+      setVisibility(companyCreatorOnly ? "PRIVATE" : "BOARD");
+    }
+  }
+
   function pickCategory(nextId: string) {
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
@@ -179,16 +193,22 @@ export function DocumentCreateForm({
     if (next.defaultDocType && !typeChosenByHand) {
       setMode(next.defaultDocType as CreationMode);
     }
-    // Never leave "Company" selected on a category that is board-only.
-    const wanted =
-      next.defaultVisibility === "COMPANY" && !next.companyVisible
-        ? "BOARD"
-        : next.defaultVisibility;
-    // A company member cannot publish to the board, so fall back to Company.
-    setVisibility(companyCreatorOnly && wanted === "BOARD" ? "COMPANY" : wanted);
+    // A category can move the document off its show, or onto one, and what
+    // "Company" means depends on that — so settle the show first.
+    let nextProductionId = productionId;
+    if (next.scope === "STANDING") nextProductionId = "none";
+    if (next.scope === "PRODUCTION" && productionId === "none") nextProductionId = "";
+    if (nextProductionId !== productionId) setProductionId(nextProductionId);
+
+    // Never leave "Company" selected where it cannot apply: a board-only
+    // category, or a document that belongs to no show. A company member has no
+    // board option at all, so for them the floor is private.
+    const companyOk = companyVisibilityAvailable(next, hasProduction(nextProductionId));
+    let wanted = next.defaultVisibility;
+    if (wanted === "COMPANY" && !companyOk) wanted = "BOARD";
+    if (wanted === "BOARD" && companyCreatorOnly) wanted = companyOk ? "COMPANY" : "PRIVATE";
+    setVisibility(wanted);
     setEditAccess(next.defaultEditAccess);
-    if (next.scope === "STANDING") setProductionId("none");
-    if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
     setTemplateId("blank");
   }
 
@@ -203,8 +223,13 @@ export function DocumentCreateForm({
     setUploadError(null);
 
     if (!categoryId) return setUploadError("Pick a category first.");
-    if (category?.scope === "PRODUCTION" && (!productionId || productionId === "none")) {
+    if (category?.scope === "PRODUCTION" && !hasProduction(productionId)) {
       return setUploadError(`Documents in ${category.name} have to be attached to a production.`);
+    }
+    if (visibility === "COMPANY" && !hasProduction(productionId)) {
+      return setUploadError(
+        "“Company” means the people on one show, so pick the production it belongs to — or file it for the board.",
+      );
     }
     if (files.length === 0) return setUploadError("Choose at least one file.");
     if (files.length === 1 && !effectiveTitle) return setUploadError("Give the file a name.");
@@ -505,7 +530,7 @@ export function DocumentCreateForm({
         <ProductionSelect
           productions={productions}
           value={productionId}
-          onChange={setProductionId}
+          onChange={pickProduction}
           scope={category?.scope}
           companyCreatorOnly={companyCreatorOnly}
         />
@@ -542,6 +567,7 @@ export function DocumentCreateForm({
           onChange={setVisibility}
           boardCount={boardCount}
           category={category}
+          hasProduction={hasProduction(productionId)}
           companyCreatorOnly={companyCreatorOnly}
         />
         <EditAccessPicker
