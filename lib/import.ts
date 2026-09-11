@@ -27,6 +27,15 @@ const MAX_DEPTH = 4;
 const MAX_FILES = 400;
 /** How many per-file failures the activity log keeps verbatim. */
 const MAX_LOGGED_FAILURES = 50;
+/**
+ * How often the walk writes its running total to the batch.
+ *
+ * A scan of a real club Drive is a minute of Google calls, and until this the
+ * only thing the browser could show for it was a spinning button. The count is
+ * written down as it goes so the page can report actual progress — "184 files
+ * so far" — which costs one small update per ten files.
+ */
+const PROGRESS_EVERY = 10;
 
 function words(value: string): string[] {
   return value
@@ -171,6 +180,15 @@ export async function scanDriveFolder(
     includeSubfolders: boolean;
     /** The shared drive the starting folder lives in, when it lives in one. */
     driveId?: string | null;
+    /**
+     * The id to file this scan under, chosen by whoever asked for it.
+     *
+     * The browser generates it before submitting so that it can follow the
+     * scan's progress while the request is still open — it has something to
+     * ask about before there is anything to answer with. Left out (by a
+     * script, say) an id is generated as usual.
+     */
+    batchId?: string;
   },
 ): Promise<ScanResult> {
   const provider = driveProvider();
@@ -206,6 +224,7 @@ export async function scanDriveFolder(
 
   const batch = await prisma.importBatch.create({
     data: {
+      ...(options.batchId ? { id: options.batchId } : {}),
       sourceFolderId: options.folderId,
       sourceFolderName: options.folderName ?? null,
       includeSubfolders: options.includeSubfolders,
@@ -363,6 +382,12 @@ export async function scanDriveFolder(
 
         found += 1;
         if (alreadyOnHub) duplicates += 1;
+        // Let whoever is watching see the number move.
+        if (found % PROGRESS_EVERY === 0) {
+          await prisma.importBatch
+            .update({ where: { id: batch.id }, data: { fileCount: found } })
+            .catch(() => {});
+        }
       } catch (error) {
         failures.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -460,7 +485,15 @@ function canonicalDriveName(
 export async function fileImportItems(
   actor: User,
   decisions: FileDecision[],
-  options?: { renameInDrive?: boolean },
+  options?: {
+    renameInDrive?: boolean;
+    /**
+     * Whether to write an activity entry for this call. Off when filing is
+     * being done a slice at a time, so a hundred files produce one entry at
+     * the end rather than twenty as they go.
+     */
+    audit?: boolean;
+  },
 ): Promise<{
   filed: number;
   renamed: number;
@@ -606,7 +639,7 @@ export async function fileImportItems(
     }
   }
 
-  if (filed > 0) {
+  if (filed > 0 && options?.audit !== false) {
     await recordAudit({
       actor,
       action: "import.file",

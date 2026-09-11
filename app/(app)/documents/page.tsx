@@ -1,15 +1,21 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { canCreateDocuments, getViewerContext, productionFilterFor } from "@/lib/access";
 import { visibleCategories } from "@/lib/nav";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
-import { DocumentFilters } from "@/components/document-filters";
-import { DocumentList, type DocumentListItem } from "@/components/document-items";
+import { DocumentFilters, Filtered, FilteringProvider } from "@/components/document-filters";
+import {
+  DocumentResults,
+  DocumentResultsSkeleton,
+  DocumentTotalNote,
+  DocumentTotalSentence,
+  filterKey,
+} from "@/components/document-results";
 import { SearchField } from "@/components/search-field";
 import { Icon } from "@/components/icons";
 import { Banner, EmptyState, PageHeader, buttonClass } from "@/components/ui";
-import { pluralize } from "@/lib/utils";
 
 export default async function DocumentsPage({
   searchParams,
@@ -21,8 +27,11 @@ export default async function DocumentsPage({
   const params = await searchParams;
   const term = typeof params.q === "string" ? params.q : undefined;
 
-  const [{ documents, total }, categories, productions] = await Promise.all([
-    queryDocuments(viewer, params, { take: 100 }),
+  // Started here and awaited inside the boundary below, so the heading and the
+  // filters are on screen while the list is still being fetched.
+  const documents = queryDocuments(viewer, params, { take: 100 });
+
+  const [categories, productions] = await Promise.all([
     visibleCategories(viewer),
     prisma.production.findMany({
       where: productionFilterFor(viewer),
@@ -35,7 +44,11 @@ export default async function DocumentsPage({
     <div>
       <PageHeader
         title={term ? `Results for “${term}”` : "All documents"}
-        description={`${total} ${pluralize(total, "document")} you can see.`}
+        description={
+          <Suspense fallback="Counting…">
+            <DocumentTotalSentence query={documents} />
+          </Suspense>
+        }
         action={
           canCreateDocuments(viewer) ? (
             <Link href="/documents/new" className={buttonClass("primary")}>
@@ -56,40 +69,47 @@ export default async function DocumentsPage({
         </Banner>
       ) : null}
 
-      <DocumentFilters
-        categories={categories.map((category) => ({ value: category.slug, label: category.name }))}
-        productions={productions.map((production) => ({
-          value: production.slug,
-          label: production.name,
-        }))}
-        boardVisibility={viewer.isBoard}
-      />
+      <FilteringProvider>
+        <DocumentFilters
+          categories={categories.map((category) => ({
+            value: category.slug,
+            label: category.name,
+          }))}
+          productions={productions.map((production) => ({
+            value: production.slug,
+            label: production.name,
+          }))}
+          boardVisibility={viewer.isBoard}
+        />
 
-      <DocumentList
-        documents={documents as DocumentListItem[]}
-        showPinned={viewer.isBoard}
-        empty={
-          <EmptyState
-            icon="search"
-            title={term ? "Nothing matched that" : "No documents match these filters"}
-            action={
-              <Link href="/documents" className={buttonClass("secondary")}>
-                Clear filters
-              </Link>
-            }
-          >
-            {term
-              ? "Try a shorter search, or check whether it was filed as private by someone else."
-              : "Loosen a filter, or create the document you were looking for."}
-          </EmptyState>
-        }
-      />
-
-      {total > documents.length ? (
-        <p className="mt-4 text-center text-xs text-ink-400">
-          Showing the first {documents.length} of {total}. Narrow the filters to see the rest.
-        </p>
-      ) : null}
+        {/* The boundary lets the frame go out ahead of the query on the first
+            render; Filtered fades the rows already on screen while a filter
+            change is in flight, which React otherwise leaves looking current. */}
+        <Filtered>
+          <Suspense key={filterKey(params)} fallback={<DocumentResultsSkeleton rows={8} />}>
+            <DocumentResults
+              query={documents}
+              showPinned={viewer.isBoard}
+              empty={
+                <EmptyState
+                  icon="search"
+                  title={term ? "Nothing matched that" : "No documents match these filters"}
+                  action={
+                    <Link href="/documents" className={buttonClass("secondary")}>
+                      Clear filters
+                    </Link>
+                  }
+                >
+                  {term
+                    ? "Try a shorter search, or check whether it was filed as private by someone else."
+                    : "Loosen a filter, or create the document you were looking for."}
+                </EmptyState>
+              }
+            />
+            <DocumentTotalNote query={documents} />
+          </Suspense>
+        </Filtered>
+      </FilteringProvider>
     </div>
   );
 }

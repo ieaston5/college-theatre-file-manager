@@ -1,113 +1,89 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { sweepSharingAction, type SweepProgress } from "@/app/actions/sharing";
+import { reshareEverythingAction, type SharingProgress } from "@/app/actions/sharing";
+import { useSharingCatchUp } from "../sharing-catch-up";
+import { ProgressBar } from "../progress";
 import { buttonClass } from "../ui";
 import { Icon } from "../icons";
 import { pluralize } from "@/lib/utils";
 
 /**
- * Runs the re-share sweep a slice at a time, calling back until nothing is
- * left. Per-member sharing means hundreds of Google calls for a season's
- * documents, so this is deliberately incremental and interruptible rather
- * than one request that would time out.
+ * The admin view of the re-share queue.
+ *
+ * Nothing here is normally necessary: every change that moves access queues the
+ * documents it affects and the queue drains itself behind the response. This
+ * page is for the two cases that are left — watching a big catch-up finish, and
+ * pushing everything again after a Google call failed earlier or the group
+ * address changed.
+ *
+ * It shares its loop with the banner people see on a production's company page
+ * (see components/sharing-catch-up), so "watching" is the same thing in both
+ * places: ask for a slice, show how far it has got, repeat.
  */
-export function SharingSweep({
-  running,
-  remaining,
-  total,
-}: {
-  running: boolean;
-  remaining: number;
-  total: number;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [progress, setProgress] = useState<SweepProgress | null>(
-    running ? { processed: 0, remaining, total, failures: 0, started: true } : null,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [stopped, setStopped] = useState(false);
-  const [failures, setFailures] = useState(0);
+export function SharingSweep({ initial }: { initial: SharingProgress }) {
+  const { progress, total, done, failures, stopped, pump } = useSharingCatchUp(initial);
+  const [queueing, startQueueing] = useTransition();
+  const [queued, setQueued] = useState(false);
 
-  async function loop() {
-    setError(null);
-    setStopped(false);
-    let guard = 0;
-    let totalFailures = 0;
-
-    // The guard is a belt-and-braces stop: 200 slices of 12 is 2,400
-    // documents, well beyond anything a club will have.
-    while (guard < 200) {
-      guard += 1;
-      let slice: SweepProgress;
-      try {
-        slice = await sweepSharingAction();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "The sweep failed.");
-        return;
-      }
-      totalFailures += slice.failures;
-      setFailures(totalFailures);
-      setProgress(slice);
-      if (slice.remaining === 0 || slice.processed === 0) return;
-    }
-    setStopped(true);
-  }
-
-  const current = progress;
-  const done = current ? current.total - current.remaining : 0;
-  const percent = current && current.total > 0 ? Math.round((done / current.total) * 100) : 0;
+  const finished = progress.pending === 0;
 
   return (
     <div className="space-y-3">
-      {current && current.total > 0 ? (
-        <div>
-          <div className="mb-1 flex items-center justify-between text-xs text-ink-600">
-            <span>
-              {done} of {current.total} {pluralize(current.total, "document")} re-shared
-              {failures > 0 ? ` · ${failures} failed` : ""}
-            </span>
-            <span className="tabular-nums">{percent}%</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-ink-100">
-            <div
-              className={
-                current.remaining === 0
-                  ? "h-full rounded-full bg-emerald-500 transition-all"
-                  : "h-full rounded-full bg-brand-500 transition-all"
-              }
-              style={{ width: `${Math.max(percent, 2)}%` }}
-            />
-          </div>
-        </div>
+      {total > 0 ? (
+        <ProgressBar
+          value={done}
+          max={total}
+          tone={finished ? "emerald" : "brand"}
+          label={`${done} of ${total} ${pluralize(total, "document")} re-shared${
+            failures > 0 ? ` · ${failures} Drive refused` : ""
+          }`}
+        />
       ) : null}
 
-      {error ? <p className="text-xs text-rose-700">{error}</p> : null}
-      {stopped ? (
+      {stopped && !finished ? (
         <p className="text-xs text-amber-700">
-          Stopped after a lot of slices — press it again to carry on.
+          Paused with {progress.pending} still queued — press below to carry on, or leave it to the
+          scheduled run.
         </p>
       ) : null}
-      {current?.remaining === 0 && current.total > 0 ? (
+
+      {finished && (done > 0 || queued) ? (
         <p className="flex items-center gap-1.5 text-xs text-emerald-700">
           <Icon name="check-circle" className="size-3.5" />
           Everything in Drive matches the hub.
         </p>
       ) : null}
 
-      <button
-        type="button"
-        onClick={() => startTransition(loop)}
-        disabled={pending}
-        className={buttonClass(remaining > 0 || running ? "primary" : "secondary")}
-      >
-        <Icon name="refresh" className={pending ? "size-4 animate-spin" : "size-4"} />
-        {pending
-          ? "Re-sharing…"
-          : remaining > 0 || running
-            ? `Re-share ${remaining} ${pluralize(remaining, "document")}`
-            : "Re-share everything anyway"}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        {!finished ? (
+          <button
+            type="button"
+            onClick={() => void pump()}
+            className={buttonClass("primary")}
+          >
+            <Icon name="refresh" className="size-4" />
+            Carry on with {progress.pending} {pluralize(progress.pending, "document")}
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={queueing}
+            onClick={() =>
+              startQueueing(async () => {
+                await reshareEverythingAction();
+                setQueued(true);
+                // The queue is full again; the shared loop takes it from here.
+                void pump();
+              })
+            }
+            className={buttonClass("secondary")}
+          >
+            <Icon name="refresh" className={queueing ? "size-4 animate-spin" : "size-4"} />
+            {queueing ? "Queueing…" : "Re-share everything anyway"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

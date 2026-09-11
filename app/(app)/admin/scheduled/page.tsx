@@ -4,6 +4,7 @@ import { getConfig } from "@/lib/config";
 import { canvaEnabled } from "@/lib/canva";
 import { digestIsDue } from "@/lib/cron";
 import { canvaMirrorIsStale } from "@/lib/canva/freshness";
+import { sharingProgress } from "@/lib/sharing";
 import { ScheduleForm } from "@/components/forms/schedule-forms";
 import { Badge, Banner, Card, SectionHeader, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -18,7 +19,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 export default async function AdminScheduledPage() {
   const config = await getConfig();
 
-  const [mirrors, staleShare] = await Promise.all([
+  const [mirrors, sharing] = await Promise.all([
     prisma.document.findMany({
       where: { canvaDesignId: { not: null }, status: "ACTIVE" },
       select: {
@@ -29,21 +30,7 @@ export default async function AdminScheduledPage() {
         canvaCheckedAt: true,
       },
     }),
-    prisma.document.count({
-      where: {
-        status: "ACTIVE",
-        visibility: { not: "PRIVATE" },
-        googleFileId: { not: null },
-        ...(config.sharingSweepStartedAt
-          ? {
-              OR: [
-                { sharingSyncedAt: null },
-                { sharingSyncedAt: { lt: config.sharingSweepStartedAt } },
-              ],
-            }
-          : { id: "never" }),
-      },
-    }),
+    sharingProgress(),
   ]);
 
   const stale = mirrors.filter((mirror) => canvaMirrorIsStale(mirror));
@@ -93,9 +80,13 @@ export default async function AdminScheduledPage() {
         />
         <Stat
           label="Documents to re-share"
-          value={staleShare}
-          icon={staleShare > 0 ? "refresh" : "check"}
-          hint={config.sharingSweepStartedAt ? "sweep in progress" : "no sweep pending"}
+          value={sharing.pending}
+          icon={sharing.pending > 0 ? "refresh" : "check"}
+          hint={
+            sharing.pending > 0
+              ? `${sharing.done} of ${sharing.total} done`
+              : "Drive matches the hub"
+          }
         />
       </div>
 
@@ -136,14 +127,15 @@ export default async function AdminScheduledPage() {
           <li className="flex gap-3">
             <Icon name="refresh" className="mt-0.5 size-4 shrink-0 text-ink-400" />
             <span>
-              <span className="font-medium text-ink-900">Finish any re-share sweep.</span>{" "}
+              <span className="font-medium text-ink-900">Finish the re-share queue.</span>{" "}
               <span className="text-ink-600">
-                Twelve documents at a time for as long as the run has left, so a sweep started by
-                changing the sharing mode completes on its own instead of needing somebody to sit on
-                the button. Whatever is left over is picked up by the next run.
+                Twelve documents at a time for as long as the run has left. This is the backstop,
+                not the normal route: an access change queues the documents it affects and pushes
+                them to Drive behind its own response, so what turns up here is a catch-up whose
+                browser was closed part-way through.
               </span>{" "}
-              {staleShare > 0 ? (
-                <Badge tone="amber">{staleShare} waiting</Badge>
+              {sharing.pending > 0 ? (
+                <Badge tone="amber">{sharing.pending} waiting</Badge>
               ) : (
                 <Badge tone="slate">idle</Badge>
               )}

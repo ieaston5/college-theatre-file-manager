@@ -6,8 +6,8 @@ import {
   canvaMirrorIsStale,
   exportCanvaMirror,
   normaliseDocumentTitles,
-  runSharingSweep,
 } from "./documents";
+import { SHARING_CHUNK, drainSharingQueue, queueAllSharing, sharingProgress } from "./sharing";
 import { driveProvider } from "./google";
 import { sendDigests } from "./email/digest";
 
@@ -40,11 +40,9 @@ const CANVA_PER_RUN = 25;
 const BUDGET_MS = 40_000;
 /** Sharing first, but never more than this share of the budget. */
 const SHARING_BUDGET_FRACTION = 0.45;
-/** A slice of a sweep is 12 documents, each a few Drive permission calls. */
-const SWEEP_CHUNK = 12;
 
 export type CronReport = {
-  sharing: { processed: number; remaining: number; slices: number } | null;
+  sharing: { processed: number; remaining: number; failures: number } | null;
   drive: { seen: number; updated: number } | null;
   titles: { scanned: number; changed: number } | null;
   canva: { checked: number; refreshed: number; failures: number } | null;
@@ -291,24 +289,29 @@ export async function runScheduledJobs(options?: {
   const startedAt = Date.now();
   const budget = options?.budgetMs ?? BUDGET_MS;
 
-  // 1. Finish any re-share sweep that is mid-flight, a slice at a time until
-  //    the sweep is done or this run's share of the budget is spent. Whatever
-  //    is left is still marked stale, so the next run continues from there.
-  if (config.sharingSweepStartedAt || options?.force?.sharing) {
-    const sharingDeadline = startedAt + budget * SHARING_BUDGET_FRACTION;
-    let processed = 0;
-    let remaining = 0;
-    let slices = 0;
-    while (Date.now() < sharingDeadline) {
-      const result = await runSharingSweep({ chunk: SWEEP_CHUNK });
-      processed += result.processed;
-      remaining = result.remaining;
-      slices += 1;
-      if (remaining === 0 || result.processed === 0) break;
-    }
-    report.sharing = { processed, remaining, slices };
+  /**
+   * 1. Drain the re-share queue, within this run's share of the budget.
+   *
+   * This is the backstop rather than the normal route: an access change queues
+   * the documents it affects and drains them behind its own response, so by the
+   * time the schedule comes round there is usually nothing here. What it
+   * catches is the queue whose browser closed mid-drain, or that ran out of
+   * time — anything still marked, which is exactly what the queue is for.
+   */
+  const queueBefore = await sharingProgress();
+  if (queueBefore.pending > 0 || options?.force?.sharing) {
+    if (options?.force?.sharing && queueBefore.pending === 0) await queueAllSharing();
+    const result = await drainSharingQueue({
+      chunk: SHARING_CHUNK,
+      deadline: startedAt + budget * SHARING_BUDGET_FRACTION,
+    });
+    report.sharing = {
+      processed: result.processed,
+      remaining: result.pending,
+      failures: result.failures,
+    };
   } else {
-    report.skipped.push("sharing (nothing stale)");
+    report.skipped.push("sharing (nothing queued)");
   }
 
   // 2. What Google says has changed. Cheap — a call or two — and it is what

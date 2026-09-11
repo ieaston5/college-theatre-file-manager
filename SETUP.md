@@ -170,6 +170,11 @@ would give them everything. Adding somebody backfills access to everything
 already filed for the show; removing them revokes it. Changing a role's
 categories re-shares every affected document across every show.
 
+None of that is waited for. Drive needs one call per person per file, so an
+access change saves at once and the documents it affects go into a queue that
+is pushed to Drive straight after the response — the page says how much is
+left, and it finishes whether or not anybody stays to watch.
+
 > They must also be in the OAuth **test users** list (2b) until the app is
 > verified — that is the one piece of Google friction for a company, and it is
 > a copy-paste of the same addresses into the Cloud console.
@@ -541,8 +546,10 @@ downgraded — it fails the build with *"Hobby accounts are limited to daily cro
 jobs"*. Vercel also runs the job at any point inside the chosen hour, to spread
 load, so 08:00 means "some time between 08:00 and 08:59".
 
-Once a day is fine for the digest, which goes out weekly anyway, and for a
-re-share sweep, which the admin page runs interactively while you watch.
+Once a day is fine for the digest, which goes out weekly anyway, and for the
+re-share queue, which is a backstop there: an access change queues the
+documents it affects and pushes them to Drive behind its own response, and the
+admin page finishes anything left while you watch.
 
 Canva is the one that would suffer, so it does not rely on the schedule at all:
 **opening a mirrored document checks Canva there and then**, and re-exports if
@@ -621,6 +628,14 @@ somebody is still editing.
    Files in a shared drive are owned by the drive, so they skip the ownership
    chase-list at the bottom of that screen entirely — there is nobody to ask,
    and Google has no transfer to perform.
+
+   Both halves of an import report what they are actually doing rather than
+   spinning: a scan counts the files as it finds them (there is no total to
+   count towards — Drive does not say how many are in a folder until it has
+   been walked), and filing goes a few files at a time behind a bar that reads
+   "24 of 60 filed". Filing really is slow, at one Drive sharing pass per file,
+   so it is worth knowing where it has got to — and a run that is interrupted
+   has filed everything it counted.
 
 ### 3f. Back it up
 

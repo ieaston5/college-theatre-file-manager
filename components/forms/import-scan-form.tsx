@@ -1,13 +1,23 @@
 "use client";
 
-import { useActionState, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { diagnoseFolderAction, startScanAction } from "@/app/actions/import";
+import { diagnoseFolderAction, scanProgressAction, startScanAction } from "@/app/actions/import";
 import { emptyState } from "@/app/actions/shared";
 import { Field, inputClass } from "../ui";
+import { ProgressBar } from "../progress";
+import { pluralize } from "@/lib/utils";
 import { FormBanner, SubmitButton, Toggle } from "./form-bits";
 
 export type ScannableSharedDrive = { id: string; name: string };
+
+/** An id for a scan the page can follow. Only ever needs to be unique. */
+function newScanId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID().replace(/-/g, "");
+  }
+  return `scan${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export function ImportScanForm({
   hubAccountEmail,
@@ -21,14 +31,89 @@ export function ImportScanForm({
   /** Shared drives the hub's account is a member of. */
   sharedDrives: ScannableSharedDrive[];
 }) {
-  const [state, formAction] = useActionState(startScanAction, emptyState);
+  const [state, formAction, scanning] = useActionState(startScanAction, emptyState);
   const [checkState, checkAction] = useActionState(diagnoseFolderAction, emptyState);
   const folderInput = useRef<HTMLInputElement>(null);
 
+  /**
+   * The id this scan will be filed under, generated here.
+   *
+   * A scan of a real club folder is a minute of Google calls, and the request
+   * cannot report on itself while it is still open. Choosing the id up front
+   * means the page has something to ask about: the walk writes each file down
+   * as it finds it, so a poll can say how many there are so far. There is no
+   * total to compare it against — Drive does not say how many files are in a
+   * folder until you have walked it — so this is a count and a live bar rather
+   * than a fake percentage.
+   */
+  const [scanId, setScanId] = useState("");
+  const [found, setFound] = useState(0);
+  const [folderName, setFolderName] = useState<string | null>(null);
+
+  // Generated after mount rather than during the render, so the server's HTML
+  // and the browser's first render agree on an empty field.
+  useEffect(() => setScanId(newScanId()), []);
+
+  // A fresh id once a scan has finished, ready for the next one.
+  const wasScanning = useRef(false);
+  useEffect(() => {
+    if (wasScanning.current && !scanning) setScanId(newScanId());
+    wasScanning.current = scanning;
+  }, [scanning]);
+
+  useEffect(() => {
+    if (!scanning || !scanId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    setFound(0);
+    setFolderName(null);
+
+    async function poll() {
+      try {
+        const progress = await scanProgressAction(scanId);
+        if (cancelled) return;
+        setFound(progress.found);
+        setFolderName(progress.folderName);
+      } catch {
+        // Nothing to say here: the scan's own answer is what matters, and this
+        // is only the commentary while it runs.
+      }
+      if (!cancelled) timer = setTimeout(poll, 1200);
+    }
+
+    void poll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [scanning, scanId]);
+
   return (
     <form action={formAction} className="space-y-4">
+      <input type="hidden" name="scanId" value={scanId} />
       <FormBanner state={state} />
       <FormBanner state={checkState} />
+
+      {scanning ? (
+        <div className="rounded-xl border border-ink-200 bg-white p-4">
+          <ProgressBar
+            value={found}
+            label={
+              found > 0
+                ? `Reading ${folderName ?? "Drive"} — ${found} ${pluralize(
+                    found,
+                    "file",
+                  )} so far`
+                : `Opening ${folderName ?? "the folder"} in Drive`
+            }
+          />
+          <p className="mt-2 text-xs leading-relaxed text-ink-500">
+            A folder does not say how many files are in it until it has been walked, so there is no
+            percentage to give — this is the count as they are found, up to the 400 a scan takes.
+            Nothing is filed by scanning.
+          </p>
+        </div>
+      ) : null}
 
       <Field
         label="Drive folder or shared drive"

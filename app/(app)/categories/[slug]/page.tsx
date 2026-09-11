@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
@@ -9,8 +10,13 @@ import {
   visibleCategoryIds,
 } from "@/lib/access";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
-import { DocumentFilters } from "@/components/document-filters";
-import { DocumentList, type DocumentListItem } from "@/components/document-items";
+import { DocumentFilters, Filtered, FilteringProvider } from "@/components/document-filters";
+import {
+  DocumentResults,
+  DocumentResultsSkeleton,
+  DocumentTotal,
+  filterKey,
+} from "@/components/document-results";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyState, PageHeader, buttonClass } from "@/components/ui";
 import { CATEGORY_SCOPE_META, DOC_TYPE_META, type CategoryScope } from "@/lib/constants";
@@ -35,14 +41,18 @@ export default async function CategoryPage({
   const allowed = visibleCategoryIds(viewer);
   if (allowed !== null && !allowed.includes(category.id)) notFound();
 
-  const [{ documents, total }, productions] = await Promise.all([
-    queryDocuments(viewer, query, { extra: { categoryId: category.id }, take: 100 }),
-    prisma.production.findMany({
-      where: productionFilterFor(viewer),
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
-      select: { name: true, slug: true },
-    }),
-  ]);
+  // Started, not awaited: the page frame and the filter bar go out while this
+  // is still in flight, and the list streams in behind its own boundary.
+  const documents = queryDocuments(viewer, query, {
+    extra: { categoryId: category.id },
+    take: 100,
+  });
+
+  const productions = await prisma.production.findMany({
+    where: productionFilterFor(viewer),
+    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    select: { name: true, slug: true },
+  });
 
   const scope = CATEGORY_SCOPE_META[category.scope as CategoryScope];
 
@@ -75,64 +85,77 @@ export default async function CategoryPage({
         }
       />
 
-      {/* Everything except the count describes how the category behaves when
-          you file into it — noise for somebody who is only reading. */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-ink-500">
-        <Badge tone="slate">
-          {total} {pluralize(total, "document")}
-        </Badge>
-        {viewer.isBoard ? (
-          <>
-            {category.defaultDocType ? (
-              <Badge tone="slate" icon={DOC_TYPE_META[category.defaultDocType as "DOC"]?.icon}>
-                Usually a {DOC_TYPE_META[category.defaultDocType as "DOC"]?.label}
+      <FilteringProvider>
+        {/* Everything except the count describes how the category behaves when
+            you file into it — noise for somebody who is only reading. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+          <Filtered>
+            <Suspense fallback={<Badge tone="slate">counting…</Badge>}>
+              <DocumentTotal query={documents} />
+            </Suspense>
+          </Filtered>
+          {viewer.isBoard ? (
+            <>
+              {category.defaultDocType ? (
+                <Badge tone="slate" icon={DOC_TYPE_META[category.defaultDocType as "DOC"]?.icon}>
+                  Usually a {DOC_TYPE_META[category.defaultDocType as "DOC"]?.label}
+                </Badge>
+              ) : null}
+              <Badge tone={category.defaultVisibility === "PRIVATE" ? "amber" : "indigo"}>
+                Defaults to {category.defaultVisibility === "PRIVATE" ? "private" : "board"}
               </Badge>
-            ) : null}
-            <Badge tone={category.defaultVisibility === "PRIVATE" ? "amber" : "indigo"}>
-              Defaults to {category.defaultVisibility === "PRIVATE" ? "private" : "board"}
-            </Badge>
-            <span>Drive folder: {category.folderName ?? category.name}</span>
-          </>
-        ) : null}
-      </div>
+              <span>Drive folder: {category.folderName ?? category.name}</span>
+            </>
+          ) : null}
+        </div>
 
-      <DocumentFilters
-        categories={[]}
-        productions={productions.map((production) => ({
-          value: production.slug,
-          label: production.name,
-        }))}
-        lockedCategory={category.slug}
-        boardVisibility={viewer.isBoard}
-      />
+        <DocumentFilters
+          categories={[]}
+          productions={productions.map((production) => ({
+            value: production.slug,
+            label: production.name,
+          }))}
+          lockedCategory={category.slug}
+          boardVisibility={viewer.isBoard}
+        />
 
-      <DocumentList
-        documents={documents as DocumentListItem[]}
-        showCategory={false}
-        showPinned={viewer.isBoard}
-        empty={
-          <EmptyState
-            icon={category.icon}
-            title={`Nothing filed under ${category.name} yet`}
-            action={
-              canCreateDocuments(viewer) ? (
-                <Link
-                  href={`/documents/new?category=${category.slug}`}
-                  className={buttonClass("primary")}
+        {/* The boundary is for the first render of the page, where it lets the
+            frame go out ahead of the query. A filter change afterwards keeps
+            the previous rows on screen — React's transition semantics, and the
+            right call, since nothing jumps — so Filtered fades them instead
+            while the new ones are on the way. */}
+        <Filtered>
+          <Suspense key={filterKey(query)} fallback={<DocumentResultsSkeleton />}>
+            <DocumentResults
+              query={documents}
+              showCategory={false}
+              showPinned={viewer.isBoard}
+              empty={
+                <EmptyState
+                  icon={category.icon}
+                  title={`Nothing filed under ${category.name} yet`}
+                  action={
+                    canCreateDocuments(viewer) ? (
+                      <Link
+                        href={`/documents/new?category=${category.slug}`}
+                        className={buttonClass("primary")}
+                      >
+                        <Icon name="plus" className="size-4" />
+                        Create the first one
+                      </Link>
+                    ) : null
+                  }
                 >
-                  <Icon name="plus" className="size-4" />
-                  Create the first one
-                </Link>
-              ) : null
-            }
-          >
-            {category.description ??
-              (viewer.isBoard
-                ? "Anything created in this category shows up here for the whole board."
-                : "Anything shared with you in this category shows up here.")}
-          </EmptyState>
-        }
-      />
+                  {category.description ??
+                    (viewer.isBoard
+                      ? "Anything created in this category shows up here for the whole board."
+                      : "Anything shared with you in this category shows up here.")}
+                </EmptyState>
+              }
+            />
+          </Suspense>
+        </Filtered>
+      </FilteringProvider>
     </div>
   );
 }

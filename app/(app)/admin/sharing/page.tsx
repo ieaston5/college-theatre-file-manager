@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
-import { sharingSweepStatus } from "@/lib/documents";
+import { sharingProgress } from "@/lib/sharing";
 import { SharingSweep } from "@/components/forms/sharing-sweep";
 import { Icon } from "@/components/icons";
 import { Banner, Card, SectionHeader, Stat, buttonClass } from "@/components/ui";
@@ -14,7 +14,7 @@ import { pluralize, relativeTime } from "@/lib/utils";
  */
 export default async function AdminSharingPage() {
   const config = await getConfig();
-  const status = await sharingSweepStatus();
+  const progress = await sharingProgress();
 
   const [
     boardCount,
@@ -90,7 +90,7 @@ export default async function AdminSharingPage() {
         >
           A company document belongs to one show&rsquo;s company, so these reach nobody outside the
           board. Attach each one to the production it is for, or file it for the board. Running the
-          sweep below takes the company&rsquo;s Drive access off them in the meantime.
+          queue below takes the company&rsquo;s Drive access off them in the meantime.
         </Banner>
       ) : null}
 
@@ -110,7 +110,7 @@ export default async function AdminSharingPage() {
           label="Never synced"
           value={staleCount}
           icon={staleCount > 0 ? "alert" : "check-circle"}
-          hint={staleCount > 0 ? "Run the sweep" : "All pushed to Drive"}
+          hint={staleCount > 0 ? "Re-share everything" : "All pushed to Drive"}
         />
       </div>
 
@@ -128,12 +128,13 @@ export default async function AdminSharingPage() {
               {boardCount} {pluralize(boardCount, "person", "people")} on the members list
             </Link>
             , so Drive access matches that list exactly — adding somebody gives them access, and
-            disabling somebody takes it away on the next sweep.
+            disabling somebody takes it away. Both go through the queue below, which starts itself
+            the moment the change is saved and needs nobody to sit and watch it.
           </p>
 
           <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
             The cost is {boardCount} individual {pluralize(boardCount, "permission")} per document
-            plus the creator, which is why re-sharing runs as a sweep rather than all at once.{" "}
+            plus the creator, which is why re-sharing runs as a queue rather than all at once.{" "}
             {config.groupEmail ? (
               <>
                 <span className="font-mono">{config.groupEmail}</span> no longer decides access
@@ -141,7 +142,7 @@ export default async function AdminSharingPage() {
             ) : (
               <>The board&rsquo;s Google Group no longer decides access</>
             )}{" "}
-            — it is kept for email, and so a sweep can take an old group permission back off
+            — it is kept for email, and so a pass can take an old group permission back off
             documents shared before this change.
           </div>
 
@@ -151,7 +152,8 @@ export default async function AdminSharingPage() {
                 {disabledMembers} {pluralize(disabledMembers, "person", "people")} disabled on the
                 hub.
               </span>{" "}
-              Run the sweep below to take their Drive access away everywhere.
+              Disabling somebody queues every shared document, so their Drive access should already
+              be gone. If the queue below is empty and you want to be certain, re-share everything.
             </div>
           ) : null}
         </div>
@@ -167,11 +169,13 @@ export default async function AdminSharingPage() {
               : "Nothing has been pushed to Drive yet."
           }
         />
-        <SharingSweep running={status.running} remaining={status.remaining} total={status.total} />
+        <SharingSweep initial={progress} />
         <p className="mt-3 text-xs leading-relaxed text-ink-500">
-          Runs in slices and can be stopped and picked up later, because per-member sharing means
-          one Google call per person per document. Normal changes — creating a document, changing
-          its visibility, adding somebody to a show — are applied immediately and do not need this.
+          Per-member sharing means one Google call per person per document, so re-sharing is a queue
+          rather than something anybody waits for: a change that moves access — adding somebody to a
+          show, moving them between roles, taking somebody off the board — saves at once and the
+          documents it affects are pushed to Drive in the background. This is where you can watch
+          that finish, or start it again from scratch.
         </p>
       </Card>
 

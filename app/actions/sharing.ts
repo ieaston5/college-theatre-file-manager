@@ -1,70 +1,70 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { assertRole } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { getConfig } from "@/lib/config";
-import { runSharingSweep, sharingSweepStatus } from "@/lib/documents";
-
-export type SweepProgress = {
-  processed: number;
-  remaining: number;
-  total: number;
-  failures: number;
-  started: boolean;
-};
+import {
+  SHARING_CHUNK,
+  drainSharingSlice,
+  kickSharingQueue,
+  queueAllSharing,
+  sharingProgress,
+  type SharingDrainResult,
+  type SharingProgress,
+} from "@/lib/sharing";
 
 /**
- * Do one slice of the re-share sweep. The client keeps calling this until
- * nothing is left, which keeps each request short enough to survive a
- * serverless timeout however many documents there are.
+ * The queue's front end.
+ *
+ * Whatever is open in the browser can watch the queue and help it along: the
+ * status is a pair of counts, and a slice is a bounded amount of Drive work
+ * that fits comfortably inside one request. Nothing here decides who may see
+ * what — that is the hub's data, already saved — so board members and not only
+ * admins may drive it, because they are the people who change a company's
+ * roles in the first place.
  */
-export async function sweepSharingAction(): Promise<SweepProgress> {
-  await assertRole("ADMIN");
-  const config = await getConfig();
 
-  if (!config.sharingSweepStartedAt) {
-    await prisma.orgConfig.update({
-      where: { id: "singleton" },
-      data: { sharingSweepStartedAt: new Date() },
-    });
-  }
+export type { SharingProgress, SharingDrainResult };
 
-  const result = await runSharingSweep({ chunk: 12 });
+/** How far the current pass has got. Cheap enough to poll while watching. */
+export async function sharingProgressAction(): Promise<SharingProgress> {
+  await assertRole("BOARD");
+  return sharingProgress();
+}
+
+/**
+ * Push one slice of the queue.
+ *
+ * The background drain that follows a save normally finishes the job; this is
+ * what makes a long queue visibly move for whoever is watching, and what
+ * finishes one whose background drain ran out of time.
+ */
+export async function drainSharingAction(): Promise<SharingDrainResult> {
+  const actor = await assertRole("BOARD");
+  const result = await drainSharingSlice({ chunk: SHARING_CHUNK });
   revalidatePath("/admin/sharing");
 
-  if (result.remaining === 0) {
-    const actor = await assertRole("ADMIN");
+  if (result.pending === 0 && result.processed > 0) {
     await recordAudit({
       actor,
       action: "sharing.sweep",
-      summary: `Finished re-sharing ${result.total} document${result.total === 1 ? "" : "s"} in Drive${
-        result.failures > 0 ? ` (${result.failures} failed)` : ""
+      summary: `Finished re-sharing ${result.done} document${result.done === 1 ? "" : "s"} in Drive${
+        result.failures > 0 ? ` (${result.failures} failed in the last slice)` : ""
       }`,
     });
   }
 
-  return { ...result, started: true };
+  return result;
 }
 
-export async function startSweepAction() {
+/**
+ * Queue every shared document and start on it. The admin button for "push
+ * everything again, whatever the hub thinks is already in step".
+ */
+export async function reshareEverythingAction(): Promise<SharingProgress> {
   await assertRole("ADMIN");
-  await prisma.orgConfig.update({
-    where: { id: "singleton" },
-    data: { sharingSweepStartedAt: new Date() },
-  });
+  await queueAllSharing();
+  kickSharingQueue();
   revalidatePath("/admin/sharing");
-}
-
-export async function sweepStatusAction(): Promise<SweepProgress> {
-  await assertRole("ADMIN");
-  const status = await sharingSweepStatus();
-  return {
-    processed: 0,
-    remaining: status.remaining,
-    total: status.total,
-    failures: 0,
-    started: status.running,
-  };
+  return sharingProgress();
 }

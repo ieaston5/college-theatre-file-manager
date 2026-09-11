@@ -89,9 +89,10 @@ export default async function AdminRolloverPage() {
           </li>
           <li className="flex gap-2">
             <span className="text-ink-400">·</span>
-            It does not take anybody's Drive access away on the spot. Board documents carry a
-            permission per person, so coming off the board marks them all for re-sharing — run the
-            sweep in Admin → Sharing to finish the job.
+            It does not take anybody's Drive access away in the same breath. Board documents carry
+            a permission per person, so coming off the board queues them all for re-sharing, and
+            the queue is pushed to Drive in the background — Admin → Sharing shows how far it has
+            got, and finishes it on the spot if you would rather watch.
           </li>
         </ul>
       </Card>

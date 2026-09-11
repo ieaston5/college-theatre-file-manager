@@ -11,9 +11,12 @@ import {
   MembershipRow,
   type RoleOption,
 } from "@/components/forms/company-forms";
+import { SharingCatchUp } from "@/components/sharing-catch-up";
+import { sharingProgress } from "@/lib/sharing";
 import { Icon } from "@/components/icons";
 import { Badge, Banner, Card, EmptyState, PageHeader, SectionHeader, buttonClass } from "@/components/ui";
 import { pluralize, relativeTime } from "@/lib/utils";
+import { atLeast } from "@/lib/constants";
 
 /**
  * Everyone working on one show, and what each of them can see. This is where a
@@ -37,7 +40,7 @@ export default async function ProductionCompanyPage({
 
   const canManage = canCreateDocuments(viewer);
 
-  const [members, roles, companyDocCount] = await Promise.all([
+  const [members, roles, companyDocCount, sharing] = await Promise.all([
     prisma.productionMember.findMany({
       where: { productionId: production.id, status: "ACTIVE" },
       include: {
@@ -62,6 +65,16 @@ export default async function ProductionCompanyPage({
       // document that names no production reaches no company at all.
       where: { visibility: "COMPANY", status: "ACTIVE", productionId: production.id },
     }),
+    /**
+     * Changing somebody's role saves at once and leaves Drive to catch up, so
+     * this page says how far that has got rather than leaving the person who
+     * pressed Save to guess.
+     *
+     * Only for the people who can actually change a membership — the banner
+     * helps the queue along as well as reporting on it, and a read-only hub
+     * member has no business pushing permissions to Drive.
+     */
+    atLeast(user.role, "BOARD") ? sharingProgress() : null,
   ]);
 
   const roleOptions: RoleOption[] = roles.map((role) => ({
@@ -117,6 +130,8 @@ export default async function ProductionCompanyPage({
           </Link>
         }
       />
+
+      {sharing ? <SharingCatchUp initial={sharing} /> : null}
 
       {canManage ? (
         <Card>
@@ -257,10 +272,11 @@ export default async function ProductionCompanyPage({
             </form>
           }
         >
-          Sharing is applied automatically when people are added, removed or moved between roles.
-          This button re-applies it to all {companyDocCount} company{" "}
-          {pluralize(companyDocCount, "document")} for this show, for when a Google call failed
-          earlier.
+          Adding somebody, removing them, or moving them between roles queues Drive's half of the
+          change and gets on with it in the background — nobody has to wait for it, and this page
+          shows the progress while it runs. This button queues all {companyDocCount} company{" "}
+          {pluralize(companyDocCount, "document")} for this show again, for when a Google call
+          failed earlier.
         </Banner>
       ) : null}
     </div>
