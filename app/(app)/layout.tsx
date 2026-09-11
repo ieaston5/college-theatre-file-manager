@@ -2,13 +2,12 @@ import Link from "next/link";
 import { requireUser, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
+import { canCreateDocuments, getViewerContext, productionFilterFor } from "@/lib/access";
 import {
-  canCreateDocuments,
-  categoryFilterFor,
-  getViewerContext,
-  productionFilterFor,
-  visibleDocumentsWhere,
-} from "@/lib/access";
+  documentCountsByCategory,
+  documentCountsByProduction,
+  visibleCategories,
+} from "@/lib/nav";
 import { env } from "@/lib/env";
 import { Sidebar } from "@/components/sidebar";
 import { SearchField } from "@/components/search-field";
@@ -17,15 +16,14 @@ import { buttonClass } from "@/components/ui";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const config = await getConfig();
   const viewer = await getViewerContext(user);
-  const where = visibleDocumentsWhere(viewer);
 
-  const [categories, productions, counts, productionCounts] = await Promise.all([
-    prisma.category.findMany({
-      where: categoryFilterFor(viewer),
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    }),
+  // One batch, so the sidebar costs a single round of database latency rather
+  // than one per list. Each of these is memoised for the request, so the page
+  // rendering inside this layout reuses the results instead of asking again.
+  const [config, categories, productions, countByCategory, countByProduction] = await Promise.all([
+    getConfig(),
+    visibleCategories(viewer),
     prisma.production.findMany({
       where: {
         ...productionFilterFor(viewer),
@@ -34,22 +32,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       take: 8,
     }),
-    prisma.document.groupBy({
-      by: ["categoryId"],
-      where: { ...where, status: "ACTIVE" },
-      _count: { _all: true },
-    }),
-    prisma.document.groupBy({
-      by: ["productionId"],
-      where: { ...where, status: "ACTIVE" },
-      _count: { _all: true },
-    }),
+    documentCountsByCategory(viewer),
+    documentCountsByProduction(viewer),
   ]);
-
-  const countByCategory = new Map(counts.map((row) => [row.categoryId, row._count._all]));
-  const countByProduction = new Map(
-    productionCounts.map((row) => [row.productionId ?? "", row._count._all]),
-  );
 
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
@@ -68,7 +53,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           slug: category.slug,
           icon: category.icon,
           color: category.color,
-          count: countByCategory.get(category.id) ?? 0,
+          count: countByCategory.get(category.id)?.count ?? 0,
         }))}
         productions={productions.map((production) => ({
           name: production.name,

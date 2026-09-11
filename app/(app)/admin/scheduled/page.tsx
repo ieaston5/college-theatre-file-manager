@@ -3,7 +3,7 @@ import { env } from "@/lib/env";
 import { getConfig } from "@/lib/config";
 import { canvaEnabled } from "@/lib/canva";
 import { digestIsDue } from "@/lib/cron";
-import { canvaMirrorIsStale } from "@/lib/documents";
+import { canvaMirrorIsStale } from "@/lib/canva/freshness";
 import { ScheduleForm } from "@/components/forms/schedule-forms";
 import { Badge, Banner, Card, SectionHeader, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";

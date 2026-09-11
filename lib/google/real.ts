@@ -1,5 +1,5 @@
-import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
+import { googleApis } from "./lazy";
 import { DOC_TYPE_META } from "../constants";
 import { formatDate } from "../utils";
 import { driveClient } from "./oauth";
@@ -107,11 +107,13 @@ export class GoogleDriveProvider implements DriveProvider {
   }
 
   private async drive() {
+    const google = await googleApis();
     return google.drive({ version: "v3", auth: await this.auth() });
   }
 
   async accountEmail(): Promise<string | null> {
     try {
+      const google = await googleApis();
       const auth = await this.auth();
       const info = await google.oauth2({ version: "v2", auth }).userinfo.get();
       return info.data.email?.toLowerCase() ?? null;
@@ -178,7 +180,7 @@ export class GoogleDriveProvider implements DriveProvider {
          * description and no appProperties. The Drive call afterwards is what
          * files it where the hub wants it and labels it like everything else.
          */
-        const forms = google.forms({ version: "v1", auth: await this.auth() });
+        const forms = (await googleApis()).forms({ version: "v1", auth: await this.auth() });
         const created = await forms.forms.create({
           requestBody: { info: { title: input.name, documentTitle: input.name } },
         });
@@ -247,6 +249,7 @@ export class GoogleDriveProvider implements DriveProvider {
   }
 
   private async fillPlaceholders(fileId: string, docType: string, header: DocHeader) {
+    const google = await googleApis();
     const auth = await this.auth();
     const values = this.placeholderValues(header);
 
@@ -282,6 +285,7 @@ export class GoogleDriveProvider implements DriveProvider {
 
   /** Prepend a small identity block to a blank Google Doc. */
   private async stampDocHeader(documentId: string, header: DocHeader) {
+    const google = await googleApis();
     const auth = await this.auth();
     const docs = google.docs({ version: "v1", auth });
 

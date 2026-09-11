@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { categoryFilterFor, getViewerContext, visibleDocumentsWhere } from "@/lib/access";
+import { getViewerContext, visibleDocumentsWhere } from "@/lib/access";
+import { documentCountsByCategory, visibleCategories } from "@/lib/nav";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyState, PageHeader, buttonClass } from "@/components/ui";
 import { CATEGORY_SCOPE_META, type CategoryScope } from "@/lib/constants";
@@ -12,17 +13,9 @@ export default async function CategoriesPage() {
   const viewer = await getViewerContext(user);
   const where = visibleDocumentsWhere(viewer);
 
-  const [categories, counts, latest] = await Promise.all([
-    prisma.category.findMany({
-      where: categoryFilterFor(viewer),
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    }),
-    prisma.document.groupBy({
-      by: ["categoryId"],
-      where: { ...where, status: "ACTIVE" },
-      _count: { _all: true },
-      _max: { updatedAt: true },
-    }),
+  const [categories, stats, latest] = await Promise.all([
+    visibleCategories(viewer),
+    documentCountsByCategory(viewer),
     prisma.document.findMany({
       where: { ...where, status: "ACTIVE" },
       orderBy: { updatedAt: "desc" },
@@ -31,9 +24,6 @@ export default async function CategoriesPage() {
     }),
   ]);
 
-  const stats = new Map(
-    counts.map((row) => [row.categoryId, { count: row._count._all, updated: row._max.updatedAt }]),
-  );
   const newest = new Map(latest.map((row) => [row.categoryId, row]));
 
   return (

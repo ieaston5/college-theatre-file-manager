@@ -1,12 +1,8 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import {
-  canCreateDocuments,
-  categoryFilterFor,
-  getViewerContext,
-  productionFilterFor,
-} from "@/lib/access";
+import { canCreateDocuments, getViewerContext, productionFilterFor } from "@/lib/access";
+import { visibleCategories } from "@/lib/nav";
 import { queryDocuments, type SearchParams } from "@/lib/queries";
 import { DocumentFilters } from "@/components/document-filters";
 import { DocumentList, type DocumentListItem } from "@/components/document-items";
@@ -27,11 +23,7 @@ export default async function DocumentsPage({
 
   const [{ documents, total }, categories, productions] = await Promise.all([
     queryDocuments(viewer, params, { take: 100 }),
-    prisma.category.findMany({
-      where: categoryFilterFor(viewer),
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      select: { name: true, slug: true },
-    }),
+    visibleCategories(viewer),
     prisma.production.findMany({
       where: productionFilterFor(viewer),
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],

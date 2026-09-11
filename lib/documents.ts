@@ -16,6 +16,9 @@ import {
   type Visibility,
 } from "./constants";
 import { canvaProvider, extractCanvaDesignId, getCanvaAccount } from "./canva";
+// Re-exported so the existing callers keep working; anything that only needs
+// the rule should import it straight from lib/canva/freshness.
+export { canvaMirrorIsStale } from "./canva/freshness";
 import { canCreateDocuments, type Viewer } from "./access";
 import { putBytesToDrive } from "./google/upload";
 import {
@@ -945,16 +948,6 @@ export async function checkCanvaFreshness(documentId: string) {
       canvaCheckedAt: new Date(),
     },
   });
-}
-
-/** True when the Canva original has been edited since the hub's copy was made. */
-export function canvaMirrorIsStale(document: {
-  canvaExportedAt: Date | null;
-  canvaDesignUpdatedAt: Date | null;
-}): boolean {
-  if (!document.canvaExportedAt || !document.canvaDesignUpdatedAt) return false;
-  // A minute of slack: Canva's updated_at ticks over as the export is taken.
-  return document.canvaDesignUpdatedAt.getTime() > document.canvaExportedAt.getTime() + 60_000;
 }
 
 // ---------------------------------------------------------------------------
