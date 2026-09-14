@@ -20,7 +20,7 @@ import { extractDriveFileId, pluralize, slugify } from "@/lib/utils";
 import { env } from "@/lib/env";
 import { ROLE_META } from "@/lib/constants";
 import { boardWelcome, sendEmail } from "@/lib/email";
-import { kickSharingQueue, queueAllSharing } from "@/lib/sharing";
+import { kickSharingQueue, queueAllSharing, queueCompanySharing } from "@/lib/sharing";
 import { bool, text, toActionState, type ActionState } from "./shared";
 
 function refreshEverywhere() {
@@ -95,6 +95,8 @@ export async function saveProductionAction(
           data: { ...common, slug: await uniqueSlug("production", data.name) },
         });
 
+    await queueCompanySharing({ productionId: production.id });
+    kickSharingQueue();
     const warnings: string[] = [];
     try {
       await ensureProductionFolder(production);
@@ -123,6 +125,8 @@ export async function setProductionStatusAction(form: FormData) {
   const id = String(form.get("id") ?? "");
   const status = String(form.get("status") ?? "ACTIVE");
   const production = await prisma.production.update({ where: { id }, data: { status } });
+  await queueCompanySharing({ productionId: id });
+    kickSharingQueue();
   await recordAudit({
     actor,
     action: "production.update",
@@ -180,6 +184,8 @@ export async function saveCategoryAction(
           data: { ...common, slug: await uniqueSlug("category", data.name) },
         });
 
+    await queueCompanySharing({});
+    kickSharingQueue();
     await recordAudit({
       actor,
       action: data.id ? "category.update" : "category.create",
@@ -205,6 +211,8 @@ export async function setCategoryArchivedAction(form: FormData) {
     );
   }
   const category = await prisma.category.update({ where: { id }, data: { archived } });
+  await queueCompanySharing({});
+    kickSharingQueue();
   await recordAudit({
     actor,
     action: "category.archive",
@@ -321,6 +329,8 @@ export async function saveMemberAction(_prev: ActionState, form: FormData): Prom
           role: data.role,
         },
       });
+      await queueAllSharing();
+      kickSharingQueue();
       await recordAudit({
         actor,
         action: "member.update",
@@ -346,6 +356,8 @@ export async function saveMemberAction(_prev: ActionState, form: FormData): Prom
         invitedById: actor.id,
       },
     });
+    await queueAllSharing();
+      kickSharingQueue();
     await recordAudit({
       actor,
       action: "member.invite",

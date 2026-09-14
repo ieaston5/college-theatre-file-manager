@@ -11,7 +11,7 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
 import { cn } from "@/lib/utils";
-import { CREATABLE_DOC_TYPES, DOC_TYPE_META, VISIBILITIES, VISIBILITY_META } from "@/lib/constants";
+import { DOC_TYPES, DOC_TYPE_META, VISIBILITIES, VISIBILITY_META } from "@/lib/constants";
 
 type Option = { value: string; label: string };
 
@@ -121,6 +121,7 @@ export function DocumentFilters({
 
   function update(key: string, next: string) {
     const params = new URLSearchParams(draft ?? search);
+    params.delete("page");
     if (!next || next === "all") params.delete(key);
     else params.set(key, next);
     go(params);
@@ -180,13 +181,11 @@ export function DocumentFilters({
         onChange={(event) => update("type", event.target.value)}
       >
         <option value="all">Any type</option>
-        {CREATABLE_DOC_TYPES.map((type) => (
+        {DOC_TYPES.map((type) => (
           <option key={type} value={type}>
             {DOC_TYPE_META[type].label}
           </option>
         ))}
-        <option value="LINK">External link</option>
-        <option value="OTHER">Other file</option>
       </select>
 
       {showVisibility ? (

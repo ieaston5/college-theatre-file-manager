@@ -16,6 +16,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { prisma } from "../lib/db";
+import { restoreProductionMember, restoreProductionRole } from "../lib/metadata-restore";
 
 const args = process.argv.slice(2);
 const file = args.find((arg) => !arg.startsWith("--"));
@@ -93,8 +94,8 @@ async function restoreTable(
 
 async function main() {
   const dump = JSON.parse(await readFile(file!, "utf8"));
-  if (dump.format !== 1) {
-    throw new Error(`This dump says format ${dump.format}; this script understands format 1.`);
+  if (dump.format !== 1 && dump.format !== 2) {
+    throw new Error(`This dump says format ${dump.format}; this script understands formats 1 and 2.`);
   }
 
   console.log(
@@ -119,13 +120,21 @@ async function main() {
   await restoreTable("people", dump.users, prisma.user);
   await restoreTable("categories", dump.categories, prisma.category);
   await restoreTable("productions", dump.productions, prisma.production);
-  await restoreTable("production roles", dump.productionRoles, prisma.productionRole);
-  await restoreTable("company members", dump.productionMembers, prisma.productionMember);
+  await restoreTable("production roles", dump.productionRoles, prisma.productionRole, restoreProductionRole);
+  await restoreTable("company members", dump.productionMembers, prisma.productionMember, restoreProductionMember);
+  if (dump.format === 1) {
+    console.log("  This older dump omitted role-category links. Existing links were preserved; review role access in Admin after restoring to an empty database.");
+  }
   await restoreTable("tags", dump.tags, prisma.tag);
   await restoreTable("templates", dump.templates, prisma.template);
 
   await restoreTable("documents", dump.documents, prisma.document, (row) => {
     const { tagIds, ...rest } = row as AnyRow & { tagIds?: string[] };
+    // A process lease from another database cannot survive a restore. Recheck
+    // the recovered audience before claiming its Drive permissions are current.
+    rest.sharingLockToken = null;
+    rest.sharingLockExpiresAt = null;
+    if (rest.googleFileId && rest.docType !== "LINK") rest.sharingDirtyAt = new Date();
     const links = (tagIds ?? []).map((id) => ({ id }));
     return {
       create: { ...rest, ...(links.length > 0 ? { tags: { connect: links } } : {}) },

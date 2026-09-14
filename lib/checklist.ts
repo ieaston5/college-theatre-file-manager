@@ -1,18 +1,7 @@
 import { prisma } from "./db";
+import { visibleDocumentsWhere, type Viewer } from "./access";
 
-/**
- * Per-show checklists.
- *
- * The production page already listed categories with nothing filed in them,
- * which is a useful nag but not a plan: plenty of what a show needs is not a
- * document at all ("get the tech rider signed", "book the load-in"). So a
- * production carries a real list, copied from an admin-editable template when
- * the show is created.
- *
- * Items tied to a category complete themselves as soon as something is filed
- * there, because asking somebody to file a document *and* tick a box is how
- * checklists stop being trusted.
- */
+/** A filing guide: counts shared files, never approvals or production tasks. */
 
 export type ChecklistEntry = {
   id: string;
@@ -31,9 +20,9 @@ export type ChecklistEntry = {
 /** Copy the template onto a production. Safe to call twice. */
 export async function seedChecklistFor(productionId: string): Promise<number> {
   const [existing, template] = await Promise.all([
-    prisma.checklistItem.count({ where: { productionId } }),
+    prisma.checklistItem.count({ where: { productionId, categoryId: { not: null } } }),
     prisma.checklistTemplateItem.findMany({
-      where: { archived: false },
+      where: { archived: false, categoryId: { not: null } },
       orderBy: { sortOrder: "asc" },
     }),
   ]);
@@ -44,16 +33,16 @@ export async function seedChecklistFor(productionId: string): Promise<number> {
       productionId,
       label: item.label,
       categoryId: item.categoryId,
-      hint: item.hint,
+      hint: null,
       sortOrder: item.sortOrder,
     })),
   });
   return template.length;
 }
 
-export async function checklistFor(productionId: string): Promise<ChecklistEntry[]> {
+export async function checklistFor(productionId: string, viewer: Viewer): Promise<ChecklistEntry[]> {
   const items = await prisma.checklistItem.findMany({
-    where: { productionId },
+    where: { productionId, categoryId: { not: null } },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     include: { category: { select: { id: true, name: true, slug: true } } },
   });
@@ -63,7 +52,9 @@ export async function checklistFor(productionId: string): Promise<ChecklistEntry
   const counts = await prisma.document.groupBy({
     by: ["categoryId"],
     where: {
+      AND: [visibleDocumentsWhere(viewer)],
       productionId,
+      visibility: { not: "PRIVATE" },
       status: "ACTIVE",
       categoryId: {
         in: items.map((item) => item.categoryId).filter((id): id is string => Boolean(id)),
@@ -77,12 +68,12 @@ export async function checklistFor(productionId: string): Promise<ChecklistEntry
     const documentCount = item.categoryId ? (byCategory.get(item.categoryId) ?? 0) : 0;
     return {
       id: item.id,
-      label: item.label,
-      hint: item.hint,
+      label: item.category?.name ?? item.label,
+      hint: null,
       categoryId: item.categoryId,
       categoryName: item.category?.name ?? null,
       categorySlug: item.category?.slug ?? null,
-      done: item.done,
+      done: false,
       autoDone: documentCount > 0,
       documentCount,
     };
@@ -97,22 +88,12 @@ export function checklistProgress(entries: ChecklistEntry[]) {
 
 /** The default template — theatre-shaped, and editable in Admin afterwards. */
 export const DEFAULT_CHECKLIST: Array<{ label: string; categorySlug?: string; hint?: string }> = [
-  { label: "Budget drafted and approved", categorySlug: "budgets-finance" },
-  { label: "Rehearsal calendar published", categorySlug: "schedules-calendars" },
-  { label: "Cast and crew contact sheet", categorySlug: "contact-sheets" },
-  { label: "Script or score available to the company", categorySlug: "scripts-scores" },
-  { label: "Design and tech paperwork", categorySlug: "design-tech" },
-  { label: "Costume and props lists", categorySlug: "costumes-props" },
-  { label: "Publicity plan", categorySlug: "marketing-publicity" },
-  { label: "Box office and front of house plan", categorySlug: "box-office-house" },
-  {
-    label: "Venue booked and space request signed off",
-    hint: "Not a document — tick it when the venue confirms.",
-  },
-  {
-    label: "Company added to the hub",
-    hint: "Cast and crew can reach the schedule and the script.",
-  },
-  { label: "Rights and licence confirmed", hint: "Before anything is printed or advertised." },
-  { label: "Post-show: returns done and budget closed out" },
+  { label: "Budget files", categorySlug: "budgets-finance" },
+  { label: "Rehearsal calendars", categorySlug: "schedules-calendars" },
+  { label: "Contact sheets", categorySlug: "contact-sheets" },
+  { label: "Scripts and scores", categorySlug: "scripts-scores" },
+  { label: "Design and tech files", categorySlug: "design-tech" },
+  { label: "Costume and props files", categorySlug: "costumes-props" },
+  { label: "Publicity files", categorySlug: "marketing-publicity" },
+  { label: "Box office files", categorySlug: "box-office-house" },
 ];

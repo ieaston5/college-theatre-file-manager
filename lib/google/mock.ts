@@ -386,12 +386,16 @@ export class MockDriveProvider implements DriveProvider {
   async listModifiedSince(
     since: Date,
     limit = 2000,
-  ): Promise<Array<{ id: string; modifiedTime: string | null }>> {
-    return Object.values(load().files)
+    pageToken?: string,
+  ) {
+    const offset = Number(pageToken ?? 0);
+    const matches = Object.values(load().files)
       .filter((file) => !file.trashed && new Date(file.modifiedTime) > since)
-      .sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime))
-      .slice(0, limit)
-      .map((file) => ({ id: file.id, modifiedTime: file.modifiedTime }));
+      .sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime) || a.id.localeCompare(b.id));
+    return {
+      files: matches.slice(offset, offset + limit).map((file) => ({ id: file.id, modifiedTime: file.modifiedTime })),
+      nextPageToken: offset + limit < matches.length ? String(offset + limit) : null,
+    };
   }
 
   async renameFile(fileId: string, name: string): Promise<void> {
@@ -443,7 +447,7 @@ export class MockDriveProvider implements DriveProvider {
     }
 
     const desired = new Map<string, "reader" | "writer">();
-    desired.set(plan.creatorEmail.toLowerCase(), "writer");
+    if (plan.creatorEmail) desired.set(plan.creatorEmail.toLowerCase(), plan.creatorLevel === "READER" ? "reader" : "writer");
     for (const extra of plan.extra ?? []) {
       const email = extra.email.toLowerCase();
       if (desired.get(email) === "writer") continue;
@@ -451,6 +455,8 @@ export class MockDriveProvider implements DriveProvider {
     }
 
     const additive = plan.strategy === "additive";
+    const managed = new Set(plan.managedPermissionIds ?? []);
+    const warnings: string[] = [];
     const retiredGroup = plan.retireGroupEmail?.toLowerCase() ?? null;
     const revoked: string[] = [];
     const kept: MockPermission[] = [];
@@ -458,10 +464,20 @@ export class MockDriveProvider implements DriveProvider {
     for (const perm of file.permissions) {
       if (perm.role === "owner") {
         kept.push(perm);
+        desired.delete(perm.email.toLowerCase());
         continue;
       }
       const email = perm.email.toLowerCase();
       const wanted = desired.get(email);
+      if (additive && !managed.has(perm.id) && email !== retiredGroup) {
+        kept.push(perm);
+        if (wanted) {
+          desired.delete(email);
+          if (wanted === "reader" && perm.role === "writer") warnings.push(`The file owner must remove ${email}'s existing edit access before read-only access can be enforced; that permission is managed outside the hub.`);
+          if (wanted === "writer" && perm.role !== "writer") warnings.push(`The file owner must give ${email} edit access; their existing permission is managed outside the hub.`);
+        }
+        continue;
+      }
       if (wanted) {
         kept.push({ ...perm, role: wanted });
         desired.delete(email);
@@ -469,11 +485,12 @@ export class MockDriveProvider implements DriveProvider {
       }
       // Nobody wants this permission any more. On a file the hub does not own
       // that means leaving it alone, except for the old board group.
-      if (additive && email !== retiredGroup) {
+      if (additive && email !== retiredGroup && !managed.has(perm.id)) {
         kept.push(perm);
         continue;
       }
       revoked.push(perm.email);
+      managed.delete(perm.id);
     }
 
     const granted: AppliedPermission[] = kept
@@ -486,6 +503,7 @@ export class MockDriveProvider implements DriveProvider {
 
     for (const [email, role] of desired) {
       const id = newId("perm");
+      managed.add(id);
       kept.push({ id, email, role, type: "user" });
       granted.push({ email, level: role === "writer" ? "WRITER" : "READER", permissionId: id });
     }
@@ -493,6 +511,6 @@ export class MockDriveProvider implements DriveProvider {
     file.permissions = kept;
     file.modifiedTime = new Date().toISOString();
     save(state);
-    return { granted, revoked, warnings: [] };
+    return { granted, revoked, warnings, managedPermissionIds: [...managed] };
   }
 }

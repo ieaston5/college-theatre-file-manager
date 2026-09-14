@@ -1,6 +1,6 @@
 # Setup
 
-Three stages. Stage 1 needs nothing but this repo. Stage 2 connects Google.
+Three stages. Stage 1 needs this repo, Node.js and Docker (or an existing PostgreSQL database). Stage 2 connects Google.
 Stage 3 is for when you want other people to reach it.
 
 ---
@@ -9,9 +9,12 @@ Stage 3 is for when you want other people to reach it.
 
 ```bash
 npm install
+docker compose up -d db
 npm run setup
 npm run dev
 ```
+
+`npm run setup` creates `.env` with local PostgreSQL defaults and random secrets when it is absent. It preserves an existing `.env`. For an existing database, set `DATABASE_URL` and `DIRECT_URL` before setup. Keep development data separate from production.
 
 Open <http://localhost:3000> and pick **Production Manager** from the local
 sign-in list. You are an admin.
@@ -24,7 +27,7 @@ What to click through:
 3. On the success screen, **Open Google Doc** — this opens `/mock-drive/…`, the
    simulated Drive, which lists exactly who the file was shared with.
 4. **Edit details** on that document and switch it to **Private**. Go back to
-   the mock Drive page: the board group's access is gone.
+   the mock Drive page: other board members' access is gone.
 5. Sign out, sign back in as **Rowan Ellis** (also an admin) and look at
    *Casting & auditions* — the private documents are not there. Private is
    private from admins too.
@@ -66,7 +69,7 @@ Every document the hub creates is owned by this account, which is what stops
 paperwork from vanishing when someone graduates.
 
 While you are there, note the board's Google Group address (the one you already
-use for mass email). Board documents get shared with that group.
+use for mass email). File access uses individual members, not this group.
 
 ### 2b. Create the OAuth client
 
@@ -127,9 +130,9 @@ Restart `npm run dev`.
    grants any of this — board members only sign in.
 4. The hub creates `Penn Players Hub / Productions` and
    `Penn Players Hub / Organisation-wide` in that account's Drive.
-5. Still in **Settings**, set the **Board Google Group** to your real group
-   address and save. If you had already created documents, press **Re-apply
-   sharing everywhere**.
+5. Still in **Settings**, optionally save the board group address for email
+   and legacy permission cleanup. If files previously used group sharing, run
+   the sweep in **Admin → Sharing** to replace it with individual permissions.
 
 ### 2e. Add the board
 
@@ -165,10 +168,10 @@ you beyond being told the address:
    company.
 
 In Drive, company documents are shared with each of those people individually
-as viewers — they are not in the board's Google Group, and putting them in it
-would give them everything. Adding somebody backfills access to everything
-already filed for the show; removing them revokes it. Changing a role's
-categories re-shares every affected document across every show.
+at the document's configured edit level. Adding somebody queues access to
+eligible files already filed for the show; removing them queues revocation.
+Changes are attempted inline, with the remainder and failures handled by the
+scheduled sharing sweep. Changing a role's categories also queues updates.
 
 None of that is waited for. Drive needs one call per person per file, so an
 access change saves at once and the documents it affects go into a queue that
@@ -244,9 +247,11 @@ If you skipped the Gmail API in 2b, the test will fail with a message saying so.
 ### 2j. Check it end to end
 
 - Create a Board document → it appears in the hub account's Drive in the right
-  folder, and a board member on the group can open it.
-- Create a Private document → nobody else sees it, in the hub or in Drive.
-- Flip it to Board → the group gets access. Flip it back → access is removed.
+  folder, and an enabled board member can open it.
+- Create a Private document → only its creator and named recipients see the hub entry.
+- Flip it to Board → board members get individual access. Flip it back → those
+  direct grants are removed. Failed updates appear as pending in Admin → Sharing.
+  The owning account and inherited folder access are outside this visibility rule.
 - Create a Company document in a company-visible category → each person on the
   show whose role covers it appears in "who can see this", and can open it.
 - **Add existing** with a link to one of your current spreadsheets. If the hub
@@ -257,12 +262,11 @@ If you skipped the Gmail API in 2b, the test will fail with a message saying so.
 - Mirror a Canva design, edit it in Canva, wait half an hour, and reload the
   document in the hub: opening it checks Canva, so the copy in Drive should be
   refreshed for you. Check the Drive file kept its link and gained a revision.
-- **Disable a member** in Admin → Members. They lose the hub immediately. Their
-  *Drive* access depends on which sharing mode you chose in Admin → Sharing: on
-  **per-member** sharing their permission is removed from every board document
-  too, which is what makes offboarding real; on **group** sharing the hub cannot
-  see inside a consumer Google Group, so you must also remove them from the
-  group by hand. The Sharing page says which you are on.
+- **Disable a member** in Admin → Members. They lose hub access immediately.
+  Run the queued sweep in Admin → Sharing to remove hub-managed Drive grants,
+  including grants on private and archived files. Failures stay pending for retry.
+  Registered files can retain owner-created or legacy grants; review these and
+  any inherited folder access directly with the owner in Drive.
 
 ---
 
@@ -272,21 +276,10 @@ Everything below is ready to run. Budget an hour, most of it waiting for a
 database to provision. Do it in this order — the Google redirect URIs need the
 real domain, which you do not have until the deploy exists.
 
-### 3a. Move to Postgres — do this *before* the first deploy
+### 3a. Configure hosted PostgreSQL before deployment
 
-SQLite is a file on one machine. On a serverless host it does not merely
-perform badly, it cannot work: the filesystem is read-only and thrown away
-between requests, so there is nowhere for `dev.db` to live. **Deploying the
-SQLite schema produces a site where every page is a 500** —
-
-```
-error: Environment variable not found: DATABASE_URL.
-  -->  schema.prisma:15
-14 |   provider = "sqlite"
-```
-
-— which is Prisma saying two things at once: the variable is missing, *and* the
-provider is still the local one. Both are fixed here.
+The app uses PostgreSQL in both local development and production. The local
+Docker database stays on your machine; production needs its own hosted database.
 
 **1. Get a database.** [Neon](https://neon.tech) and
 [Supabase](https://supabase.com) both have a free tier that is plenty for a
@@ -402,14 +395,7 @@ So: a dot in the username means a pooler, and the port tells you which. A
 **Neon** is simpler: its *pooled* string is `DATABASE_URL` and its *unpooled*
 string is `DIRECT_URL`.
 
-**2. Switch the project over.**
-
-```
-npm run use-db -- postgres
-```
-
-This rewrites the whole datasource block in `prisma/schema.prisma`, including
-the `directUrl` line, and prints the follow-up commands.
+**2. Keep the checked-in PostgreSQL schema and migrations.** No provider switch is needed.
 
 **3. Point your local `.env` at it.**
 
@@ -419,9 +405,7 @@ DATABASE_URL="postgres://…?sslmode=require&pgbouncer=true"   # pooled: the app
 DIRECT_URL="postgres://…?sslmode=require"                    # direct: migrations
 ```
 
-`DATABASE_PROVIDER=postgresql` also switches the hub's search from
-case-sensitive `LIKE` to Postgres' `ILIKE`, so searching "budget" starts
-matching "Budget" too.
+Search always uses case-insensitive PostgreSQL matching, so "budget" matches "Budget". `DATABASE_PROVIDER` is retained only for older configurations.
 
 **4. The schema.** `prisma/migrations/0_init/` is already in this repository —
 the whole Postgres schema, generated from `schema.prisma` by Prisma itself. The
@@ -452,19 +436,11 @@ confusing to debug: the deployment runs `prisma migrate deploy` during its
 build, so if the migration files are not in the repository the build succeeds
 and the site then reports missing tables.
 
-Everything you set up in stages 1–2 lives in the old SQLite file, which does
-not travel. If you had already done real work there, carry it over rather than
-redoing it:
-
-```
-npm run use-db -- sqlite && npm run backup     # dump from SQLite
-npm run use-db -- postgres                     # then, after step 4
-npm run restore -- backups/<file>.json
-```
-
-Local development from here on uses Postgres too. The simplest arrangement for
-a club is to point your local `.env` at the same database; if you would rather
-not develop against live data, Neon can branch it.
+To carry local metadata into a new hosted database, run `npm run backup`
+against the local database, then `npm run restore -- backups/<file>.json`
+against the hosted database. Backups contain metadata; simulated Drive files
+remain local and do not become real Google files. Continue developing against
+a separate local database.
 
 ### 3b. Deploy to Vercel
 
@@ -613,7 +589,7 @@ somebody is still editing.
 2. *Admin → Google connection*: connect the hub account (stage 2a). This is a
    separate connection from your sign-in and has to be done again per
    deployment.
-3. *Admin → Settings*: set the board group address and the naming template.
+3. *Admin → Settings*: set the naming template and optional board email group.
 4. *Admin → Members*: add the board. They get a welcome email if email is on.
 5. *Admin → Import*: point it at your existing Drive folder.
 
@@ -671,14 +647,9 @@ dashboard back.
 
 ## Troubleshooting
 
-**Every page on the deployed site is a 500, and the log says `Environment
-variable not found: DATABASE_URL` pointing at `provider = "sqlite"`.** The
-deployment is still on the local database. Both halves need fixing and stage 3a
-does both: run `npm run use-db -- postgres`, create and **commit** the
-migration, and set `DATABASE_URL` / `DIRECT_URL` / `DATABASE_PROVIDER` in the
-host's environment. Adding the variables alone is not enough — SQLite cannot
-run on a host with a read-only, disposable filesystem, whatever `DATABASE_URL`
-says.
+**The app reports a missing or unsupported database URL.** Set PostgreSQL
+`DATABASE_URL` and `DIRECT_URL`, and apply the checked-in migrations. This
+build no longer supports SQLite URLs; use the local Docker database for development.
 
 **Sign-in bounces to `/login` or `/no-access` and the log shows a Prisma
 error.** Sign-in is not broken; the database is unreachable. The OAuth round
@@ -751,9 +722,10 @@ again.
 files the hub account can open. Share the file with the hub account as an
 editor, or tick *just save the link*.
 
-**"Could not share with …"** Google refused the group share. Check the group
-address, and that the group accepts members/files from outside — Google Groups
-can be configured to reject it.
+**"Could not share with …"** Google refused an individual permission update.
+Check the recipient address and whether the connected hub account can manage
+that file's permissions. Admin → Sharing keeps failed updates pending for retry.
+Existing owner or folder permissions may need to be changed directly in Drive.
 
 **`Error 400: redirect_uri_mismatch`, and the URI in the message looks
 correct.** It probably *is* correct — the hub builds it from `APP_URL` — and the

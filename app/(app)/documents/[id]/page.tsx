@@ -23,6 +23,7 @@ import { ShareForm } from "@/components/forms/share-form";
 import { NewVersionUploader } from "@/components/forms/new-version-uploader";
 import { CanvaReexportForm } from "@/components/forms/canva-panel";
 import { CanvaWatch } from "@/components/canva-watch";
+import { CanvaOpenLink } from "@/components/canva-open-link";
 import { checkCanvaFreshnessAction, simulateCanvaEditAction } from "@/app/actions/canva";
 import { canvaMirrorIsStale } from "@/lib/documents";
 import { CANVA_FORMAT_META, type CanvaExportFormat } from "@/lib/constants";
@@ -120,24 +121,23 @@ export default async function DocumentPage({
   // The audience, the pending requests, the share picker and the history are
   // independent of one another; awaiting them in turn cost four rounds of
   // database latency on a page that needs one.
-  const [companyAudience, pendingRequests, shareableMembers, activity] = await Promise.all([
-    // No show, no company: a company document reaches the people on the
-    // production it is filed against, so one with no production has no
-    // audience beyond the board.
-    document.visibility === "COMPANY" && document.productionId
+  const [companyMemberships, pendingRequests, shareableMembers, activity] = await Promise.all([
+    // Show files use that company; organisation-wide files use eligible active roles.
+    document.visibility === "COMPANY"
       ? prisma.productionMember.findMany({
           where: {
             status: "ACTIVE",
             user: { status: { not: "DISABLED" } },
-            productionId: document.productionId,
-            role: { archived: false, categories: { some: { id: document.categoryId } } },
+            ...(document.productionId ? { productionId: document.productionId } : {}),
+            production: { status: { not: "ARCHIVED" } },
+            roles: { some: { role: { archived: false, categories: { some: { id: document.categoryId, archived: false, companyVisible: true } } } } },
           },
           include: {
             user: { select: { name: true, email: true } },
-            role: { select: { name: true } },
+            roles: { include: { role: { select: { name: true } } } },
             production: { select: { name: true, slug: true } },
           },
-          orderBy: [{ role: { sortOrder: "asc" } }, { createdAt: "asc" }],
+          orderBy: { createdAt: "asc" },
         })
       : [],
     canEdit
@@ -152,6 +152,10 @@ export default async function DocumentPage({
           where: {
             status: { not: "DISABLED" },
             id: { notIn: [document.creatorId, ...document.shares.map((share) => share.userId)] },
+            ...(document.productionId ? { OR: [
+              { role: { in: ["ADMIN", "BOARD", "MEMBER"] } },
+              { memberships: { some: { productionId: document.productionId, status: "ACTIVE", production: { status: { not: "ARCHIVED" } } } } },
+            ] } : {}),
           },
           orderBy: { name: "asc" },
           select: { id: true, name: true, email: true },
@@ -166,6 +170,17 @@ export default async function DocumentPage({
         })
       : Promise.resolve([]),
   ]);
+
+  // An organisation-wide file can reach someone through more than one show.
+  // List that person once and retain the names of their contributing roles.
+  const companyAudience = [...companyMemberships.reduce((people, membership) => {
+    const previous = people.get(membership.userId);
+    if (!previous) people.set(membership.userId, { ...membership, roles: [...membership.roles] });
+    else for (const assignment of membership.roles) {
+      if (!previous.roles.some(({ roleId }) => roleId === assignment.roleId)) previous.roles.push(assignment);
+    }
+    return people;
+  }, new Map<string, (typeof companyMemberships)[number]>()).values()];
 
   const folderPath = document.production
     ? `Productions / ${document.production.name} / ${document.category.folderName ?? document.category.name}`
@@ -245,9 +260,23 @@ export default async function DocumentPage({
         </div>
       </div>
 
+      {document.source === "REGISTERED" || document.source === "LINK" ? (
+        <Banner tone="amber" icon="info" title="Access outside the hub">
+          Visibility controls who sees this entry in the hub. Existing access granted by the file
+          owner, a shared folder, or a public link can remain. The hub removes grants it created;
+          ask the owner to review other permissions before treating the file itself as private.
+        </Banner>
+      ) : null}
+      {document.sharingError ? (
+        <Banner tone="amber" icon="alert" title="Drive access update pending">
+          Some permissions could not be updated. Drive access may still differ from the hub.
+          The hub will retry; an admin can check progress in Sharing.
+        </Banner>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2">
         {document.webViewLink ? (
-          <a
+          isCanva ? <CanvaOpenLink documentId={document.id} href={document.webViewLink} className={buttonClass("primary")} /> : <a
             href={document.webViewLink}
             target={env.driveMode === "mock" ? undefined : "_blank"}
             rel="noreferrer"
@@ -435,12 +464,9 @@ export default async function DocumentPage({
                   .
                 </p>
               ) : (
-                /* A company document belongs to one show's company. Without a
-                   show there is no company, so this one goes no further than
-                   the board however it is labelled. */
-                <p className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
-                  This is not attached to a show, so no company can see it — only the board can.
-                  Attach it to a production and that show&rsquo;s company gets it.
+                <p className="text-sm text-ink-600">
+                  This is an organisation-wide file. The board and active company members whose
+                  roles cover this category can see it.
                 </p>
               )}
 
@@ -458,7 +484,7 @@ export default async function DocumentPage({
                           <span className="text-ink-500"> · {member.title}</span>
                         ) : null}
                       </span>
-                      <Badge tone="green">{member.role?.name ?? "No role"}</Badge>
+                      <Badge tone="green">{member.roles.map(({ role }) => role.name).join(", ") || "No role"}</Badge>
                     </li>
                   ))}
                 </ul>
@@ -487,16 +513,15 @@ export default async function DocumentPage({
                 {document.editAccess === "CREATOR_ONLY"
                   ? " as viewers"
                   : " — the board as editors, read-only members as viewers"}
-                . Nobody outside that list has access: no public link, and no group standing in for
-                one.
+                . For hub-managed files, direct permissions follow this list. Existing access through an owner or shared folder may still apply.
               </div>
             </div>
           ) : (
             <div className="space-y-3 text-sm">
               <p className="text-ink-600">
                 {viewer.isBoard
-                  ? "This is private. It is hidden from every other member's dashboard and is not shared with the rest of the board in Drive."
-                  : "This is private. Only the people listed below can see it — not the rest of the company, and not the board."}
+                  ? "This entry is private in the hub. Only its creator and named recipients can see it here."
+                  : "This entry is private in the hub. Only its creator and named recipients can see it here."}
               </p>
               <ul className="space-y-2">
                 <li className="flex items-center gap-2 rounded-lg bg-ink-50 p-2 text-sm">

@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { assertRole, getCurrentUser } from "@/lib/auth";
 import { canEditDocument, canViewDocument, getViewerContext } from "@/lib/access";
-import { recordAudit } from "@/lib/audit";
+import { recordAudit, canvaRefreshSummary } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { canvaEnabled } from "@/lib/canva";
 import { CANVA_QUIET_MINUTES } from "@/lib/cron";
@@ -92,10 +92,11 @@ export async function refreshCanvaOnOpenAction(documentId: string): Promise<{
   checked: boolean;
   stale: boolean;
   exported: boolean;
+  error?: string;
 }> {
   const quiet = { checked: false, stale: false, exported: false };
   try {
-    if (!canvaEnabled()) return quiet;
+    if (!canvaEnabled()) return { ...quiet, error: "Canva checks are turned off; this copy may be out of date." };
 
     const user = await getCurrentUser();
     if (!user) return quiet;
@@ -112,10 +113,10 @@ export async function refreshCanvaOnOpenAction(documentId: string): Promise<{
     const checkedAgoMs = document.canvaCheckedAt
       ? Date.now() - document.canvaCheckedAt.getTime()
       : Number.POSITIVE_INFINITY;
-    if (checkedAgoMs < CHECK_TRUSTED_MINUTES * 60 * 1000) return quiet;
+    if (checkedAgoMs < CHECK_TRUSTED_MINUTES * 60 * 1000) return { ...quiet, stale: canvaMirrorIsStale(document) };
 
     const updated = await checkCanvaFreshness(documentId);
-    if (!updated) return quiet;
+    if (!updated) return { ...quiet, error: "The Canva original could not be checked." };
 
     const stale = canvaMirrorIsStale(updated);
     const settledFor = updated.canvaDesignUpdatedAt
@@ -139,14 +140,14 @@ export async function refreshCanvaOnOpenAction(documentId: string): Promise<{
       action: "canva.export",
       targetType: "Document",
       targetId: documentId,
-      summary: `The hub took a fresh copy of “${updated.title}” because the Canva design had changed`,
+      summary: canvaRefreshSummary(updated),
     });
 
     revalidatePath(`/documents/${documentId}`);
     return { checked: true, stale: true, exported: true };
   } catch (error) {
     console.error("[canva] could not refresh on open", error);
-    return quiet;
+    return { ...quiet, error: "Could not check Canva for changes." };
   }
 }
 

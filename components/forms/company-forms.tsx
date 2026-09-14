@@ -9,7 +9,7 @@ import {
 } from "@/app/actions/company";
 import { emptyState } from "@/app/actions/shared";
 import { parsePeopleInput } from "@/lib/utils";
-import { Avatar, Badge, Card, Field, buttonClass, inputClass, selectClass } from "../ui";
+import { Avatar, Badge, Card, Field, buttonClass, inputClass } from "../ui";
 import { Icon } from "../icons";
 import { FormBanner, SubmitButton, Toggle } from "./form-bits";
 
@@ -40,10 +40,10 @@ export function AddCompanyMembersForm({
 }) {
   const [state, formAction] = useActionState(addCompanyMembersAction, emptyState);
   const [text, setText] = useState("");
-  const [roleId, setRoleId] = useState(roles.find((role) => role.isDefault)?.id ?? roles[0]?.id ?? "");
+  const [roleIds, setRoleIds] = useState<string[]>([roles.find((role) => role.isDefault)?.id ?? roles[0]?.id].filter((id): id is string => Boolean(id)));
 
   const parsed = useMemo(() => parsePeopleInput(text), [text]);
-  const role = roles.find((item) => item.id === roleId);
+  const categoryNames = [...new Set(roles.filter((role) => roleIds.includes(role.id)).flatMap((role) => role.categoryNames))];
 
   if (roles.length === 0) {
     return (
@@ -105,35 +105,22 @@ export function AddCompanyMembersForm({
         </div>
       ) : null}
 
-      <Field
-        label="What are they doing on the show?"
-        htmlFor="roleId"
-        required
-        hint={
-          role
-            ? `${role.name} can see: ${role.categoryNames.join(", ") || "nothing yet — add categories to this role"}.`
-            : "The role decides which categories they can see."
-        }
-      >
-        <select
-          id="roleId"
-          name="roleId"
-          value={roleId}
-          onChange={(event) => setRoleId(event.target.value)}
-          className={selectClass}
-          required
-        >
-          {roles.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-      </Field>
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium">Roles on this show</legend>
+        <p className="text-xs text-ink-500">Select every role that applies. Existing members keep their other roles.</p>
+        <div className="flex flex-wrap gap-3">
+          {roles.map((role) => <label key={role.id} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="roleIds" value={role.id} checked={roleIds.includes(role.id)}
+              onChange={(event) => setRoleIds((current) => event.target.checked ? [...current, role.id] : current.filter((id) => id !== role.id))} />
+            {role.name}
+          </label>)}
+        </div>
+        <p className="text-xs text-ink-500">Selected roles can see: {categoryNames.join(", ") || "no categories selected"}.</p>
+      </fieldset>
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-ink-500">
-          Nothing is emailed. They sign in with Google and see only what this role allows.
+          New members receive an invitation. They sign in with Google and see the categories their roles allow.
         </p>
         <SubmitButton icon="user-plus" pendingLabel="Adding…">
           {parsed.length > 1 ? `Add ${parsed.length} people` : "Add to the company"}
@@ -159,7 +146,7 @@ export function MembershipRow({
   membership: {
     id: string;
     title: string | null;
-    roleId: string | null;
+    roleIds: string[];
     userName: string | null;
     userEmail: string;
     userStatus: string;
@@ -172,8 +159,10 @@ export function MembershipRow({
 }) {
   const [state, formAction] = useActionState(updateMembershipAction, emptyState);
   const [editing, setEditing] = useState(false);
+  const [selectedRoleIds, setSelectedRoleIds] = useState(membership.roleIds);
+  const [title, setTitle] = useState(membership.title ?? "");
 
-  const role = roles.find((item) => item.id === membership.roleId);
+  const assignedRoles = roles.filter((role) => membership.roleIds.includes(role.id));
 
   if (!editing || !canEdit) {
     return (
@@ -193,11 +182,15 @@ export function MembershipRow({
           </div>
           <div className="truncate text-xs text-ink-500">{membership.userEmail}</div>
         </div>
-        <Badge tone={role ? "green" : "rose"}>{role?.name ?? "No role"}</Badge>
+        <div className="flex flex-wrap gap-1">{assignedRoles.length ? assignedRoles.map((role) => <Badge key={role.id} tone="green">{role.name}</Badge>) : <Badge tone="rose">No active role</Badge>}</div>
         {canEdit ? (
           <button
             type="button"
-            onClick={() => setEditing(true)}
+            onClick={() => {
+              setSelectedRoleIds(membership.roleIds);
+              setTitle(membership.title ?? "");
+              setEditing(true);
+            }}
             className={buttonClass("ghost", "px-2")}
             aria-label={`Edit ${membership.userEmail}`}
           >
@@ -221,21 +214,22 @@ export function MembershipRow({
             </span>
             <input
               name="title"
-              defaultValue={membership.title ?? ""}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
               placeholder="Part or job, e.g. Ensemble"
               className={inputClass}
             />
           </div>
-          <label>
-            <span className="mb-1 block text-xs font-medium text-ink-600">Role</span>
-            <select name="roleId" defaultValue={membership.roleId ?? ""} className={selectClass}>
-              {roles.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <fieldset className="space-y-1">
+            <legend className="text-xs font-medium text-ink-600">Roles</legend>
+            {roles.map((role) => <label key={role.id} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="roleIds" value={role.id} checked={selectedRoleIds.includes(role.id)}
+                onChange={(event) => setSelectedRoleIds((selected) => event.target.checked
+                  ? [...selected, role.id] : selected.filter((id) => id !== role.id))} />
+              {role.name}
+            </label>)}
+            <p className="text-xs text-ink-500">Uncheck a role to remove its access.</p>
+          </fieldset>
           <SubmitButton variant="secondary" icon="check" pendingLabel="Saving…">
             Save
           </SubmitButton>

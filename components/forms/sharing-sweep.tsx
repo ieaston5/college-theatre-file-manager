@@ -51,7 +51,7 @@ export function SharingSweep({ initial }: { initial: SharingProgress }) {
       {finished && (done > 0 || queued) ? (
         <p className="flex items-center gap-1.5 text-xs text-emerald-700">
           <Icon name="check-circle" className="size-3.5" />
-          Everything in Drive matches the hub.
+          The access update finished. Files managed outside the hub can retain other permissions.
         </p>
       ) : null}
 

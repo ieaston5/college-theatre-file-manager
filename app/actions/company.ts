@@ -61,17 +61,18 @@ export async function addCompanyMembersAction(
     const actor = await assertRole("BOARD");
     const parsed = addCompanyMembersSchema.safeParse({
       productionId: text(form, "productionId") ?? "",
-      roleId: text(form, "roleId") ?? "",
+      roleIds: form.getAll("roleIds").map(String),
       people: text(form, "people") ?? "",
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
 
-    const [production, role] = await Promise.all([
+    const [production, roles] = await Promise.all([
       prisma.production.findUnique({ where: { id: parsed.data.productionId } }),
-      prisma.productionRole.findUnique({ where: { id: parsed.data.roleId } }),
+      prisma.productionRole.findMany({ where: { id: { in: parsed.data.roleIds }, archived: false } }),
     ]);
     if (!production) return { error: "That production no longer exists." };
-    if (!role) return { error: "That role no longer exists." };
+    if (roles.length !== parsed.data.roleIds.length) return { error: "One of those roles is archived or no longer exists." };
+    const roleNames = roles.map((role) => role.name).join(", ");
 
     const people = parsePeopleInput(parsed.data.people);
     if (people.length === 0) {
@@ -112,7 +113,8 @@ export async function addCompanyMembersAction(
         await prisma.productionMember.update({
           where: { id: membership.id },
           data: {
-            roleId: role.id,
+            roleId: null,
+            roles: { createMany: { data: roles.map((role) => ({ roleId: role.id })), skipDuplicates: true } },
             title: person.title ?? membership.title,
             status: "ACTIVE",
           },
@@ -123,7 +125,8 @@ export async function addCompanyMembersAction(
           data: {
             productionId: production.id,
             userId: user.id,
-            roleId: role.id,
+            roleId: null,
+            roles: { createMany: { data: roles.map((role) => ({ roleId: role.id })), skipDuplicates: true } },
             title: person.title ?? null,
             addedById: actor.id,
           },
@@ -136,7 +139,7 @@ export async function addCompanyMembersAction(
     // Tell the people who were newly added, once their access exists.
     const config = await getConfig();
     const roleCategories = await prisma.category.findMany({
-      where: { productionRoles: { some: { id: role.id } }, archived: false },
+      where: { productionRoles: { some: { id: { in: parsed.data.roleIds } } }, archived: false, companyVisible: true },
       orderBy: { sortOrder: "asc" },
       select: { name: true },
     });
@@ -149,7 +152,7 @@ export async function addCompanyMembersAction(
           appUrl: env.appUrl,
           name: person.name,
           productionName: production.name,
-          roleName: role.name,
+          roleName: roleNames,
           categoryNames: roleCategories.map((category) => category.name),
           addedBy: actor.name ?? actor.email,
         }),
@@ -169,7 +172,7 @@ export async function addCompanyMembersAction(
       targetId: production.id,
       summary: `Added ${added} and updated ${updated} company ${
         added + updated === 1 ? "member" : "members"
-      } on ${production.name} as ${role.name}`,
+      } on ${production.name} as ${roleNames}`,
       metadata: { emails: people.map((person) => person.email) },
     });
 
@@ -181,7 +184,7 @@ export async function addCompanyMembersAction(
           }. They can sign in with Google straight away.`
         : `${updated} ${updated === 1 ? "person was" : "people were"} already on ${
             production.name
-          } — their role has been updated.`;
+          } — the selected roles have been added.`;
     return { ok: catchUp ? `${summary} ${catchUp}` : summary };
   } catch (error) {
     return toActionState(error);
@@ -196,16 +199,25 @@ export async function updateMembershipAction(
     const actor = await assertRole("BOARD");
     const parsed = membershipSchema.safeParse({
       id: text(form, "id") ?? "",
-      roleId: text(form, "roleId") ?? "",
+      roleIds: form.getAll("roleIds").map(String),
       title: text(form, "title"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
 
+    const roles = await prisma.productionRole.findMany({
+      where: { id: { in: parsed.data.roleIds }, archived: false },
+    });
+    if (roles.length !== parsed.data.roleIds.length) return { error: "One of those roles is archived or no longer exists." };
     const membership = await prisma.productionMember.update({
       where: { id: parsed.data.id },
-      data: { roleId: parsed.data.roleId, title: parsed.data.title ?? null },
-      include: { user: true, production: true, role: true },
+      data: {
+        roleId: null, title: parsed.data.title ?? null,
+        roles: { deleteMany: { roleId: { notIn: parsed.data.roleIds } },
+          createMany: { data: parsed.data.roleIds.map((roleId) => ({ roleId })), skipDuplicates: true } },
+      },
+      include: { user: true, production: true, roles: { include: { role: true } } },
     });
+    const roleNames = membership.roles.map(({ role }) => role.name).join(", ") || "unassigned";
 
     /**
      * A different role means a different set of categories, so Drive access
@@ -225,7 +237,7 @@ export async function updateMembershipAction(
       action: "company.update",
       targetType: "Production",
       targetId: membership.productionId,
-      summary: `${membership.user.email} is now ${membership.role?.name ?? "unassigned"} on ${
+      summary: `${membership.user.email} is now ${roleNames} on ${
         membership.production.name
       }`,
     });
@@ -233,7 +245,7 @@ export async function updateMembershipAction(
     return {
       ok: catchUp
         ? `Saved — ${membership.user.name ?? membership.user.email} is now ${
-            membership.role?.name ?? "unassigned"
+            roleNames
           }. ${catchUp}`
         : "Updated.",
     };
@@ -387,7 +399,7 @@ export async function setRoleArchivedAction(form: FormData) {
   const archived = form.get("archived") === "true";
 
   if (archived) {
-    const inUse = await prisma.productionMember.count({ where: { roleId: id, status: "ACTIVE" } });
+    const inUse = await prisma.productionMember.count({ where: { roles: { some: { roleId: id } }, status: "ACTIVE" } });
     if (inUse > 0) {
       throw new Error(
         `${inUse} ${inUse === 1 ? "person is" : "people are"} still on that role. Move them first.`,

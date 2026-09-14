@@ -441,10 +441,10 @@ export class GoogleDriveProvider implements DriveProvider {
   async listModifiedSince(
     since: Date,
     limit = 2000,
-  ): Promise<Array<{ id: string; modifiedTime: string | null }>> {
+    pageToken?: string,
+  ) {
     const drive = await this.drive();
     const out: Array<{ id: string; modifiedTime: string | null }> = [];
-    let pageToken: string | undefined;
     try {
       do {
         const res = await drive.files.list({
@@ -454,7 +454,7 @@ export class GoogleDriveProvider implements DriveProvider {
           q: `modifiedTime > '${since.toISOString()}' and trashed = false`,
           fields: "nextPageToken, files(id,modifiedTime)",
           orderBy: "modifiedTime desc",
-          pageSize: 1000,
+          pageSize: Math.min(1000, limit - out.length),
           pageToken,
           supportsAllDrives: true,
           includeItemsFromAllDrives: true,
@@ -464,7 +464,7 @@ export class GoogleDriveProvider implements DriveProvider {
         }
         pageToken = res.data.nextPageToken ?? undefined;
       } while (pageToken && out.length < limit);
-      return out.slice(0, limit);
+      return { files: out, nextPageToken: pageToken ?? null };
     } catch (error) {
       wrap(error, "Asking Drive what has changed");
     }
@@ -551,7 +551,7 @@ export class GoogleDriveProvider implements DriveProvider {
     // Everybody the file should reach is named individually — there is no
     // group permission to grant any more.
     const desired = new Map<string, { level: "READER" | "WRITER" }>();
-    desired.set(plan.creatorEmail.toLowerCase(), { level: "WRITER" });
+    if (plan.creatorEmail) desired.set(plan.creatorEmail.toLowerCase(), { level: plan.creatorLevel ?? "WRITER" });
     for (const extra of plan.extra ?? []) {
       const email = extra.email.toLowerCase();
       if (desired.get(email)?.level === "WRITER") continue;
@@ -566,31 +566,60 @@ export class GoogleDriveProvider implements DriveProvider {
       permissionDetails?: Array<{ inherited?: boolean | null }> | null;
     }> = [];
     try {
-      const res = await drive.permissions.list({
-        fileId,
-        // permissionDetails.inherited: in a shared drive, membership of the
-        // drive grants access to everything in it, and those permissions
-        // cannot be changed or removed on the individual file. Asking Drive
-        // to do it returns an error per file; knowing in advance lets the hub
-        // say what is actually true instead.
-        fields: "permissions(id,type,role,emailAddress,deleted,permissionDetails(inherited))",
-        pageSize: 100,
-        supportsAllDrives: true,
-      });
-      existing = res.data.permissions ?? [];
+      let pageToken: string | undefined;
+      do {
+        const res = await drive.permissions.list({
+          fileId,
+          // permissionDetails.inherited: in a shared drive, membership of the
+          // drive grants access to everything in it, and those permissions
+          // cannot be changed or removed on the individual file. Asking Drive
+          // to do it returns an error per file; knowing in advance lets the hub
+          // say what is actually true instead.
+          fields: "nextPageToken,permissions(id,type,role,emailAddress,deleted,permissionDetails(inherited))",
+          pageSize: 100,
+          pageToken,
+          supportsAllDrives: true,
+        });
+        existing.push(...(res.data.permissions ?? []));
+        pageToken = res.data.nextPageToken ?? undefined;
+      } while (pageToken);
     } catch (error) {
       wrap(error, "Reading the file's sharing settings");
     }
 
     const additive = plan.strategy === "additive";
+    const managed = new Set(plan.managedPermissionIds ?? []);
     const retiredGroup = plan.retireGroupEmail?.toLowerCase() ?? null;
 
     // 1. Reconcile what is already on the file.
     for (const perm of existing) {
-      if (!perm.id || perm.role === "owner") continue;
+      if (!perm.id) continue;
+      if (perm.role === "owner") {
+        // Ownership already supplies access and cannot be narrowed by a file share.
+        if (perm.emailAddress) desired.delete(perm.emailAddress.toLowerCase());
+        continue;
+      }
       const email = perm.emailAddress?.toLowerCase();
       const isLinkShare = perm.type === "anyone" || perm.type === "domain";
       const wanted = email ? desired.get(email) : undefined;
+      const canEdit = perm.role === "writer" || perm.role === "organizer" || perm.role === "fileOrganizer";
+      if (additive && !managed.has(perm.id) && email !== retiredGroup) {
+        // External collaborators belong to the owner. Do not narrow their
+        // access or claim their existing permission as one the hub controls.
+        if (wanted && email) {
+          if (canEdit || wanted.level === "READER") {
+            desired.delete(email);
+            granted.push({ email, level: canEdit ? "WRITER" : "READER", permissionId: perm.id });
+            if (canEdit && wanted.level === "READER") {
+              warnings.push(`The file owner must remove ${email}'s existing edit access before read-only access can be enforced; that permission is managed outside the hub.`);
+            }
+          } else {
+            desired.delete(email);
+            warnings.push(`The file owner must give ${email} edit access; their existing permission is managed outside the hub.`);
+          }
+        }
+        continue;
+      }
       const roleMatches =
         wanted && perm.role === (wanted.level === "WRITER" ? "writer" : "reader");
       // Inherited from a shared drive or an ancestor folder: not this file's
@@ -598,11 +627,11 @@ export class GoogleDriveProvider implements DriveProvider {
       const inherited = perm.permissionDetails?.some((detail) => detail.inherited) ?? false;
 
       if (inherited) {
-        if (wanted && email && roleMatches) {
-          // The drive already grants exactly what the plan asks for.
+        if (wanted && email && (roleMatches || (wanted.level === "WRITER" && canEdit))) {
+          // The inherited permission already supplies the requested access.
           desired.delete(email);
           granted.push({ email, level: wanted.level, permissionId: perm.id });
-        } else if (wanted && email && wanted.level === "READER" && perm.role === "writer") {
+        } else if (wanted && email && wanted.level === "READER" && canEdit) {
           // Cannot be narrowed here: the drive gave them edit access. Left in
           // place, and left out of `desired` so no pointless grant is made.
           desired.delete(email);
@@ -610,12 +639,8 @@ export class GoogleDriveProvider implements DriveProvider {
           warnings.push(
             `${email} can already edit this through the shared drive or folder it lives in, so read-only access could not be applied to them.`,
           );
-        } else if (!wanted && (!additive || (email && email === retiredGroup))) {
-          // Additive sharing only ever pulls the retired board group back, so
-          // that is the only inherited grant it needs to report as
-          // un-revokable. Worth saying: a group inherited from a shared drive
-          // is access no member list can take away, which is the whole reason
-          // the group is being retired.
+        } else if (!wanted && (!additive || managed.has(perm.id) || (email && email === retiredGroup))) {
+          // Inherited access cannot be revoked on this individual file.
           warnings.push(
             `${email ?? perm.type ?? "Someone"} can reach this through the shared drive or folder it lives in, ` +
               "which cannot be undone on the file itself — change who has access there, or move the file out of it.",
@@ -650,11 +675,10 @@ export class GoogleDriveProvider implements DriveProvider {
         continue;
       }
 
-      // On a file the hub does not own, only ever pull the old board group
-      // back — its members are named on the file individually now, and leaving
-      // it in place would be access no member list can take away.
+      // On externally owned files, revoke only our grants and the retired group.
       const shouldRevoke = additive
         ? Boolean(email && retiredGroup && email === retiredGroup)
+          || managed.has(perm.id)
         : isLinkShare || !wanted || !roleMatches;
       if (!shouldRevoke) continue;
 
@@ -665,6 +689,7 @@ export class GoogleDriveProvider implements DriveProvider {
           supportsAllDrives: true,
         });
         revoked.push(email ?? perm.type ?? "unknown");
+        managed.delete(perm.id);
       } catch (error) {
         warnings.push(
           `Could not revoke access for ${email ?? perm.type}: ${(error as Error).message}`,
@@ -694,6 +719,7 @@ export class GoogleDriveProvider implements DriveProvider {
               fields: "id",
             });
             granted.push({ email, level: spec.level, permissionId: res.data.id ?? null });
+            if (res.data.id) managed.add(res.data.id);
           } catch (error) {
             warnings.push(`Could not share with ${email}: ${(error as Error).message}`);
           }
@@ -701,6 +727,6 @@ export class GoogleDriveProvider implements DriveProvider {
       );
     }
 
-    return { granted, revoked, warnings };
+    return { granted, revoked, warnings, managedPermissionIds: [...managed] };
   }
 }

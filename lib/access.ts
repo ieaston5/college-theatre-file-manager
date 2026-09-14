@@ -13,12 +13,9 @@ import { atLeast, isBoardRole } from "./constants";
  *   COMPANY  the board, plus people working on that production whose
  *            production role covers the document's category. An actor sees the
  *            script and the schedule; they do not see the light plot unless
- *            their role says so, and they never see a category that has not
+ *            one of their roles says so. The same category access applies to
+ *            organisation-wide files without a production. They never see a category that has not
  *            been marked as company-visible at all.
- *            A company document is always one show's document: somebody is in
- *            the company of a production, not of the hub, so a company
- *            document filed against no show — or against a show they are not
- *            on — is board-only as far as they are concerned.
  *   BOARD    everybody with board access to the hub. Company members never see
  *            these, whatever production they are on and whoever filed them —
  *            somebody who has come off the board keeps their private
@@ -33,11 +30,11 @@ export type ViewerMembership = {
   productionId: string;
   productionSlug: string;
   productionName: string;
-  roleId: string | null;
-  roleName: string | null;
+  roles: Array<{ id: string; name: string }>;
   title: string | null;
   categoryIds: string[];
-  /** Whether this role may file documents on the hub. */
+  creatableCategoryIds: string[];
+  /** Whether an assigned role permits filing in at least one category. */
   canCreate: boolean;
 };
 
@@ -58,7 +55,7 @@ type DocumentLike = {
   creatorId: string;
   categoryId: string;
   productionId?: string | null;
-  shares?: Array<{ userId: string }>;
+  shares?: Array<{ userId: string; accessLevel?: string }>;
 };
 
 /**
@@ -85,29 +82,27 @@ const loadViewerContext = cache(async function loadViewerContext(
     },
     include: {
       production: { select: { id: true, slug: true, name: true } },
-      role: {
+      roles: { include: { role: {
         select: {
-          id: true,
-          name: true,
-          archived: true,
-          canCreate: true,
+          id: true, name: true, archived: true, canCreate: true,
           categories: { where: { archived: false, companyVisible: true }, select: { id: true } },
         },
-      },
+      } } },
     },
   });
 
-  const memberships: ViewerMembership[] = rows.map((row) => ({
-    productionId: row.production.id,
-    productionSlug: row.production.slug,
-    productionName: row.production.name,
-    roleId: row.role?.id ?? null,
-    roleName: row.role?.name ?? null,
-    title: row.title,
-    // An archived role grants nothing — the safe direction.
-    categoryIds: row.role && !row.role.archived ? row.role.categories.map((c) => c.id) : [],
-    canCreate: Boolean(row.role && !row.role.archived && row.role.canCreate),
-  }));
+  const memberships: ViewerMembership[] = rows.map((row) => {
+    const roles = row.roles.map((assignment) => assignment.role).filter((role) => !role.archived);
+    const categoryIds = [...new Set(roles.flatMap((role) => role.categories.map((category) => category.id)))];
+    const creatableCategoryIds = [...new Set(roles.filter((role) => role.canCreate)
+      .flatMap((role) => role.categories.map((category) => category.id)))];
+    return {
+      productionId: row.production.id, productionSlug: row.production.slug,
+      productionName: row.production.name, title: row.title,
+      roles: roles.map(({ id, name }) => ({ id, name })),
+      categoryIds, creatableCategoryIds, canCreate: creatableCategoryIds.length > 0,
+    };
+  });
 
   const companyCategoryIds = [
     ...new Set(memberships.flatMap((membership) => membership.categoryIds)),
@@ -133,7 +128,7 @@ export function getViewerContext(user: Pick<User, "id" | "email" | "role">): Pro
  * a company member can only if one of their production roles says so.
  */
 export function canCreateDocuments(viewer: Viewer): boolean {
-  if (viewer.isBoard) return true;
+  if (viewer.isBoard) return atLeast(viewer.role, "BOARD");
   return viewer.memberships.some((membership) => membership.canCreate);
 }
 
@@ -152,7 +147,7 @@ export function creatableCategoryIds(viewer: Viewer): string[] | null {
     ...new Set(
       viewer.memberships
         .filter((membership) => membership.canCreate)
-        .flatMap((membership) => membership.categoryIds),
+        .flatMap((membership) => membership.creatableCategoryIds),
     ),
   ];
 }
@@ -165,9 +160,9 @@ export function creatableCategoryIds(viewer: Viewer): string[] | null {
 export function allowedVisibilitiesFor(
   viewer: Viewer,
   category: { companyVisible: boolean },
-  options: { hasProduction: boolean },
+  _options?: { hasProduction: boolean },
 ): string[] {
-  const byCategory = allowedVisibilities(category, options);
+  const byCategory = allowedVisibilities(category);
   if (viewer.isBoard) return byCategory;
   return byCategory.filter((visibility) => visibility !== "BOARD");
 }
@@ -190,10 +185,6 @@ export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput
   }
 
   // Company members: per production, only the categories their role covers.
-  // Nothing else — a company document that is not filed against one of their
-  // shows is not theirs, including one filed against no show at all. Somebody
-  // is in the company of a production, so that is the only thing that can
-  // carry company access to them.
   for (const membership of viewer.memberships) {
     if (membership.categoryIds.length === 0) continue;
     clauses.push({
@@ -202,11 +193,29 @@ export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput
       categoryId: { in: membership.categoryIds },
     });
   }
+  // Organisation-wide company documents (handbooks, onboarding) are not tied
+  // to a show, so any current membership is enough to reach them.
+  if (viewer.companyCategoryIds.length > 0) {
+    clauses.push({
+      visibility: "COMPANY",
+      productionId: null,
+      categoryId: { in: viewer.companyCategoryIds },
+    });
+  }
 
-  return { OR: clauses };
+  return { AND: [
+    { OR: [{ productionId: null }, { productionId: { in: viewer.memberships.map((m) => m.productionId) } }] },
+    { OR: clauses },
+  ] };
+}
+
+/** A named share or old creator record never bypasses a company's show boundary. */
+export function canAccessProduction(viewer: Viewer, productionId?: string | null): boolean {
+  return viewer.isBoard || !productionId || viewer.memberships.some((m) => m.productionId === productionId);
 }
 
 export function canViewDocument(viewer: Viewer, doc: DocumentLike): boolean {
+  if (!canAccessProduction(viewer, doc.productionId)) return false;
   if (doc.shares?.some((share) => share.userId === viewer.id)) return true;
 
   // Checked before ownership: a board document belongs to the board, so
@@ -217,11 +226,13 @@ export function canViewDocument(viewer: Viewer, doc: DocumentLike): boolean {
 
   if (doc.visibility === "COMPANY") {
     if (viewer.isBoard) return true;
-    // No show, no company: a company document reaches the people on the
-    // production it is filed against, and nobody else.
-    if (!doc.productionId) return false;
-    const membership = viewer.memberships.find((item) => item.productionId === doc.productionId);
-    return Boolean(membership?.categoryIds.includes(doc.categoryId));
+    if (doc.productionId) {
+      const membership = viewer.memberships.find(
+        (item) => item.productionId === doc.productionId,
+      );
+      return Boolean(membership?.categoryIds.includes(doc.categoryId));
+    }
+    return viewer.companyCategoryIds.includes(doc.categoryId);
   }
 
   // PRIVATE, and neither creator nor an explicit share.
@@ -231,6 +242,7 @@ export function canViewDocument(viewer: Viewer, doc: DocumentLike): boolean {
 /** Creators own their documents; admins may curate anything the board can see. */
 export function canEditDocument(viewer: Viewer, doc: DocumentLike): boolean {
   if (!canViewDocument(viewer, doc)) return false;
+  if (viewer.role === "MEMBER") return false;
   if (doc.creatorId === viewer.id) return true;
   return doc.visibility !== "PRIVATE" && viewer.isAdmin;
 }
@@ -269,16 +281,10 @@ export function productionFilterFor(viewer: Viewer): Prisma.ProductionWhereInput
  * Which visibility levels the creator may choose for a document in this
  * category. "Company" is only offered where the board has said the category is
  * safe for a company to see — that is the guard that keeps budgets and casting
- * out of the cast's view even by accident — and only for a document attached
- * to a show, because the show is what names the company it reaches.
+ * out of the cast's view even by accident.
  */
-export function allowedVisibilities(
-  category: { companyVisible: boolean },
-  options: { hasProduction: boolean },
-): string[] {
-  return category.companyVisible && options.hasProduction
-    ? ["PRIVATE", "COMPANY", "BOARD"]
-    : ["PRIVATE", "BOARD"];
+export function allowedVisibilities(category: { companyVisible: boolean }, _options?: { hasProduction: boolean }): string[] {
+  return category.companyVisible ? ["PRIVATE", "COMPANY", "BOARD"] : ["PRIVATE", "BOARD"];
 }
 
 /**
@@ -290,10 +296,10 @@ export function canEditFileContents(
   doc: DocumentLike & { editAccess: string },
 ): boolean {
   if (!canViewDocument(viewer, doc)) return false;
+  if (viewer.role === "MEMBER") return false;
   if (doc.creatorId === viewer.id) return true;
   if (doc.shares?.some((share) => share.userId === viewer.id)) {
-    // A named share carries its own level, checked where it is applied.
-    return true;
+    return doc.shares.some((share) => share.userId === viewer.id && share.accessLevel === "WRITER");
   }
   if (doc.editAccess === "CREATOR_ONLY") return false;
   if (doc.editAccess === "BOARD") return viewer.isBoard && viewer.role !== "MEMBER";

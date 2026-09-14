@@ -47,7 +47,8 @@ export default async function AdminRolesPage({
         </Link>{" "}
         ({boardOnlyCount} {pluralize(boardOnlyCount, "category", "categories")} are board-only right
         now, including budgets and casting). Within the open ones, a role decides what that
-        particular job needs. Then each document still has its own “who can see it” — so a role
+        role can see. A person's assigned roles combine their category access. Each document
+        still has its own “who can see it” — so a role
         grants access to a shelf, not to everything on it.
       </Banner>
 

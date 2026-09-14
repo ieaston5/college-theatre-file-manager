@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CanvaOpenLink } from "./canva-open-link";
 import type { Category, Document, Production, Tag, User } from "@prisma/client";
 import { DOC_TYPE_META, VISIBILITY_META, type DocType, type Visibility } from "@/lib/constants";
 import { cn, relativeTime } from "@/lib/utils";
@@ -119,7 +120,8 @@ export function DocumentRow({
       </div>
 
       {document.webViewLink ? (
-        <a
+        document.canvaDesignId ? <CanvaOpenLink documentId={document.id} href={document.webViewLink}
+          compact className="shrink-0 rounded-lg p-2 text-ink-500 hover:text-brand-600" /> : <a
           href={document.webViewLink}
           target="_blank"
           rel="noreferrer"

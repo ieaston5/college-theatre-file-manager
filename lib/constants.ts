@@ -237,7 +237,7 @@ export const VISIBILITY_META: Record<
   },
   BOARD: {
     label: "Board",
-    blurb: "Listed on the dashboard for everyone with hub access and shared with the board's Google Group in Drive. Not visible to anyone outside the group.",
+    blurb: "Visible to active board-side accounts (Admin, Board and Member). Each is granted Drive access by name; company-only accounts are excluded.",
     icon: "users",
     tone: "indigo",
   },

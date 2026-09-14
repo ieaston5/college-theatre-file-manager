@@ -83,8 +83,11 @@ export type CreateDocumentInput = {
 
 export type SharingPlan = {
   visibility: Visibility;
-  /** Always kept as an editor so the creator can find the file in Drive. */
-  creatorEmail: string;
+  /** Present only while the creator is entitled to access this file. */
+  creatorEmail: string | null;
+  creatorLevel?: AccessLevel;
+  /** Direct permissions created by the hub, including on externally owned files. */
+  managedPermissionIds?: string[];
   /**
    * The board's old Google Group, which is never granted anything any more.
    * It is named here so a pass over a file can take the permission back off
@@ -99,9 +102,8 @@ export type SharingPlan = {
    * "reconcile" makes the file's permissions exactly match the plan — correct
    * for files the hub created and owns.
    *
-   * "additive" grants what is missing and only ever revokes the old board
-   * group. Used for pre-existing files owned by a member, where blindly
-   * revoking unknown permissions would cut off the file's real collaborators.
+   * "additive" grants what is missing and revokes tracked hub grants plus the
+   * retired board group. Other permissions remain under the file owner's control.
    */
   strategy?: "reconcile" | "additive";
 };
@@ -109,9 +111,17 @@ export type SharingPlan = {
 export type AppliedPermission = { email: string; level: AccessLevel; permissionId: string | null };
 
 export type SharingResult = {
+  /** Another worker or newer audience still needs to finish this update. */
+  deferred?: boolean;
   granted: AppliedPermission[];
   revoked: string[];
   warnings: string[];
+  managedPermissionIds?: string[];
+};
+
+export type ModifiedFilesPage = {
+  files: Array<{ id: string; modifiedTime: string | null }>;
+  nextPageToken: string | null;
 };
 
 export interface DriveProvider {
@@ -151,7 +161,7 @@ export interface DriveProvider {
    * Asking per document would be one API call per row on every list; asking
    * Drive for the delta is one call for the lot, however big the hub is.
    */
-  listModifiedSince(since: Date, limit?: number): Promise<Array<{ id: string; modifiedTime: string | null }>>;
+  listModifiedSince(since: Date, limit?: number, pageToken?: string): Promise<ModifiedFilesPage>;
   renameFile(fileId: string, name: string): Promise<void>;
   /**
    * Merge hub labels into the file's appProperties.

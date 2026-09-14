@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { DocumentPages } from "@/components/document-results";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { canCreateDocuments, getViewerContext, productionFilterFor } from "@/lib/access";
@@ -9,7 +10,6 @@ import { DocumentFilters, Filtered, FilteringProvider } from "@/components/docum
 import {
   DocumentResults,
   DocumentResultsSkeleton,
-  DocumentTotalNote,
   DocumentTotalSentence,
   filterKey,
 } from "@/components/document-results";
@@ -106,7 +106,7 @@ export default async function DocumentsPage({
                 </EmptyState>
               }
             />
-            <DocumentTotalNote query={documents} />
+            <DocumentPages query={documents} pathname={`/documents`} params={params} pageSize={100} />
           </Suspense>
         </Filtered>
       </FilteringProvider>

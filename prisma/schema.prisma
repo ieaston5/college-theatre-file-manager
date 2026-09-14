@@ -1,10 +1,6 @@
 // Penn Players Hub — data model
 //
-// Provider notes: SQLite is used for the private/local environment. Prisma does
-// not support enums or native JSON on SQLite, so every enum-ish column is a
-// String validated by zod in lib/constants.ts, and structured payloads are
-// stored as JSON text. That keeps the schema portable to Postgres (Pass 3)
-// without a rewrite.
+// PostgreSQL in local development and production. String vocabularies are validated with zod.
 
 /// relationJoins makes Prisma fetch a record and its relations in one SQL
 /// statement rather than one statement per relation. Every document list on
@@ -258,7 +254,13 @@ model Document {
   /// The timestamp is the queue's order — oldest first — which also lets an
   /// urgent change (somebody's access being *removed*) be backdated so it
   /// drains ahead of work that was already waiting.
+  sharingVersion Int @default(0)
+  sharingLockToken String?
+  sharingLockExpiresAt DateTime?
   sharingDirtyAt    DateTime?
+  sharingAttemptedAt DateTime?
+  sharingError       String?
+  managedDrivePermissions String?
 
   /// Canva mirrors: the hub keeps an exported copy of a Canva design in Drive
   /// so the hub's own permission model applies to it. Canva's API cannot set
@@ -349,17 +351,19 @@ model ProductionRole {
   updatedAt   DateTime @updatedAt
 
   categories Category[]
-  members    ProductionMember[]
+  members    ProductionMemberRole[]
+  legacyMembers ProductionMember[]
 
   @@index([archived])
 }
 
-/// Somebody working on one show. Access comes from the role; `title` is just
+/// Somebody working on one show. Access combines their roles; `title` is just
 /// what they are called on the programme ("Ensemble", "Lighting Designer").
 model ProductionMember {
   id           String   @id @default(cuid())
   productionId String
   userId       String
+  /// Legacy single-role value retained for upgrade compatibility; roles is authoritative.
   roleId       String?
   title        String?
   status       String   @default("ACTIVE") // ACTIVE | REMOVED
@@ -370,12 +374,25 @@ model ProductionMember {
   production Production      @relation(fields: [productionId], references: [id], onDelete: Cascade)
   user       User            @relation("MembershipUser", fields: [userId], references: [id], onDelete: Cascade)
   role       ProductionRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  roles      ProductionMemberRole[]
   addedBy    User?           @relation("MembershipAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
 
   @@unique([productionId, userId])
   @@index([userId])
   @@index([productionId])
   @@index([status])
+}
+
+/// An additive role assignment within one person's production membership.
+model ProductionMemberRole {
+  id String @id @default(cuid())
+  memberId String
+  roleId String
+  member ProductionMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  role ProductionRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, roleId])
+  @@index([roleId])
 }
 
 // ---------------------------------------------------------------------------
@@ -606,6 +623,9 @@ model OrgConfig {
   /// changed after this has already been folded into the documents' edit
   /// times, so the next run only has to ask about what is newer.
   lastDriveScanAt    DateTime?
+  driveScanPageToken String?
+  driveScanSince     DateTime?
+  driveScanStartedAt DateTime?
   /// When the naming rule was last applied across every existing title.
   /// Null means never, which is what triggers the one-off pass on a hub that
   /// predates the rule being used for hub titles at all.

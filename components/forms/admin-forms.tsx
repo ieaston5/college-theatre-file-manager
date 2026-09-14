@@ -253,6 +253,11 @@ export function CategoryForm({
   const [icon, setIcon] = useState(category?.icon ?? "folder");
   const [color, setColor] = useState(category?.color ?? "#6366f1");
   const [scope, setScope] = useState(category?.scope ?? "BOTH");
+  // Keep saved choices visible when React resets uncontrolled fields after a
+  // successful form action. The category key resets these when switching rows.
+  const [defaultVisibility, setDefaultVisibility] = useState(category?.defaultVisibility ?? "BOARD");
+  const [defaultEditAccess, setDefaultEditAccess] = useState(category?.defaultEditAccess ?? "BOARD");
+  const [defaultDocType, setDefaultDocType] = useState(category?.defaultDocType ?? "");
 
   return (
     <form action={formAction} className="space-y-5">
@@ -301,7 +306,7 @@ export function CategoryForm({
       <Toggle
         name="companyVisible"
         label="Production companies can see documents here"
-        hint="Turn this on for the things a cast or crew legitimately needs — schedules, scripts, contact sheets. Leave it off for budgets, casting and governance: those categories are then never offered as “Company” and never appear to company members. “Company” means the people on one show, so it only applies to documents attached to a production — an organisation-wide category never reaches a company whatever this says."
+        hint="Turn this on for the things a cast or crew legitimately needs — schedules, scripts, contact sheets. Leave it off for budgets, casting and governance: those categories are then never offered as “Company” and never appear to company members. For files attached to a show, “Company” reaches eligible members of that show. Organisation-wide files reach active company members whose roles cover this category."
         defaultChecked={category?.companyVisible ?? false}
       />
 
@@ -337,7 +342,8 @@ export function CategoryForm({
           <select
             id="defaultDocType"
             name="defaultDocType"
-            defaultValue={category?.defaultDocType ?? ""}
+            value={defaultDocType}
+            onChange={(event) => setDefaultDocType(event.target.value)}
             className={selectClass}
           >
             <option value="">No default</option>
@@ -357,7 +363,8 @@ export function CategoryForm({
           <select
             id="defaultEditAccess"
             name="defaultEditAccess"
-            defaultValue={category?.defaultEditAccess ?? "BOARD"}
+            value={defaultEditAccess}
+            onChange={(event) => setDefaultEditAccess(event.target.value)}
             className={selectClass}
           >
             {EDIT_ACCESS_LEVELS.map((level) => (
@@ -372,7 +379,8 @@ export function CategoryForm({
           <select
             id="defaultVisibility"
             name="defaultVisibility"
-            defaultValue={category?.defaultVisibility ?? "BOARD"}
+            value={defaultVisibility}
+            onChange={(event) => setDefaultVisibility(event.target.value)}
             className={selectClass}
           >
             {VISIBILITIES.map((visibility) => (

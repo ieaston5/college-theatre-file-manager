@@ -92,6 +92,9 @@ function buildAdapter(): PrismaPg {
     throw new Error("Missing DATABASE_URL in .env — see SETUP.md.");
   }
 
+  if (!/^postgres(ql)?:\/\//.test(configured)) {
+    throw new Error("This build uses PostgreSQL. Set DATABASE_URL and DIRECT_URL as described in SETUP.md; SQLite is no longer supported.");
+  }
   const { pool, schema } = connectionSettings(configured);
   return new PrismaPg(pool, schema ? { schema } : undefined);
 }

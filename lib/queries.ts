@@ -20,8 +20,7 @@ function one(params: SearchParams, key: string): string | undefined {
 
 /**
  * Text search across title, description, tags, production and category.
- * Case-insensitivity is handled in lib/db-portability so the behaviour is the
- * same on SQLite and Postgres.
+ * Case-insensitivity is handled centrally in lib/db-portability.
  */
 function searchWhere(term: string): Prisma.DocumentWhereInput {
   return {
@@ -87,11 +86,11 @@ export function buildDocumentOrder(
     options?.pinnedFirst === false ? [] : [{ pinned: "desc" }];
   switch (one(params, "sort")) {
     case "created":
-      return [...first, { createdAt: "desc" }];
+      return [...first, { createdAt: "desc" }, { id: "asc" }];
     case "title":
-      return [...first, { title: "asc" }];
+      return [...first, { title: "asc" }, { id: "asc" }];
     default:
-      return [...first, { lastEditedAt: "desc" }];
+      return [...first, { lastEditedAt: "desc" }, { id: "asc" }];
   }
 }
 
@@ -101,15 +100,17 @@ export async function queryDocuments(
   options?: { extra?: Prisma.DocumentWhereInput; take?: number; skip?: number },
 ) {
   const where = buildDocumentWhere(viewer, params, options?.extra);
-  const [documents, total] = await Promise.all([
-    prisma.document.findMany({
+  const take = options?.take ?? 60;
+  const total = await prisma.document.count({ where });
+  const requested = Number(one(params, "page") ?? 1);
+  const page = Math.min(Math.max(1, Math.ceil(total / take)),
+    Number.isSafeInteger(requested) && requested > 0 ? requested : 1);
+  const documents = await prisma.document.findMany({
       where,
       include: DOCUMENT_LIST_INCLUDE,
       orderBy: buildDocumentOrder(params, { pinnedFirst: viewer.isBoard }),
-      take: options?.take ?? 60,
-      skip: options?.skip ?? 0,
-    }),
-    prisma.document.count({ where }),
-  ]);
-  return { documents, total };
+      take,
+      skip: options?.skip ?? (page - 1) * take,
+    });
+  return { documents, total, page };
 }
