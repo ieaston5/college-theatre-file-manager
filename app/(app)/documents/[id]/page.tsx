@@ -698,6 +698,7 @@ export default async function DocumentPage({
             description="Upload an updated file over this one instead of creating “v2”. Same link, same sharing — Drive keeps the old version."
           />
           <NewVersionUploader
+            simulated={env.driveMode === "mock"}
             documentId={document.id}
             currentFileName={document.originalFileName}
           />

@@ -7,7 +7,7 @@ import { assertCreationAllowed, documentName } from "@/lib/documents";
 import { getConfig } from "@/lib/config";
 import { resolveFolder } from "@/lib/google";
 import { openResumableCreate, openResumableUpdate } from "@/lib/google/upload";
-import { UPLOADED_DOC_TYPES, type DocType } from "@/lib/constants";
+import { UPLOADED_DOC_TYPES, UPLOAD_SERVER_MAX_BYTES, type DocType } from "@/lib/constants";
 import { firstError, uploadStartSchema } from "@/lib/validation";
 import { randomToken } from "@/lib/crypto";
 import { rateLimit, tooManyMessage } from "@/lib/rate-limit";
@@ -53,6 +53,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: firstError(parsed.error) }, { status: 400 });
   }
   const input = parsed.data;
+  if (env.driveMode === "mock" && input.sizeBytes > UPLOAD_SERVER_MAX_BYTES) {
+    return NextResponse.json(
+      { error: "Simulated Drive supports files up to 4 MB. Connect Google Drive to upload recordings up to 20 GB." },
+      { status: 413 },
+    );
+  }
   const token = randomToken(18);
 
   // Opportunistic tidy-up: uploads that were started and abandoned.
@@ -130,6 +136,7 @@ export async function POST(request: NextRequest) {
       if (env.driveMode === "google") {
         const sessionUrl = await openResumableUpdate({
           fileId: document.googleFileId,
+          name: driveName,
           mimeType: input.mimeType,
           sizeBytes: input.sizeBytes,
           appProperties: { hubUploadToken: token, hubDocumentId: document.id },
@@ -139,7 +146,6 @@ export async function POST(request: NextRequest) {
           uploadId: pending.id,
           kind: "resumable",
           uploadUrl: sessionUrl,
-          proxyUrl: `/api/uploads/proxy?u=${pending.id}`,
         });
       }
 
@@ -244,7 +250,6 @@ export async function POST(request: NextRequest) {
         uploadId: pending.id,
         kind: "resumable",
         uploadUrl: sessionUrl,
-        proxyUrl: `/api/uploads/proxy?u=${pending.id}`,
         driveName,
         title,
       });

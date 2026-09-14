@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "codex/access-and-membership-fixes": false
+      "codex/access-and-membership-fixes": false,
+      "codex/resumable-recording-uploads": false
     }
   },
   "crons": [

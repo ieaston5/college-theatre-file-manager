@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { pushToSession } from "@/lib/google/upload";
-import { UPLOAD_MAX_BYTES } from "@/lib/constants";
+import { readSmallUploadBody, UploadBodyError } from "@/lib/upload-body";
 
 /**
  * Fallback for browsers that cannot PUT straight to Google (blocked by a
@@ -26,16 +26,19 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "That upload has no Google session." }, { status: 400 });
   }
 
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength === 0) {
-    return NextResponse.json({ error: "That file is empty." }, { status: 400 });
-  }
-  if (bytes.byteLength > UPLOAD_MAX_BYTES) {
-    return NextResponse.json({ error: "That file is over the 100 MB limit." }, { status: 413 });
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await readSmallUploadBody(request, pending.sizeBytes);
+  } catch (error) {
+    if (error instanceof UploadBodyError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    return NextResponse.json({ error: "The upload was interrupted. Please retry." }, { status: 502 });
   }
 
   try {
     const fileId = await pushToSession(pending.sessionUrl, bytes, pending.mimeType);
+    await prisma.pendingUpload.update({ where: { id: pending.id }, data: { uploadedFileId: fileId } });
     return NextResponse.json({ fileId });
   } catch (error) {
     console.error("[upload] proxy failed", error);

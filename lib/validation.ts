@@ -111,8 +111,8 @@ export const uploadStartSchema = z.object({
   tags: optionalText(400),
   fileName: z.string().trim().min(1).max(300),
   mimeType: z.string().trim().min(1).max(255).default("application/octet-stream"),
-  sizeBytes: z.coerce.number().int().min(0).max(UPLOAD_MAX_BYTES, {
-    message: "That file is larger than the 100 MB limit.",
+  sizeBytes: z.coerce.number().int().min(1, "That file is empty.").max(UPLOAD_MAX_BYTES, {
+    message: "That file is larger than the 20 GB limit.",
   }),
 });
 

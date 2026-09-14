@@ -96,8 +96,10 @@ export const UPLOADED_DOC_TYPES: DocType[] = [
   "OTHER",
 ];
 
-/** Refused above this; Drive itself allows far more but a club does not need it. */
-export const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+/** Supports full rehearsal recordings while keeping accidental uploads bounded. */
+export const UPLOAD_MAX_BYTES = 20 * 1024 * 1024 * 1024;
+/** Only simulated/small legacy uploads pass through the app server. */
+export const UPLOAD_SERVER_MAX_BYTES = 4 * 1024 * 1024;
 
 // --- Canva ------------------------------------------------------------------
 

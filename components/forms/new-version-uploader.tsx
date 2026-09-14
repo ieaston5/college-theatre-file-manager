@@ -15,9 +15,11 @@ import { FilePicker, fileKey, type UploadState } from "./file-picker";
 export function NewVersionUploader({
   documentId,
   currentFileName,
+  simulated = false,
 }: {
   documentId: string;
   currentFileName: string | null;
+  simulated?: boolean;
 }) {
   const router = useRouter();
   const [files, setFiles] = useState<File[]>([]);
@@ -78,6 +80,7 @@ export function NewVersionUploader({
   return (
     <div className="space-y-3">
       <FilePicker
+        simulated={simulated}
         files={files}
         onFiles={setFiles}
         onRemove={() => setFiles([])}

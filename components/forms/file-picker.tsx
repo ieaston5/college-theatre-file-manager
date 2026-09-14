@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../icons";
 import { cn, formatBytes } from "@/lib/utils";
-import { UPLOAD_MAX_BYTES } from "@/lib/constants";
+import { UPLOAD_MAX_BYTES, UPLOAD_SERVER_MAX_BYTES } from "@/lib/constants";
 
 export type UploadState = {
   pct: number;
@@ -25,6 +25,7 @@ export function FilePicker({
   multiple = true,
   disabled = false,
   hint,
+  simulated = false,
 }: {
   files: File[];
   onFiles: (files: File[]) => void;
@@ -33,17 +34,26 @@ export function FilePicker({
   multiple?: boolean;
   disabled?: boolean;
   hint?: string;
+  simulated?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [tooBig, setTooBig] = useState<string[]>([]);
+  const maxBytes = simulated ? UPLOAD_SERVER_MAX_BYTES : UPLOAD_MAX_BYTES;
+  const uploading = Object.values(progress ?? {}).some((state) => state.status === "uploading");
+  useEffect(() => {
+    if (!uploading) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [uploading]);
 
   function accept(incoming: FileList | null) {
     if (!incoming) return;
     const list = Array.from(incoming);
-    const oversized = list.filter((file) => file.size > UPLOAD_MAX_BYTES).map((file) => file.name);
+    const oversized = list.filter((file) => file.size > maxBytes).map((file) => file.name);
     setTooBig(oversized);
-    const usable = list.filter((file) => file.size <= UPLOAD_MAX_BYTES);
+    const usable = list.filter((file) => file.size <= maxBytes);
     if (usable.length > 0) onFiles(multiple ? [...files, ...usable] : usable.slice(0, 1));
   }
 
@@ -92,10 +102,15 @@ export function FilePicker({
           </button>
         </p>
         <p className="mt-1 text-xs leading-relaxed text-ink-500">
-          {hint ?? "Any file type — PDFs, scans, images, spreadsheets, audio."} Up to{" "}
-          {formatBytes(UPLOAD_MAX_BYTES)} each.
+          {hint ?? "Any file type — including video and audio recordings."} Up to{" "}
+          {formatBytes(maxBytes)} each.
         </p>
       </div>
+
+      <p className="text-xs text-ink-500">
+        {simulated ? "Connect Google Drive to upload recordings up to 20 GB. Simulated uploads are limited to 4 MB." :
+          "Keep this page open while uploading. Connection interruptions retry automatically. To resume within 24 hours after leaving, select the same file with the same filing choices."}
+      </p>
 
       {tooBig.length > 0 ? (
         <p className="text-xs text-rose-700">

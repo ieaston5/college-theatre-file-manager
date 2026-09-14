@@ -41,6 +41,16 @@ several at once and each takes its own filename as its title. The extension is
 preserved through the naming rule, so you get
 `[URINETOWN] Script — Scripts & scores.pdf`.
 
+Rehearsal video and audio recordings can be up to **20 GB per file** (20 GiB).
+The browser sends 8 MiB chunks straight to Google Drive and retries interrupted
+transfers from Drive's acknowledged position. Keep the page open during upload.
+If you leave, select the same unchanged file with the same filing choices within
+24 hours to resume. Finishing an upload can be retried without creating another
+document. Drive storage quota and file permissions still apply.
+
+Simulated Drive uploads are limited to 4 MiB; connect Google to test larger files.
+Large recordings never fall back to being sent through the app server.
+
 Uploaded files also get **new versions**: upload an updated file over the old
 one and the Drive file id, link and sharing stay the same while Drive keeps the
 previous revision. That is the end of `Script_FINAL_v3.pdf`.
@@ -196,7 +206,7 @@ app/
     admin/                Google & settings · members · production roles · categories · productions · templates · activity
   api/auth/               Google sign-in, local dev sign-in, sign-out
   api/google/             connecting the hub's document-owning account
-  api/uploads/            start · finish · proxy · mock · blob (upload plumbing)
+  api/uploads/            start · status · finish · proxy · mock · blob (upload plumbing)
   api/canva/              connect · callback (the hub's Canva account)
   mock-drive/[id]/        the simulated Drive viewer
   actions/                server actions (every mutation)
