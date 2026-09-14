@@ -196,9 +196,7 @@ const CATEGORIES = [
     companyVisible: true,
     icon: "script",
     color: "#4f46e5",
-    // Either/or rather than organisation-wide: "Company" reaches the people on
-    // one show, so a handbook the cast is meant to read has to be filed
-    // against their show. Filed against none, it is the board's.
+    // Handbooks may be organisation-wide or tailored to a particular show.
     scope: "BOTH",
     defaultDocType: "DOC",
     description:

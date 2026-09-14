@@ -1,5 +1,6 @@
 import type { Document, User } from "@prisma/client";
 import { prisma } from "./db";
+import { queueDocumentSharing } from "./sharing";
 import { env } from "./env";
 import { getConfig, getDriveAccount } from "./config";
 import { recordAudit } from "./audit";
@@ -19,7 +20,7 @@ import { canvaProvider, extractCanvaDesignId, getCanvaAccount } from "./canva";
 // Re-exported so the existing callers keep working; anything that only needs
 // the rule should import it straight from lib/canva/freshness.
 export { canvaMirrorIsStale } from "./canva/freshness";
-import { canCreateDocuments, type Viewer } from "./access";
+import { canCreateDocuments, canViewDocument, getViewerContext, type Viewer } from "./access";
 import { putBytesToDrive } from "./google/upload";
 import {
   applyNamingTemplate,
@@ -104,11 +105,6 @@ async function companyRecipients(doc: {
   productionId?: string | null;
 }): Promise<string[]> {
   if (doc.visibility !== "COMPANY") return [];
-  // No show, no company. A document filed against no production has no company
-  // to belong to, so nobody outside the board reaches it — and returning
-  // nobody here is what makes a reconciling sync take the grants back off one
-  // that was shared more widely before the rule changed.
-  if (!doc.productionId) return [];
 
   const members = await prisma.productionMember.findMany({
     where: {
@@ -118,8 +114,8 @@ async function companyRecipients(doc: {
       // ignores archived productions, so without this Drive would keep
       // granting access the hub had stopped showing.
       production: { status: { not: "ARCHIVED" } },
-      productionId: doc.productionId,
-      role: { archived: false, categories: { some: { id: doc.categoryId } } },
+      ...(doc.productionId ? { productionId: doc.productionId } : {}),
+      role: { archived: false, categories: { some: { id: doc.categoryId, companyVisible: true, archived: false } } },
     },
     select: { user: { select: { email: true } } },
   });
@@ -128,25 +124,17 @@ async function companyRecipients(doc: {
 
 /**
  * "Company" is only available where an admin has opened the category up to
- * companies, and only for a document attached to a show — the show is the
- * company. Enforced here as well as in the form, so an old page or a hand made
- * request cannot put a budget in front of the cast, or file something as
- * "Company" that no company can actually see.
+ * companies. A show selects its company; organisation-wide documents reach
+ * active company members whose roles include this category.
  */
 function assertVisibilityAllowed(
   category: { name: string; companyVisible: boolean },
   visibility: string,
-  hasProduction: boolean,
 ) {
   if (visibility !== "COMPANY") return;
   if (!category.companyVisible) {
     throw new Error(
       `${category.name} is not shared with production companies. Pick Board or Private — or ask an admin to open the category up to companies.`,
-    );
-  }
-  if (!hasProduction) {
-    throw new Error(
-      `“Company” means the people on one show, so a company document has to be attached to a production. Attach it to a show, or file it for the board.`,
     );
   }
 }
@@ -161,10 +149,10 @@ export function assertCreationAllowed(
   viewer: Viewer,
   input: { categoryId: string; productionId?: string | null; visibility: string },
 ) {
-  if (viewer.isBoard) return;
   if (!canCreateDocuments(viewer)) {
     throw new Error("Your role on this show does not allow filing documents on the hub.");
   }
+  if (viewer.isBoard) return;
   if (input.visibility === "BOARD") {
     throw new Error("Only board members can file a document for the board.");
   }
@@ -172,9 +160,7 @@ export function assertCreationAllowed(
   const membership = viewer.memberships.find(
     (entry) => entry.canCreate && entry.productionId === input.productionId,
   );
-  // Filing against no show at all is still allowed for something they keep to
-  // themselves; "Company" is refused by assertVisibilityAllowed, because
-  // without a show there is no company for it to reach.
+  // A creator may also file organisation-wide documents in their allowed categories.
   const orgWideAllowed =
     !input.productionId &&
     viewer.memberships.some(
@@ -227,14 +213,14 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
 
   const [creator, shares, company, board] = await Promise.all([
     prisma.user.findUnique({ where: { id: doc.creatorId } }),
-    prisma.documentShare.findMany({ where: { documentId: doc.id }, include: { user: true } }),
+    prisma.documentShare.findMany({ where: { documentId: doc.id, user: { status: { not: "DISABLED" } } }, include: { user: true } }),
     companyRecipients(doc),
     doc.visibility === "PRIVATE" ? Promise.resolve([]) : boardRecipients(boardCanEdit),
   ]);
 
   const extra = shares.map((share) => ({
     email: share.user.email,
-    level: share.accessLevel as "READER" | "WRITER",
+    level: (share.user.role === "MEMBER" ? "READER" : share.accessLevel) as "READER" | "WRITER",
   }));
 
   const seen = new Set(extra.map((entry) => entry.email.toLowerCase()));
@@ -251,9 +237,18 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   // it may edit it.
   for (const email of company) add(email, companyCanEdit ? "WRITER" : "READER");
 
+  const creatorCanView = creator && creator.status !== "DISABLED" &&
+    canViewDocument(await getViewerContext(creator), { ...doc, shares });
+  const stored = await prisma.document.findUnique({
+    where: { id: doc.id }, select: { managedDrivePermissions: true, driveOwnerEmail: true },
+  });
+  const account = await getDriveAccount();
+
   return {
     visibility: doc.visibility as Visibility,
-    creatorEmail: creator?.email ?? "",
+    creatorEmail: creatorCanView ? creator.email : null,
+    creatorLevel: creator?.role === "MEMBER" ? "READER" : "WRITER",
+    managedPermissionIds: JSON.parse(stored?.managedDrivePermissions ?? "[]") as string[],
     // Never granted — passed so a pass over a file left over from group
     // sharing takes that permission off it. Harmless on a file that never had
     // one.
@@ -264,7 +259,8 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
     // removes the wider access. Only pre-existing files that belong to
     // somebody else are treated additively, where blindly revoking unknown
     // permissions would cut off their real collaborators.
-    strategy: doc.source === "REGISTERED" ? "additive" : "reconcile",
+    strategy: doc.source === "REGISTERED" && (!account?.email || stored?.driveOwnerEmail?.toLowerCase() !== account.email.toLowerCase())
+      ? "additive" : "reconcile",
   };
 }
 
@@ -275,20 +271,37 @@ export async function syncSharing(
   if (!doc.googleFileId || doc.docType === "LINK") {
     return { granted: [], revoked: [], warnings: [] };
   }
-  const plan = await sharingPlanFor(doc);
-  if (!plan.creatorEmail) {
-    return { granted: [], revoked: [], warnings: ["Could not find the creator's email address."] };
+  const queued = await prisma.document.findUnique({ where: { id: doc.id }, select: { sharingDirtyAt: true } });
+  const attemptedAt = new Date();
+  let result: SharingResult;
+  try {
+    const plan = await sharingPlanFor(doc);
+    result = await driveProvider().applySharing(doc.googleFileId, plan);
+  } catch (error) {
+    result = { granted: [], revoked: [], warnings: [error instanceof Error ? error.message : "Drive sharing failed."] };
   }
-  const result = await driveProvider().applySharing(doc.googleFileId, plan);
-  // Pushed, so it is no longer waiting: clearing the queue mark here means a
-  // document synced by any other route — an edit, a visibility change — drops
-  // out of the queue instead of being pushed a second time for nothing.
-  await prisma.document
-    .update({
-      where: { id: doc.id },
-      data: { sharingSyncedAt: new Date(), sharingDirtyAt: null },
-    })
-    .catch(() => {});
+  await prisma.document.update({ where: { id: doc.id }, data: {
+    sharingAttemptedAt: attemptedAt,
+    sharingSyncedAt: result.warnings.length ? null : attemptedAt,
+    sharingError: result.warnings.length ? result.warnings.join("\n") : null,
+    ...(result.managedPermissionIds ? { managedDrivePermissions: JSON.stringify(result.managedPermissionIds) } : {}),
+  } });
+  if (result.warnings.length) {
+    await prisma.document.updateMany({
+      where: { id: doc.id, sharingDirtyAt: null }, data: { sharingDirtyAt: attemptedAt },
+    });
+    await prisma.orgConfig.updateMany({
+      where: { id: "singleton", sharingSweepStartedAt: null },
+      data: { sharingSweepStartedAt: attemptedAt },
+    });
+  }
+
+  if (!result.warnings.length) {
+    await prisma.document.updateMany({
+      where: { id: doc.id, sharingDirtyAt: queued?.sharingDirtyAt ?? null },
+      data: { sharingDirtyAt: null },
+    });
+  }
 
   // Keep the recorded permission ids in step with Drive.
   for (const grant of result.granted) {
@@ -339,7 +352,7 @@ export async function createDocument(
     throw new Error(`${category.name} is an organisation-wide category — leave the production blank.`);
   }
   if (input.productionId && !production) throw new Error("That production no longer exists.");
-  assertVisibilityAllowed(category, input.visibility, Boolean(production));
+  assertVisibilityAllowed(category, input.visibility);
 
   const warnings: string[] = [];
 
@@ -503,7 +516,7 @@ export async function recordUploadedDocument(
   const production = input.productionId
     ? await prisma.production.findUnique({ where: { id: input.productionId } })
     : null;
-  assertVisibilityAllowed(category, input.visibility, Boolean(production));
+  assertVisibilityAllowed(category, input.visibility);
 
   const docType = docTypeFromMime(input.file.mimeType);
   const warnings: string[] = [];
@@ -653,7 +666,7 @@ export async function mirrorCanvaDesign(
   if (category.scope === "STANDING" && production) {
     throw new Error(`${category.name} is an organisation-wide category — leave the production blank.`);
   }
-  assertVisibilityAllowed(category, input.visibility, Boolean(production));
+  assertVisibilityAllowed(category, input.visibility);
 
   const existing = await prisma.document.findFirst({ where: { canvaDesignId: designId } });
   if (existing) {
@@ -887,7 +900,7 @@ export async function registerDocument(
   if (category.scope === "PRODUCTION" && !production) {
     throw new Error(`Documents in ${category.name} have to be attached to a production.`);
   }
-  assertVisibilityAllowed(category, input.visibility, Boolean(production));
+  assertVisibilityAllowed(category, input.visibility);
 
   const warnings: string[] = [];
   const provider = driveProvider();
@@ -1016,7 +1029,7 @@ export async function updateDocument(
   if (category.scope === "PRODUCTION" && !production) {
     throw new Error(`Documents in ${category.name} have to be attached to a production.`);
   }
-  assertVisibilityAllowed(category, input.visibility, Boolean(production));
+  assertVisibilityAllowed(category, input.visibility);
 
   const warnings: string[] = [];
   const movedShelf =
@@ -1045,6 +1058,10 @@ export async function updateDocument(
       tags: { set: await tagIds(input.tags) },
     },
   });
+
+  const audienceChanged = movedShelf || current.visibility !== document.visibility ||
+    current.editAccess !== document.editAccess;
+  if (audienceChanged) await queueDocumentSharing(document.id);
 
   // Keep Drive in step: rename and re-file when the hub metadata changed.
   // Files the hub owns are fair game even if they arrived by import — that is
@@ -1099,7 +1116,7 @@ export async function updateDocument(
     }
   }
 
-  if (current.visibility !== document.visibility || current.editAccess !== document.editAccess) {
+  if (audienceChanged) {
     const sharing = await syncSharing(document);
     warnings.push(...sharing.warnings);
     await recordAudit({

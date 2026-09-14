@@ -16,45 +16,31 @@ export default async function AdminSharingPage() {
   const config = await getConfig();
   const progress = await sharingProgress();
 
-  const [
-    boardCount,
-    sharedCount,
-    companyCount,
-    privateCount,
-    lastSynced,
-    staleCount,
-    companyNoShowCount,
-  ] = await Promise.all([
-    prisma.user.count({
-      where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
-    }),
-    prisma.document.count({
-      where: { visibility: "BOARD", status: "ACTIVE", googleFileId: { not: null } },
-    }),
-    prisma.document.count({
-      where: { visibility: "COMPANY", status: "ACTIVE", googleFileId: { not: null } },
-    }),
-    prisma.document.count({ where: { visibility: "PRIVATE", status: "ACTIVE" } }),
-    prisma.document.findFirst({
-      where: { sharingSyncedAt: { not: null } },
-      orderBy: { sharingSyncedAt: "desc" },
-      select: { sharingSyncedAt: true },
-    }),
-    prisma.document.count({
-      where: {
-        status: "ACTIVE",
-        visibility: { not: "PRIVATE" },
-        googleFileId: { not: null },
-        sharingSyncedAt: null,
-      },
-    }),
-    // "Company" means the people on one show, so a company document with no
-    // show reaches no company at all — it is board-only in practice. These
-    // are the ones somebody filed before that was true.
-    prisma.document.count({
-      where: { visibility: "COMPANY", status: "ACTIVE", productionId: null },
-    }),
-  ]);
+  const [boardCount, sharedCount, companyCount, privateCount, lastSynced, staleCount] =
+    await Promise.all([
+      prisma.user.count({
+        where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: { not: "DISABLED" } },
+      }),
+      prisma.document.count({
+        where: { visibility: "BOARD", status: "ACTIVE", googleFileId: { not: null } },
+      }),
+      prisma.document.count({
+        where: { visibility: "COMPANY", status: "ACTIVE", googleFileId: { not: null } },
+      }),
+      prisma.document.count({ where: { visibility: "PRIVATE", status: "ACTIVE" } }),
+      prisma.document.findFirst({
+        where: { sharingSyncedAt: { not: null } },
+        orderBy: { sharingSyncedAt: "desc" },
+        select: { sharingSyncedAt: true },
+      }),
+      prisma.document.count({
+        where: {
+          googleFileId: { not: null },
+          docType: { not: "LINK" },
+          sharingDirtyAt: { not: null },
+        },
+      }),
+    ]);
 
   const disabledMembers = await prisma.user.count({
     where: { role: { in: ["ADMIN", "BOARD", "MEMBER"] }, status: "DISABLED" },
@@ -67,32 +53,10 @@ export default async function AdminSharingPage() {
     <div className="space-y-6">
       <Banner tone="sky" icon="info" title="Two systems, one list">
         The hub decides what people <em>see listed</em>; Drive decides what they can{" "}
-        <em>open</em>. The hub keeps the two in step whenever a document or a member changes — this
-        page is for the times they drift apart.
+        <em>open</em>. Document and membership changes queue Drive updates. This page shows pending
+        updates and lets you run them now.
       </Banner>
 
-      {companyNoShowCount > 0 ? (
-        <Banner
-          tone="amber"
-          icon="warning"
-          title={`${companyNoShowCount} company ${pluralize(
-            companyNoShowCount,
-            "document",
-          )} not attached to a show`}
-          action={
-            <Link
-              href="/documents?visibility=COMPANY&production=none"
-              className={buttonClass("secondary")}
-            >
-              Show them
-            </Link>
-          }
-        >
-          A company document belongs to one show&rsquo;s company, so these reach nobody outside the
-          board. Attach each one to the production it is for, or file it for the board. Running the
-          queue below takes the company&rsquo;s Drive access off them in the meantime.
-        </Banner>
-      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-4">
         <Stat
@@ -105,12 +69,12 @@ export default async function AdminSharingPage() {
           )} each`}
         />
         <Stat label="Company documents" value={companyCount} icon="theater" />
-        <Stat label="Private" value={privateCount} icon="lock" hint="Never shared out" />
+        <Stat label="Private" value={privateCount} icon="lock" hint="Creator and named recipients" />
         <Stat
-          label="Never synced"
+          label="Needs access update"
           value={staleCount}
           icon={staleCount > 0 ? "alert" : "check-circle"}
-          hint={staleCount > 0 ? "Re-share everything" : "All pushed to Drive"}
+          hint={staleCount > 0 ? "Run the sweep" : "No pending updates"}
         />
       </div>
 
@@ -127,14 +91,13 @@ export default async function AdminSharingPage() {
             <Link href="/admin/members" className="font-medium text-brand-700 hover:underline">
               {boardCount} {pluralize(boardCount, "person", "people")} on the members list
             </Link>
-            , so Drive access matches that list exactly — adding somebody gives them access, and
-            disabling somebody takes it away. Both go through the queue below, which starts itself
-            the moment the change is saved and needs nobody to sit and watch it.
+            . Adding or disabling somebody queues an update to the hub-managed permissions.
+            Failed changes stay pending for retry.
           </p>
 
           <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
             The cost is {boardCount} individual {pluralize(boardCount, "permission")} per document
-            plus the creator, which is why re-sharing runs as a queue rather than all at once.{" "}
+            including eligible creators, which is why re-sharing runs as a sweep rather than all at once.{" "}
             {config.groupEmail ? (
               <>
                 <span className="font-mono">{config.groupEmail}</span> no longer decides access
@@ -152,8 +115,8 @@ export default async function AdminSharingPage() {
                 {disabledMembers} {pluralize(disabledMembers, "person", "people")} disabled on the
                 hub.
               </span>{" "}
-              Disabling somebody queues every shared document, so their Drive access should already
-              be gone. If the queue below is empty and you want to be certain, re-share everything.
+              Run the sweep below to remove their hub-managed Drive access. Owner, folder,
+              and other externally managed access may require a separate change in Google Drive.
             </div>
           ) : null}
         </div>
@@ -171,31 +134,31 @@ export default async function AdminSharingPage() {
         />
         <SharingSweep initial={progress} />
         <p className="mt-3 text-xs leading-relaxed text-ink-500">
-          Per-member sharing means one Google call per person per document, so re-sharing is a queue
-          rather than something anybody waits for: a change that moves access — adding somebody to a
-          show, moving them between roles, taking somebody off the board — saves at once and the
-          documents it affects are pushed to Drive in the background. This is where you can watch
-          that finish, or start it again from scratch.
+          Runs in slices and can be stopped and picked up later, because per-member sharing means
+          one Google call per person per document. Normal changes — creating a document, changing
+          its visibility, adding somebody to a show — start an access update. Pending changes and
+          failures continue on the next scheduled run, including archived and private files.
         </p>
       </Card>
 
       <Card className="bg-ink-50 text-sm text-ink-600">
-        <SectionHeader icon="lock" title="What is never shared" />
+        <SectionHeader icon="lock" title="What the hub shares" />
         <ul className="space-y-1.5 text-sm">
           <li className="flex gap-2">
             <Icon name="check" className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-            Private documents: the creator and anyone they added by hand. Not the board, not
-            admins, not the group.
+            Private entries: only the active creator and enabled named recipients in the hub.
           </li>
           <li className="flex gap-2">
             <Icon name="check" className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-            Company documents: only the people on that show whose role covers the category, as
-            viewers.
+            Company documents: the board and eligible company members whose roles cover the
+            category, plus named recipients. The edit-access setting controls who may edit.
           </li>
           <li className="flex gap-2">
             <Icon name="check" className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-            No "anyone with the link" permission survives a sharing pass on a document the hub
-            owns — those are stripped every time.
+            The hub removes direct public-link permissions from files it owns. Registered files
+            can retain access granted by their owner; inherited folder access must be changed in
+            Drive. Older grants on externally owned files may need an owner review because the hub
+            cannot reliably identify who created them.
           </li>
         </ul>
       </Card>

@@ -196,27 +196,6 @@ export async function decideAccessRequestAction(form: FormData) {
 
 // --- checklists -------------------------------------------------------------
 
-export async function toggleChecklistItemAction(form: FormData) {
-  const user = await getCurrentUser();
-  if (!user) return;
-  const viewer = await getViewerContext(user);
-  const { canCreateDocuments } = await import("@/lib/access");
-  if (!canCreateDocuments(viewer)) return;
-
-  const id = String(form.get("id") ?? "");
-  const item = await prisma.checklistItem.findUnique({ where: { id } });
-  if (!item) return;
-
-  await prisma.checklistItem.update({
-    where: { id },
-    data: item.done
-      ? { done: false, doneAt: null, doneById: null }
-      : { done: true, doneAt: new Date(), doneById: user.id },
-  });
-  revalidatePath("/productions");
-  revalidatePath(`/productions`, "layout");
-}
-
 export async function seedChecklistAction(form: FormData) {
   await assertRole("BOARD");
   const productionId = String(form.get("productionId") ?? "");
@@ -231,8 +210,11 @@ export async function addChecklistItemAction(
   try {
     await assertRole("BOARD");
     const productionId = text(form, "productionId") ?? "";
-    const label = text(form, "label");
-    if (!label) return { error: "Give the item a name." };
+    const categoryId = text(form, "categoryId");
+    const category = categoryId ? await prisma.category.findFirst({
+      where: { id: categoryId, archived: false, scope: { in: ["PRODUCTION", "BOTH"] } },
+    }) : null;
+    if (!category) return { error: "Pick a file category for the filing guide." };
 
     const last = await prisma.checklistItem.findFirst({
       where: { productionId },
@@ -242,8 +224,8 @@ export async function addChecklistItemAction(
     await prisma.checklistItem.create({
       data: {
         productionId,
-        label,
-        categoryId: text(form, "categoryId") === "none" ? null : (text(form, "categoryId") ?? null),
+        label: category.name,
+        categoryId: category.id,
         sortOrder: (last?.sortOrder ?? 0) + 10,
       },
     });

@@ -1,10 +1,6 @@
 // Penn Players Hub — data model
 //
-// Provider notes: SQLite is used for the private/local environment. Prisma does
-// not support enums or native JSON on SQLite, so every enum-ish column is a
-// String validated by zod in lib/constants.ts, and structured payloads are
-// stored as JSON text. That keeps the schema portable to Postgres (Pass 3)
-// without a rewrite.
+// PostgreSQL in local development and production. String vocabularies are validated with zod.
 
 /// relationJoins makes Prisma fetch a record and its relations in one SQL
 /// statement rather than one statement per relation. Every document list on
@@ -259,6 +255,9 @@ model Document {
   /// urgent change (somebody's access being *removed*) be backdated so it
   /// drains ahead of work that was already waiting.
   sharingDirtyAt    DateTime?
+  sharingAttemptedAt DateTime?
+  sharingError       String?
+  managedDrivePermissions String?
 
   /// Canva mirrors: the hub keeps an exported copy of a Canva design in Drive
   /// so the hub's own permission model applies to it. Canva's API cannot set
@@ -606,6 +605,9 @@ model OrgConfig {
   /// changed after this has already been folded into the documents' edit
   /// times, so the next run only has to ask about what is newer.
   lastDriveScanAt    DateTime?
+  driveScanPageToken String?
+  driveScanSince     DateTime?
+  driveScanStartedAt DateTime?
   /// When the naming rule was last applied across every existing title.
   /// Null means never, which is what triggers the one-off pass on a hub that
   /// predates the rule being used for hub titles at all.

@@ -1,3 +1,5 @@
+import { DocumentPagination } from "./document-pagination";
+import type { SearchParams } from "@/lib/queries";
 import { DocumentList, type DocumentListItem } from "./document-items";
 import { Badge } from "./ui";
 import { pluralize } from "@/lib/utils";
@@ -25,7 +27,7 @@ import { pluralize } from "@/lib/utils";
  * The same promise feeds the count, so asking for both costs one query.
  */
 
-export type DocumentQuery = Promise<{ documents: DocumentListItem[]; total: number }>;
+export type DocumentQuery = Promise<{ documents: DocumentListItem[]; total: number; page: number }>;
 
 export async function DocumentResults({
   query,
@@ -72,15 +74,12 @@ export async function DocumentTotalSentence({ query }: { query: DocumentQuery })
   );
 }
 
-/** "Showing the first 100 of 340", when the list was capped. */
-export async function DocumentTotalNote({ query }: { query: DocumentQuery }) {
-  const { total, documents } = await query;
-  if (total <= documents.length) return null;
-  return (
-    <p className="mt-4 text-center text-xs text-ink-400">
-      Showing the first {documents.length} of {total}. Narrow the filters to see the rest.
-    </p>
-  );
+/** Pagination shares the streamed query with the results. */
+export async function DocumentPages({ query, pathname, params, pageSize }: {
+  query: DocumentQuery; pathname: string; params: SearchParams; pageSize: number;
+}) {
+  const { total, page } = await query;
+  return <DocumentPagination pathname={pathname} params={params} page={page} pageSize={pageSize} total={total} />;
 }
 
 function Line({ className = "" }: { className?: string }) {
@@ -112,7 +111,7 @@ export function DocumentResultsSkeleton({ rows = 6 }: { rows?: number }) {
  * should show the skeleton, while something unrelated in the URL should not.
  */
 export function filterKey(params: Record<string, string | string[] | undefined>): string {
-  return ["q", "category", "production", "type", "visibility", "mine", "status", "sort"]
+  return ["q", "category", "production", "type", "visibility", "mine", "status", "sort", "page"]
     .map((key) => {
       const value = params[key];
       return `${key}=${Array.isArray(value) ? value.join(",") : (value ?? "")}`;

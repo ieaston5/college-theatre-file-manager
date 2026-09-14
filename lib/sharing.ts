@@ -38,8 +38,8 @@ import { syncSharing } from "./documents";
 /** Documents in the queue: marked, and actually pushable to Drive. */
 const QUEUED = {
   sharingDirtyAt: { not: null },
-  status: "ACTIVE",
   googleFileId: { not: null },
+  docType: { not: "LINK" },
 } satisfies Prisma.DocumentWhereInput;
 
 /** What syncSharing needs, and nothing more. */
@@ -57,7 +57,6 @@ const SHARABLE_SELECT = {
 
 /** Documents a pass could ever have to touch. */
 const SHARABLE = {
-  status: "ACTIVE",
   googleFileId: { not: null },
   docType: { not: "LINK" },
 } satisfies Prisma.DocumentWhereInput;
@@ -140,10 +139,8 @@ async function queueSharing(
 /**
  * Everything a production's company can see, after a membership or role change.
  *
- * Documents filed against no show are included even though no company can see
- * them: a company document needs a production, so anything left over from
- * before that rule has Drive grants to hand back, and the reconciling sync is
- * what takes them off.
+ * Organisation-wide documents are included because active production roles
+ * also grant access to eligible categories outside a particular show.
  *
  * With no production given, every company document on the hub — which is what
  * a change to a role's categories means, since a role is used by every show.
@@ -168,7 +165,12 @@ export function queueCompanySharing(
  * the admin button that re-pushes the lot.
  */
 export function queueAllSharing(options?: { urgent?: boolean }): Promise<number> {
-  return queueSharing({ visibility: { not: "PRIVATE" } }, options);
+  return queueSharing({}, options);
+}
+
+/** Queue one document after its audience changes. */
+export function queueDocumentSharing(id: string): Promise<number> {
+  return queueSharing({ id });
 }
 
 /** How much of the current pass is left. */
@@ -194,31 +196,34 @@ export async function sharingProgress(): Promise<SharingProgress> {
 /**
  * Push one slice of the queue.
  *
- * A failure marks the document done anyway. One file the hub cannot share —
- * somebody else owns it and has since restricted it — must not stall everything
- * behind it, and the admin page lists what never made it to Drive separately.
+ * Failures remain queued for retry, with a brief backoff so untouched files
+ * can continue. Error state is retained for the admin and document pages.
  */
 export async function drainSharingSlice(options?: {
   chunk?: number;
 }): Promise<SharingDrainResult> {
   const batch = await prisma.document.findMany({
-    where: QUEUED,
+    where: { AND: [QUEUED, { OR: [
+      { sharingError: null },
+      { sharingAttemptedAt: null },
+      { sharingAttemptedAt: { lt: new Date(Date.now() - 60_000) } },
+    ] }] },
     select: SHARABLE_SELECT,
-    orderBy: { sharingDirtyAt: "asc" },
+    orderBy: [{ sharingAttemptedAt: { sort: "asc", nulls: "first" } }, { sharingDirtyAt: "asc" }, { id: "asc" }],
     take: options?.chunk ?? SHARING_CHUNK,
   });
 
   let failures = 0;
   for (const document of batch) {
     try {
-      await syncSharing(document);
+      const result = await syncSharing(document);
+      if (result.warnings.length) failures += 1;
     } catch (error) {
       failures += 1;
       console.error("[sharing] could not push", document.id, error);
-    } finally {
-      await prisma.document
-        .update({ where: { id: document.id }, data: { sharingDirtyAt: null } })
-        .catch(() => {});
+      await prisma.document.update({ where: { id: document.id }, data: {
+        sharingSyncedAt: null, sharingAttemptedAt: new Date(), sharingError: "Sharing failed; retry pending.",
+      } }).catch(() => {});
     }
   }
 

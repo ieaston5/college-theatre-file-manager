@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { DocumentPages } from "@/components/document-results";
 import { notFound } from "next/navigation";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -15,7 +16,6 @@ import { checklistFor, checklistProgress } from "@/lib/checklist";
 import {
   removeChecklistItemAction,
   seedChecklistAction,
-  toggleChecklistItemAction,
 } from "@/app/actions/rollover";
 import { AddChecklistItemForm } from "@/components/forms/access-and-checklist";
 import { DocumentFilters, Filtered, FilteringProvider } from "@/components/document-filters";
@@ -49,9 +49,8 @@ export default async function ProductionPage({
   const allowedProductions = visibleProductionIds(viewer);
   if (allowedProductions !== null && !allowedProductions.includes(production.id)) notFound();
 
-  // The checklist is only rendered for the people who work it, so it is only
-  // fetched for them.
-  const canManage = canCreateDocuments(viewer);
+  // Board members curate the filing guide. Company creators file within their own roles.
+  const canManage = viewer.isBoard && canCreateDocuments(viewer);
 
   // The list is started and handed to the section below rather than awaited
   // here, so the show's heading, tiles and filter bar are on screen while it
@@ -86,7 +85,7 @@ export default async function ProductionPage({
       where: { productionId: production.id, status: "ACTIVE" },
       _count: { _all: true },
     }),
-    canManage ? checklistFor(production.id) : [],
+    canManage ? checklistFor(production.id, viewer) : [],
   ]);
 
   const progress = checklistProgress(checklist);
@@ -170,7 +169,7 @@ export default async function ProductionPage({
           <>
             <Stat label="Categories used" value={filedIn.size} icon="grid" />
             <Stat
-              label="Not started"
+              label="No files"
               value={missing.length}
               icon="alert"
               hint={
@@ -226,19 +225,19 @@ export default async function ProductionPage({
               canManage={canManage}
               showPinned={viewer.isBoard}
             />
+            <DocumentPages query={documents} pathname={`/productions/${production.slug}`} params={query} pageSize={200} />
           </Suspense>
         </Filtered>
       </FilteringProvider>
 
-      {/* The checklist is the production team's to-do list — rights, budget
-          sign-off, load-in — and several of its items point at categories the
-          company cannot open. It is shown to the people who work it. */}
+
+      {/* Filing coverage is board-side guidance about shared documents. */}
       {canManage && checklist.length > 0 ? (
         <Card>
           <SectionHeader
             icon="clipboard"
-            title="Checklist"
-            description={`${progress.complete} of ${progress.total} done. Items tied to a category tick themselves as soon as something is filed there.`}
+            title="Filing guide"
+            description={`${progress.complete} of ${progress.total} categories have shared files. This shows filing coverage, not whether the contents have been reviewed or approved.`}
             action={
               <AddChecklistItemForm
                 productionId={production.id}
@@ -266,39 +265,15 @@ export default async function ProductionPage({
               const complete = item.done || item.autoDone;
               return (
                 <li key={item.id} className="flex flex-wrap items-center gap-2.5 py-2">
-                  {!item.autoDone ? (
-                    <form action={toggleChecklistItemAction}>
-                      <input type="hidden" name="id" value={item.id} />
-                      <button
-                        type="submit"
-                        className={
-                          complete
-                            ? "grid size-5 place-items-center rounded border-2 border-emerald-500 bg-emerald-500 text-white"
-                            : "grid size-5 place-items-center rounded border-2 border-ink-300 text-transparent hover:border-brand-400"
-                        }
-                        aria-label={complete ? `Untick ${item.label}` : `Tick ${item.label}`}
-                      >
-                        <Icon name="check" className="size-3" />
-                      </button>
-                    </form>
-                  ) : (
-                    <span
-                      className={
-                        complete
-                          ? "grid size-5 place-items-center rounded border-2 border-emerald-500 bg-emerald-500 text-white"
-                          : "grid size-5 place-items-center rounded border-2 border-ink-200 text-transparent"
-                      }
-                      title={item.autoDone ? "Ticked itself — something is filed" : undefined}
-                    >
-                      <Icon name="check" className="size-3" />
-                    </span>
-                  )}
+                  <span className={complete ? "text-emerald-600" : "text-ink-300"}>
+                    <Icon name={complete ? "check" : "folder"} className="size-4" />
+                  </span>
 
                   <span className="min-w-40 flex-1">
                     <span
                       className={
                         complete
-                          ? "block text-sm text-ink-500 line-through"
+                          ? "block text-sm text-ink-700"
                           : "block text-sm text-ink-900"
                       }
                     >
@@ -346,14 +321,14 @@ export default async function ProductionPage({
         <Card>
           <SectionHeader
             icon="clipboard"
-            title="No checklist yet"
-            description="The standard list of what a show needs, with the document-shaped items ticking themselves as you file."
+            title="No filing guide yet"
+            description="Add the standard file categories to see which ones contain shared documents."
           />
           <form action={seedChecklistAction}>
             <input type="hidden" name="productionId" value={production.id} />
             <button type="submit" className={buttonClass("secondary")}>
               <Icon name="clipboard" className="size-4" />
-              Add the standard checklist
+              Add the filing guide
             </button>
           </form>
         </Card>

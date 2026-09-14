@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { getConfig } from "./config";
-import { recordAudit } from "./audit";
+import { recordAudit, canvaRefreshSummary } from "./audit";
 import { canvaEnabled, canvaProvider } from "./canva";
 import {
   canvaMirrorIsStale,
@@ -77,21 +77,32 @@ export async function refreshDriveEditTimes(options?: {
 }): Promise<{ seen: number; updated: number }> {
   const config = await getConfig();
   const since =
-    options?.since ??
+    options?.since ?? config.driveScanSince ??
     new Date(
       (config.lastDriveScanAt?.getTime() ?? Date.now() - FIRST_DRIVE_SCAN_DAYS * DAY_MS) -
         DRIVE_SCAN_OVERLAP_MS,
     );
 
-  const startedAt = new Date();
-  const changed = await driveProvider().listModifiedSince(
-    since,
-    options?.limit ?? DRIVE_SCAN_PAGE,
-  );
-  if (changed.length === 0) {
+  const startedAt = config.driveScanStartedAt ?? new Date();
+  let page;
+  try {
+    page = await driveProvider().listModifiedSince(
+      since, options?.limit ?? DRIVE_SCAN_PAGE,
+      options?.since ? undefined : config.driveScanPageToken ?? undefined,
+    );
+  } catch (error) {
+    // A rejected page token can be recovered by replaying the same interval.
+    // Keep the committed watermark unchanged; duplicate timestamp writes are harmless.
+    if (config.driveScanPageToken) {
+      await prisma.orgConfig.update({ where: { id: "singleton" }, data: { driveScanPageToken: null } });
+    }
+    throw error;
+  }
+  const changed = page.files;
+  if (changed.length === 0 && !page.nextPageToken) {
     await prisma.orgConfig.update({
       where: { id: "singleton" },
-      data: { lastDriveScanAt: startedAt },
+      data: { lastDriveScanAt: startedAt, driveScanPageToken: null, driveScanSince: null, driveScanStartedAt: null },
     });
     return { seen: 0, updated: 0 };
   }
@@ -123,16 +134,18 @@ export async function refreshDriveEditTimes(options?: {
     }
   }
 
-  // Drive answers newest first, so a truncated answer is missing its oldest
-  // end. Marking the scan complete would lose those for good; instead the
-  // watermark goes back to the oldest one actually read and the next run
-  // starts from there.
-  const truncated = changed.length >= (options?.limit ?? DRIVE_SCAN_PAGE);
-  const oldestSeen = changed.at(-1)?.modifiedTime;
+  // Commit the watermark only after every page in this interval was read.
   await prisma.orgConfig.update({
     where: { id: "singleton" },
-    data: {
-      lastDriveScanAt: truncated && oldestSeen ? new Date(oldestSeen) : startedAt,
+    data: page.nextPageToken ? {
+      driveScanPageToken: page.nextPageToken,
+      driveScanSince: since,
+      driveScanStartedAt: startedAt,
+    } : {
+      lastDriveScanAt: startedAt,
+      driveScanPageToken: null,
+      driveScanSince: null,
+      driveScanStartedAt: null,
     },
   });
   return { seen: changed.length, updated };
@@ -165,6 +178,7 @@ export async function refreshStaleCanvaMirrors(options?: {
     select: {
       id: true,
       title: true,
+      visibility: true,
       canvaDesignId: true,
       canvaExportedAt: true,
       canvaDesignUpdatedAt: true,
@@ -224,7 +238,7 @@ export async function refreshStaleCanvaMirrors(options?: {
         action: "canva.export",
         targetType: "Document",
         targetId: mirror.id,
-        summary: `The hub took a fresh copy of “${mirror.title}” because the Canva design had changed`,
+        summary: canvaRefreshSummary(mirror),
       });
       refreshed += 1;
     } catch (error) {

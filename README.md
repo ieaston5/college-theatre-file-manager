@@ -5,14 +5,17 @@ instead of in Google Drive; the hub names the file, files it in the right Drive
 folder, links it to a production and shares it with exactly the right people.
 
 Built for a private environment first — it runs end to end on your laptop with
-no Google account at all, and switches to real Google Drive when you add
+no Google account at all, using local PostgreSQL, and switches to real Google Drive when you add
 credentials.
 
 ```bash
 npm install
+docker compose up -d db   # local PostgreSQL; requires Docker
 npm run setup     # generate the client, create the database, load sample data
 npm run dev       # http://localhost:3000
 ```
+
+`npm run setup` creates `.env` from the local defaults with random secrets if it does not exist. Existing configuration is preserved. Use a separate database for development.
 
 Sign in with the local sign-in list on the login screen (no Google needed
 while `ALLOW_DEV_LOGIN=true`). `ieaston@upenn.edu` is seeded as the admin.
@@ -97,7 +100,8 @@ Music by default) are admin-editable, as is which categories may be offered to
 a company at all. Budgets, casting, box office, governance, grants and venue
 are board-only out of the box, so they are never even offered as "Company" and
 never appear to a company member. Adding somebody to a show backfills their
-Drive access to everything already filed; removing them revokes it.
+Drive access to eligible files; removing them queues revocation. Updates are attempted
+inline and continue in a scheduled sharing sweep, with failures kept for retry.
 
 Nobody waits for that. Drive needs one permission per person per file, so an
 access change — a new cast member, somebody moved between roles, a role's
@@ -107,12 +111,9 @@ queue that is pushed to Drive immediately after the response. What people see
 is still catching up, and the catch-up finishes whether or not anybody stays to
 look at it.
 
-A company document is always one show's document. Somebody is in the company of
-a production, not of the hub, so "Company" is only offered for a document
-attached to a show, and it reaches that show's company and nobody else's —
-another show's cast never sees it, and neither does anybody whose company
-membership is elsewhere. Something that is not about a particular production is
-the board's.
+A company document attached to a show reaches eligible members of that show.
+An organisation-wide company document reaches active members whose roles cover
+its category. Membership in one show never grants access to another show's files.
 
 Three visibility levels on every document:
 
@@ -125,15 +126,25 @@ Three visibility levels on every document:
 Mirrored Canva designs obey the same three levels, because what is being shared
 is the exported copy in Drive rather than the Canva design.
 
-**Privacy.** `PRIVATE` means private, including from admins. A private document
-is never listed for anyone but its creator and the people they add by hand, and
-is never shared with the group in Drive. Flipping a document down a level
-revokes the wider Drive access on the spot. The activity log deliberately omits
-the titles of private documents.
+**Privacy.** A `PRIVATE` entry is listed only for its enabled creator and named
+recipients, including when an admin browses the hub. The activity log omits
+private document titles. Changing visibility updates hub-managed Drive permissions;
+failures remain pending and are retried by the sharing sweep.
+
+Hub visibility does not remove the file owner's access or permissions inherited
+from a shared folder. On registered files owned elsewhere, the hub removes only
+its tracked grants and leaves the owner's existing collaborators and public links
+alone. Grants made before tracking was introduced cannot reliably be attributed
+to the hub and need an owner review in Drive. Check Admin → Sharing for pending
+updates before relying on a revocation.
 
 **Institutional memory.** One dedicated Google account owns every document the
 hub creates, so nothing disappears when a board member graduates. Existing
 files can be registered (link + metadata) without changing their ownership.
+
+**Filing guide.** Each production can show which shared file categories contain
+documents. Private drafts do not count. This is filing coverage, not an approval
+or production-task workflow.
 
 **On its own.** One scheduled request to `/api/cron` (Vercel Cron, or anything
 else that can call a URL on a timer) finishes the re-share queue, re-exports Canva
@@ -193,9 +204,9 @@ lib/
   constants.ts            roles, doc types, visibilities — the enum vocabulary
   cron.ts                 the scheduled jobs; each one decides if it has work
   rate-limit.ts           database-backed fixed-window limits
-  db-portability.ts       the SQLite/Postgres differences, in one place
+  db-portability.ts       case-insensitive PostgreSQL search
 prisma/
-  schema.prisma           SQLite now, portable to Postgres
+  schema.prisma           PostgreSQL schema
   seed.ts                 sample categories, shows, members and documents
 scripts/
   export-metadata.ts      npm run backup
@@ -209,15 +220,15 @@ scripts/
 | | |
 |---|---|
 | `npm run dev` | development server |
-| `npm run setup` | generate client + create DB + seed |
-| `npm run db:reset` | wipe the local DB and reseed |
+| `npm run setup` | create local config if absent + generate client + migrate + seed |
+| `npm run db:reset` | reset the configured database with Prisma confirmation |
 | `npm run db:studio` | browse the database |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | production build |
 | `npm run backup` | dump the index to `backups/hub-<timestamp>.json` |
 | `npm run restore -- <file> [--dry-run]` | put a dump back, row by row |
 | `npm run rebuild -- [--apply]` | reconstruct documents from Drive's own labels |
-| `npm run use-db -- <sqlite\|postgres>` | switch the Prisma datasource |
+| `npm run use-db -- postgres` | show PostgreSQL setup guidance |
 
 ## Notes for whoever picks this up
 
@@ -225,12 +236,11 @@ scripts/
   Settings has a one-click **Remove sample data**. The seed also creates a
   sample company for the active show so the access layer is visible; sign in as
   one of them from the login screen.
-- The seeded board group is a placeholder
-  (`pennplayers-board@googlegroups.com`). Change it in Admin → Settings before
-  connecting a real Google account.
-- Text search goes through `containsInsensitive` in `lib/db-portability.ts`,
-  which adds Prisma's `mode: "insensitive"` only when `DATABASE_PROVIDER` says
-  Postgres — the option does not exist for SQLite and Prisma rejects it.
+- Board access uses individual member permissions. The optional board group
+  address is retained for email and to remove legacy group permissions during
+  a sharing sweep; it is not the access list.
+- Text search goes through `containsInsensitive` in `lib/db-portability.ts` and
+  always uses PostgreSQL's case-insensitive matching.
 - Rate limits live in `lib/rate-limit.ts`, counted in the database rather than
   in memory because a serverless host may answer each request from a different
   process. Response headers, including the CSP, are in `next.config.ts`.

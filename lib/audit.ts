@@ -96,3 +96,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
 export function auditLabel(action: string): string {
   return AUDIT_ACTION_LABELS[action] ?? action;
 }
+
+/** Background exports obey the same privacy rule as user actions. */
+export function canvaRefreshSummary(document: { visibility: string; title: string }): string {
+  return document.visibility === "PRIVATE"
+    ? "The hub refreshed a private Canva copy because its original changed"
+    : `The hub took a fresh copy of “${document.title}” because the Canva design had changed`;
+}

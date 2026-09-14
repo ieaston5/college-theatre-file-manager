@@ -15,10 +15,6 @@ import { atLeast, isBoardRole } from "./constants";
  *            script and the schedule; they do not see the light plot unless
  *            their role says so, and they never see a category that has not
  *            been marked as company-visible at all.
- *            A company document is always one show's document: somebody is in
- *            the company of a production, not of the hub, so a company
- *            document filed against no show — or against a show they are not
- *            on — is board-only as far as they are concerned.
  *   BOARD    everybody with board access to the hub. Company members never see
  *            these, whatever production they are on and whoever filed them —
  *            somebody who has come off the board keeps their private
@@ -58,7 +54,7 @@ type DocumentLike = {
   creatorId: string;
   categoryId: string;
   productionId?: string | null;
-  shares?: Array<{ userId: string }>;
+  shares?: Array<{ userId: string; accessLevel?: string }>;
 };
 
 /**
@@ -133,7 +129,7 @@ export function getViewerContext(user: Pick<User, "id" | "email" | "role">): Pro
  * a company member can only if one of their production roles says so.
  */
 export function canCreateDocuments(viewer: Viewer): boolean {
-  if (viewer.isBoard) return true;
+  if (viewer.isBoard) return atLeast(viewer.role, "BOARD");
   return viewer.memberships.some((membership) => membership.canCreate);
 }
 
@@ -165,9 +161,9 @@ export function creatableCategoryIds(viewer: Viewer): string[] | null {
 export function allowedVisibilitiesFor(
   viewer: Viewer,
   category: { companyVisible: boolean },
-  options: { hasProduction: boolean },
+  _options?: { hasProduction: boolean },
 ): string[] {
-  const byCategory = allowedVisibilities(category, options);
+  const byCategory = allowedVisibilities(category);
   if (viewer.isBoard) return byCategory;
   return byCategory.filter((visibility) => visibility !== "BOARD");
 }
@@ -190,16 +186,21 @@ export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput
   }
 
   // Company members: per production, only the categories their role covers.
-  // Nothing else — a company document that is not filed against one of their
-  // shows is not theirs, including one filed against no show at all. Somebody
-  // is in the company of a production, so that is the only thing that can
-  // carry company access to them.
   for (const membership of viewer.memberships) {
     if (membership.categoryIds.length === 0) continue;
     clauses.push({
       visibility: "COMPANY",
       productionId: membership.productionId,
       categoryId: { in: membership.categoryIds },
+    });
+  }
+  // Organisation-wide company documents (handbooks, onboarding) are not tied
+  // to a show, so any current membership is enough to reach them.
+  if (viewer.companyCategoryIds.length > 0) {
+    clauses.push({
+      visibility: "COMPANY",
+      productionId: null,
+      categoryId: { in: viewer.companyCategoryIds },
     });
   }
 
@@ -217,11 +218,13 @@ export function canViewDocument(viewer: Viewer, doc: DocumentLike): boolean {
 
   if (doc.visibility === "COMPANY") {
     if (viewer.isBoard) return true;
-    // No show, no company: a company document reaches the people on the
-    // production it is filed against, and nobody else.
-    if (!doc.productionId) return false;
-    const membership = viewer.memberships.find((item) => item.productionId === doc.productionId);
-    return Boolean(membership?.categoryIds.includes(doc.categoryId));
+    if (doc.productionId) {
+      const membership = viewer.memberships.find(
+        (item) => item.productionId === doc.productionId,
+      );
+      return Boolean(membership?.categoryIds.includes(doc.categoryId));
+    }
+    return viewer.companyCategoryIds.includes(doc.categoryId);
   }
 
   // PRIVATE, and neither creator nor an explicit share.
@@ -231,6 +234,7 @@ export function canViewDocument(viewer: Viewer, doc: DocumentLike): boolean {
 /** Creators own their documents; admins may curate anything the board can see. */
 export function canEditDocument(viewer: Viewer, doc: DocumentLike): boolean {
   if (!canViewDocument(viewer, doc)) return false;
+  if (viewer.role === "MEMBER") return false;
   if (doc.creatorId === viewer.id) return true;
   return doc.visibility !== "PRIVATE" && viewer.isAdmin;
 }
@@ -269,16 +273,10 @@ export function productionFilterFor(viewer: Viewer): Prisma.ProductionWhereInput
  * Which visibility levels the creator may choose for a document in this
  * category. "Company" is only offered where the board has said the category is
  * safe for a company to see — that is the guard that keeps budgets and casting
- * out of the cast's view even by accident — and only for a document attached
- * to a show, because the show is what names the company it reaches.
+ * out of the cast's view even by accident.
  */
-export function allowedVisibilities(
-  category: { companyVisible: boolean },
-  options: { hasProduction: boolean },
-): string[] {
-  return category.companyVisible && options.hasProduction
-    ? ["PRIVATE", "COMPANY", "BOARD"]
-    : ["PRIVATE", "BOARD"];
+export function allowedVisibilities(category: { companyVisible: boolean }, _options?: { hasProduction: boolean }): string[] {
+  return category.companyVisible ? ["PRIVATE", "COMPANY", "BOARD"] : ["PRIVATE", "BOARD"];
 }
 
 /**
@@ -290,10 +288,10 @@ export function canEditFileContents(
   doc: DocumentLike & { editAccess: string },
 ): boolean {
   if (!canViewDocument(viewer, doc)) return false;
+  if (viewer.role === "MEMBER") return false;
   if (doc.creatorId === viewer.id) return true;
   if (doc.shares?.some((share) => share.userId === viewer.id)) {
-    // A named share carries its own level, checked where it is applied.
-    return true;
+    return doc.shares.some((share) => share.userId === viewer.id && share.accessLevel === "WRITER");
   }
   if (doc.editAccess === "CREATOR_ONLY") return false;
   if (doc.editAccess === "BOARD") return viewer.isBoard && viewer.role !== "MEMBER";

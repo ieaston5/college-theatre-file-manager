@@ -61,8 +61,7 @@ export default async function ProductionCompanyPage({
       },
     }),
     prisma.document.count({
-      // This show's company documents, and only this show's: a company
-      // document that names no production reaches no company at all.
+      // Count this show's files; eligible organisation-wide files are available separately.
       where: { visibility: "COMPANY", status: "ACTIVE", productionId: production.id },
     }),
     /**

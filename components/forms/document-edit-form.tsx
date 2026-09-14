@@ -15,8 +15,6 @@ import {
   ProductionSelect,
   TagsField,
   VisibilityPicker,
-  companyVisibilityAvailable,
-  hasProduction,
   type FormCategory,
   type FormProduction,
 } from "./document-fields";
@@ -74,29 +72,13 @@ export function DocumentEditForm({
     setCategoryId(nextId);
     const next = categories.find((item) => item.id === nextId);
     if (!next) return;
-    // The category can take the document off its show, and "Company" needs
-    // one, so settle the show before deciding whether it can stay.
-    let nextProductionId = productionId;
-    if (next.scope === "STANDING") nextProductionId = "none";
-    if (next.scope === "PRODUCTION" && productionId === "none") nextProductionId = "";
-    if (nextProductionId !== productionId) setProductionId(nextProductionId);
     // A company member cannot publish to the board, so private is the only
     // place a board-only category can land for them.
-    if (
-      visibility === "COMPANY" &&
-      !companyVisibilityAvailable(next, hasProduction(nextProductionId))
-    ) {
+    if (visibility === "COMPANY" && !next.companyVisible) {
       setVisibility(companyCreatorOnly ? "PRIVATE" : "BOARD");
     }
-  }
-
-  function pickProduction(nextId: string) {
-    setProductionId(nextId);
-    // A company document is one show's document: take the show off and
-    // "Company" goes with it.
-    if (visibility === "COMPANY" && !hasProduction(nextId)) {
-      setVisibility(companyCreatorOnly ? "PRIVATE" : "BOARD");
-    }
+    if (next.scope === "STANDING") setProductionId("none");
+    if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
   }
 
   return (
@@ -135,7 +117,7 @@ export function DocumentEditForm({
         <ProductionSelect
           productions={productions}
           value={productionId}
-          onChange={pickProduction}
+          onChange={setProductionId}
           scope={category?.scope}
           companyCreatorOnly={companyCreatorOnly}
         />
@@ -147,7 +129,6 @@ export function DocumentEditForm({
           onChange={setVisibility}
           boardCount={boardCount}
           category={category}
-          hasProduction={hasProduction(productionId)}
           companyCreatorOnly={companyCreatorOnly}
         />
         <EditAccessPicker

@@ -54,7 +54,7 @@ export function RequestAccessForm({ documentId }: { documentId: string }) {
   );
 }
 
-/** Add a one-off item to a show's checklist. */
+/** Add a file category to a show's filing guide. */
 export function AddChecklistItemForm({
   productionId,
   categories,
@@ -69,7 +69,7 @@ export function AddChecklistItemForm({
     return (
       <button type="button" onClick={() => setOpen(true)} className={buttonClass("ghost", "text-xs")}>
         <Icon name="plus" className="size-3.5" />
-        Add an item
+        Add a category
       </button>
     );
   }
@@ -79,22 +79,13 @@ export function AddChecklistItemForm({
       <input type="hidden" name="productionId" value={productionId} />
       <FormBanner state={state} />
       <div className="flex flex-wrap items-end gap-2">
-        <label className="min-w-48 flex-1">
-          <span className="mb-1 block text-xs font-medium text-ink-600">What needs doing</span>
-          <input
-            name="label"
-            className={inputClass}
-            placeholder="Get the tech rider signed"
-            required
-          />
-        </label>
         <label>
-          <span className="mb-1 block text-xs font-medium text-ink-600">Ticks itself when</span>
-          <select name="categoryId" className={selectClass} defaultValue="none">
-            <option value="none">Never — tick it by hand</option>
+          <span className="mb-1 block text-xs font-medium text-ink-600">Category to track</span>
+          <select name="categoryId" className={selectClass} defaultValue="" required>
+            <option value="" disabled>Pick a category</option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
-                Something is filed in {category.name}
+                {category.name}
               </option>
             ))}
           </select>

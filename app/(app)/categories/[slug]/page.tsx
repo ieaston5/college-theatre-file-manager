@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { DocumentPages } from "@/components/document-results";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -153,6 +154,7 @@ export default async function CategoryPage({
                 </EmptyState>
               }
             />
+            <DocumentPages query={documents} pathname={`/categories/${category.slug}`} params={query} pageSize={100} />
           </Suspense>
         </Filtered>
       </FilteringProvider>
