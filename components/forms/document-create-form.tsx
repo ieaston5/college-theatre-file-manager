@@ -62,7 +62,7 @@ const MODE_COPY: Record<CreationMode, { label: string; icon: string; tint: strin
       label: "Upload a file",
       icon: "upload",
       tint: "#dc2626",
-      blurb: "Scripts, scores, PDFs, scans, images",
+      blurb: "Recordings, scripts, scores, PDFs, images",
     },
     CANVA: {
       label: "Canva design",
@@ -231,6 +231,7 @@ export function DocumentCreateForm({
             categoryId,
             productionId: productionId === "none" ? undefined : productionId,
             visibility,
+            editAccess,
             tags,
           },
           onProgress: (pct) =>
@@ -422,6 +423,7 @@ export function DocumentCreateForm({
             hint="The hub uploads it to the club's Drive, renames it to the naming rule and shares it — same as anything created here."
           >
             <FilePicker
+              simulated={driveMode === "mock"}
               files={files}
               onFiles={addFiles}
               onRemove={(index) => setFiles(files.filter((_, i) => i !== index))}

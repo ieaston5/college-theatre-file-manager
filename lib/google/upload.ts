@@ -15,9 +15,8 @@ import { GoogleCallError, type DriveFileInfo } from "./types";
  *    the session, so the browser cannot redirect the upload somewhere else or
  *    rename it around the hub's rules.
  *
- * There is a server-side proxy fallback for the case where the browser's direct
- * PUT is blocked (corporate proxies, odd extensions); it is subject to the host
- * body limit, which is fine for the small files that path tends to see.
+ * The browser sends bounded chunks and asks the server for the acknowledged
+ * offset after an interruption. Recording bytes never pass through the app.
  */
 
 const UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3/files";
@@ -25,6 +24,65 @@ const UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3/files";
 export type UploadPlan =
   | { kind: "resumable"; uploadUrl: string }
   | { kind: "direct"; uploadUrl: string };
+
+export class UploadSessionError extends Error {
+  constructor(message: string, public readonly status: number, public readonly retryable = false) {
+    super(message);
+  }
+}
+
+/** Query Google's acknowledged byte count without sending any file content. */
+export async function resumableUploadStatus(sessionUrl: string, sizeBytes: number): Promise<{
+  complete: boolean;
+  offset: number;
+  fileId?: string;
+}> {
+  let response: Response;
+  try {
+    response = await fetch(sessionUrl, {
+      method: "PUT",
+      headers: { "Content-Length": "0", "Content-Range": `bytes */${sizeBytes}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    throw new UploadSessionError("Could not reach Google to check upload progress. Retrying is safe.", 502, true);
+  }
+  if (response.status === 308) {
+    const range = response.headers.get("range");
+    if (!range) return { complete: false, offset: 0 };
+    const match = /^bytes=0-(\d+)$/i.exec(range);
+    const offset = match ? Number(match[1]) + 1 : NaN;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > sizeBytes) {
+      throw new UploadSessionError("Google returned an invalid upload position. Please retry.", 502, true);
+    }
+    return { complete: false, offset };
+  }
+  if (response.status === 200 || response.status === 201) {
+    const file = await response.json().catch(() => ({})) as { id?: string };
+    if (!file.id) throw new UploadSessionError("Google has not returned the finished file yet. Please retry.", 502, true);
+    return { complete: true, offset: sizeBytes, fileId: file.id };
+  }
+  if (response.status === 404 || response.status === 410) {
+    throw new UploadSessionError("This upload session expired. Select the file again to start a new upload.", 410);
+  }
+  if (response.status === 408 || response.status === 429 || response.status >= 500) {
+    throw new UploadSessionError("Google is temporarily unavailable. Your uploaded progress is retained; please retry.", 503, true);
+  }
+  if (response.status === 403) {
+    const body = await response.json().catch(() => null) as { error?: { errors?: Array<{ reason?: string }> } } | null;
+    const reasons = body?.error?.errors?.map(error => error.reason) ?? [];
+    if (reasons.some(reason => reason === "rateLimitExceeded" || reason === "userRateLimitExceeded")) {
+      throw new UploadSessionError("Google is temporarily limiting uploads. Your uploaded progress is retained; please retry.", 503, true);
+    }
+    if (reasons.includes("storageQuotaExceeded")) {
+      throw new UploadSessionError("The connected Google Drive is out of storage. Free up space or ask an administrator to increase storage, then start the upload again.", 403);
+    }
+  }
+  // An unusable capability must be removed from the browser's saved session,
+  // so that the next attempt can start a fresh upload rather than loop forever.
+  throw new UploadSessionError("Google could not continue this upload. Select the file again to start a new upload.", 410);
+}
 
 async function accessToken(): Promise<string> {
   const client = await driveClient();

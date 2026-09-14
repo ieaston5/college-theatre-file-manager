@@ -548,6 +548,8 @@ export async function createDocument(
 export async function recordUploadedDocument(
   actor: User,
   input: {
+    /** Stable identity makes a retried finish incapable of creating a second row. */
+    uploadId?: string;
     title: string;
     description?: string;
     categoryId: string;
@@ -568,6 +570,11 @@ export async function recordUploadedDocument(
     };
   },
 ): Promise<DocumentServiceResult> {
+  const registeredId = input.uploadId ? `upload_${input.uploadId}` : undefined;
+  if (registeredId) {
+    const existing = await prisma.document.findUnique({ where: { id: registeredId } });
+    if (existing) return { document: existing, warnings: existing.sharingDirtyAt ? ["File uploaded. Access updates are pending."] : [] };
+  }
   const category = await prisma.category.findUnique({ where: { id: input.categoryId } });
   if (!category) throw new Error("That category no longer exists.");
   const production = input.productionId
@@ -579,37 +586,51 @@ export async function recordUploadedDocument(
   const warnings: string[] = [];
   const config = await getConfig();
 
-  const document = await prisma.document.create({
-    data: {
-      // The extension belongs on the file in Drive, not on the title.
-      title: documentName(config, { baseTitle: input.title, category, production }),
-      baseTitle: input.title,
-      description: input.description ?? null,
-      docType,
-      source: "CREATED",
-      visibility: input.visibility,
-      editAccess: clampEditAccess(input.visibility, input.editAccess ?? category.defaultEditAccess),
-      categoryId: category.id,
-      productionId: production?.id ?? null,
-      creatorId: actor.id,
-      googleFileId: input.file.id,
-      webViewLink: input.file.webViewLink || driveViewLink(input.file.id, docType),
-      driveFolderId: input.driveFolderId,
-      driveOwnerEmail: input.file.ownerEmail ?? null,
-      sizeBytes: input.file.sizeBytes ?? null,
-      originalFileName: input.originalFileName,
-      mimeType: input.file.mimeType,
-      googleModifiedAt: input.file.modifiedTime ? new Date(input.file.modifiedTime) : new Date(),
-      lastEditedAt: input.file.modifiedTime ? new Date(input.file.modifiedTime) : new Date(),
-      lastSyncedAt: new Date(),
-      tags: { connect: await tagIds(input.tags) },
-      metadata: JSON.stringify({
-        createdVia: "upload",
-        driveMode: env.driveMode,
-        driveName: input.file.name,
-      }),
-    },
-  });
+  let document: Document;
+  try {
+    document = await prisma.document.create({
+      data: {
+        id: registeredId,
+        sharingDirtyAt: new Date(),
+        sharingVersion: 1,
+        // The extension belongs on the file in Drive, not on the title.
+        title: documentName(config, { baseTitle: input.title, category, production }),
+        baseTitle: input.title,
+        description: input.description ?? null,
+        docType,
+        source: "CREATED",
+        visibility: input.visibility,
+        editAccess: clampEditAccess(input.visibility, input.editAccess ?? category.defaultEditAccess),
+        categoryId: category.id,
+        productionId: production?.id ?? null,
+        creatorId: actor.id,
+        googleFileId: input.file.id,
+        webViewLink: input.file.webViewLink || driveViewLink(input.file.id, docType),
+        driveFolderId: input.driveFolderId,
+        driveOwnerEmail: input.file.ownerEmail ?? null,
+        sizeBytes: input.file.sizeBytes ?? null,
+        originalFileName: input.originalFileName,
+        mimeType: input.file.mimeType,
+        googleModifiedAt: input.file.modifiedTime ? new Date(input.file.modifiedTime) : new Date(),
+        lastEditedAt: input.file.modifiedTime ? new Date(input.file.modifiedTime) : new Date(),
+        lastSyncedAt: new Date(),
+        tags: { connect: await tagIds(input.tags) },
+        metadata: JSON.stringify({
+          createdVia: "upload",
+          driveMode: env.driveMode,
+          driveName: input.file.name,
+        }),
+      },
+    });
+  } catch (error) {
+    // A concurrent finish may have won the unique insertion. Its durable row
+    // also retains pending sharing work if that request stops unexpectedly.
+    if (registeredId && (error as { code?: string }).code === "P2002") {
+      const existing = await prisma.document.findUnique({ where: { id: registeredId } });
+      if (existing) return { document: existing, warnings: existing.sharingDirtyAt ? ["File uploaded. Access updates are pending."] : [] };
+    }
+    throw error;
+  }
 
   // The upload session was opened before this row existed, so the file's
   // labels are missing the one that matters most for a rebuild: its hub id.

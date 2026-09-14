@@ -668,8 +668,10 @@ model PendingUpload {
   fileName      String
   driveName     String
   mimeType      String
-  sizeBytes     Int?
+  sizeBytes     BigInt?
   driveFolderId String?
+  /// File accepted by Drive, retained while hub registration is retried.
+  uploadedFileId String?
   /// The Google resumable session URI. Kept server-side so the proxy fallback
   /// cannot be pointed at an arbitrary host.
   sessionUrl    String?
