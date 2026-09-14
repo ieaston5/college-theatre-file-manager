@@ -38,23 +38,23 @@ export default async function ProductionCompanyPage({
   const allowed = visibleProductionIds(viewer);
   if (allowed !== null && !allowed.includes(production.id)) notFound();
 
-  const canManage = canCreateDocuments(viewer);
+  const canManage = viewer.isBoard && canCreateDocuments(viewer);
 
   const [members, roles, companyDocCount, sharing] = await Promise.all([
     prisma.productionMember.findMany({
       where: { productionId: production.id, status: "ACTIVE" },
       include: {
         user: { select: { name: true, email: true, status: true, role: true, lastLoginAt: true } },
-        role: { select: { id: true, name: true, sortOrder: true } },
+        roles: { include: { role: { select: { id: true, name: true, sortOrder: true } } } },
       },
-      orderBy: [{ role: { sortOrder: "asc" } }, { createdAt: "asc" }],
+      orderBy: { createdAt: "asc" },
     }),
     prisma.productionRole.findMany({
       where: { archived: false },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
       include: {
         categories: {
-          where: { archived: false },
+          where: { archived: false, companyVisible: true },
           orderBy: { sortOrder: "asc" },
           select: { name: true },
         },
@@ -88,7 +88,7 @@ export default async function ProductionCompanyPage({
   // Group by role for the list.
   const grouped = new Map<string, typeof members>();
   for (const member of members) {
-    const key = member.role?.name ?? "No role";
+    const key = member.roles.map(({ role }) => role.name).sort().join(" + ") || "No role";
     grouped.set(key, [...(grouped.get(key) ?? []), member]);
   }
 
@@ -115,7 +115,7 @@ export default async function ProductionCompanyPage({
                 members.length,
                 "person",
                 "people",
-              )} on this show. What each of them can see is decided by their role — nothing else on the hub is visible to them.`
+              )} on this show. Their roles combine to grant category access for this show and eligible organisation-wide files.`
             : `${members.length} ${pluralize(
                 members.length,
                 "person",
@@ -149,14 +149,15 @@ export default async function ProductionCompanyPage({
 
       {members.length === 0 ? (
         <EmptyState icon="users" title="Nobody has been added yet">
-          Add the company and they will be able to see the {companyDocCount}{" "}
-          {pluralize(companyDocCount, "document")} already marked for the company — the schedule,
-          the contact sheet, the script — and nothing else.
+          Add the company and assign roles to give them access to eligible categories among the {companyDocCount}{" "}
+          {pluralize(companyDocCount, "document")} marked for this company, plus organisation-wide files.
         </EmptyState>
       ) : (
         <div className="space-y-4">
           {[...grouped.entries()].map(([roleName, list]) => {
-            const role = roles.find((item) => item.name === roleName);
+            const assignedIds = new Set(list[0].roles.map(({ roleId }) => roleId));
+            const assignedRoles = roles.filter((role) => assignedIds.has(role.id));
+            const categoryNames = [...new Set(assignedRoles.flatMap((role) => role.categories.map((category) => category.name)))];
             return (
               <Card key={roleName} className="p-0">
                 <div className="flex flex-wrap items-start justify-between gap-2 p-4 pb-2">
@@ -172,16 +173,16 @@ export default async function ProductionCompanyPage({
                         company at large. */}
                     {canManage ? (
                       <p className="mt-0.5 text-xs text-ink-500">
-                        {role
+                        {assignedRoles.length > 0
                           ? `Can see: ${
-                              role.categories.map((category) => category.name).join(", ") ||
+                              categoryNames.join(", ") ||
                               "nothing yet"
                             }`
-                          : "This role no longer exists — reassign these people."}
+                          : "No active roles assigned. Assign a role to grant category access."}
                       </p>
                     ) : null}
                   </div>
-                  {!role && canManage ? <Badge tone="rose">Needs attention</Badge> : null}
+                  {assignedRoles.length === 0 && canManage ? <Badge tone="rose">No active role</Badge> : null}
                 </div>
                 <ul className="divide-y divide-ink-100 border-t border-ink-100">
                   {list.map((member) => (
@@ -191,7 +192,7 @@ export default async function ProductionCompanyPage({
                       membership={{
                         id: member.id,
                         title: member.title,
-                        roleId: member.roleId,
+                        roleIds: member.roles.map(({ roleId }) => roleId),
                         userName: member.user.name,
                         userEmail: member.user.email,
                         userStatus: member.user.status,
@@ -273,9 +274,8 @@ export default async function ProductionCompanyPage({
         >
           Adding somebody, removing them, or moving them between roles queues Drive's half of the
           change and gets on with it in the background — nobody has to wait for it, and this page
-          shows the progress while it runs. This button queues all {companyDocCount} company{" "}
-          {pluralize(companyDocCount, "document")} for this show again, for when a Google call
-          failed earlier.
+          shows the progress while it runs. This button queues this show's files and
+          organisation-wide files again, for when a Google call failed earlier.
         </Banner>
       ) : null}
     </div>

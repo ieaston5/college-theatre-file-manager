@@ -48,10 +48,10 @@ export async function CompanyDashboard({
 
   const countByCategory = new Map(counts.map((row) => [row.categoryId, row._count._all]));
   const roleNames = [
-    ...new Set(viewer.memberships.map((membership) => membership.roleName).filter(Boolean)),
+    ...new Set(viewer.memberships.flatMap((membership) => membership.roles.map((role) => role.name))),
   ];
 
-  if (viewer.memberships.length === 0) {
+  if (viewer.memberships.length === 0 && total === 0) {
     return (
       <div>
         <PageHeader title={`Hello, ${greeting}`} />
@@ -68,9 +68,9 @@ export async function CompanyDashboard({
       <PageHeader
         eyebrow={roleNames.join(" · ") || undefined}
         title={`Hello, ${greeting}`}
-        description={`Everything you need for ${productions
+        description={productions.length > 0 ? `Everything you need for ${productions
           .map((production) => production.name)
-          .join(" and ")}, in one place.`}
+          .join(" and ")}, in one place.` : "Organisation-wide documents you own or that have been shared with you."}
       />
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -94,7 +94,9 @@ export async function CompanyDashboard({
                     {production.venue ? ` · ${production.venue}` : ""}
                   </div>
                 </div>
-                {membership?.roleName ? <Badge tone="green">{membership.roleName}</Badge> : null}
+                <div className="flex flex-wrap justify-end gap-1">
+                  {membership?.roles.map((role) => <Badge key={role.id} tone="green">{role.name}</Badge>)}
+                </div>
               </div>
               {membership?.title ? (
                 <div className="text-xs text-ink-600">You: {membership.title}</div>
@@ -114,12 +116,12 @@ export async function CompanyDashboard({
         <SectionHeader
           icon="grid"
           title="What you can see"
-          description={`${total} ${pluralize(total, "document")} shared with the company.`}
+          description={`${total} ${pluralize(total, "document")} available to you.`}
         />
         {categories.length === 0 ? (
           <Card className="text-sm text-ink-600">
-            Your role does not have any categories attached yet, so nothing is shared with you.
-            Whoever runs your show can fix that in the hub.
+            Your current roles do not grant any category access. Documents you own or that are
+            shared with you individually appear below when your production access allows it.
           </Card>
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -180,9 +182,9 @@ export async function CompanyDashboard({
       </section>
 
       <p className="text-xs leading-relaxed text-ink-400">
-        You are seeing this as a company member: only documents the production team has shared with
-        your role. Budgets, casting notes and board paperwork are not visible to you and are not
-        listed anywhere on this page.
+        Your roles grant access to eligible categories on your shows and organisation-wide files.
+        Individually shared files also appear here. Files belonging to shows you are not on stay
+        outside your access.
       </p>
     </div>
   );

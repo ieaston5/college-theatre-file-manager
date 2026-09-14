@@ -80,9 +80,9 @@ export default async function ProductionPage({
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.productionMember.count({ where: { productionId: production.id, status: "ACTIVE" } }),
-    prisma.productionMember.groupBy({
+    prisma.productionMemberRole.groupBy({
       by: ["roleId"],
-      where: { productionId: production.id, status: "ACTIVE" },
+      where: { member: { productionId: production.id, status: "ACTIVE" } },
       _count: { _all: true },
     }),
     canManage ? checklistFor(production.id, viewer) : [],

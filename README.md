@@ -92,7 +92,7 @@ board list, and get a `COMPANY` account with no board access at all. What they
 see is computed, not hardcoded:
 
 ```
-production membership  →  production role  →  categories the role covers
+production membership  →  assigned roles  →  union of their categories
 ```
 
 Production roles (Cast, Stage management, Design & tech, Costumes & props,
@@ -100,8 +100,13 @@ Music by default) are admin-editable, as is which categories may be offered to
 a company at all. Budgets, casting, box office, governance, grants and venue
 are board-only out of the box, so they are never even offered as "Company" and
 never appear to a company member. Adding somebody to a show backfills their
-Drive access to eligible files; removing them queues revocation. Updates are attempted
-inline and continue in a scheduled sharing sweep, with failures kept for retry.
+Drive access to eligible files; removing them queues revocation. Failed updates
+stay queued for retry.
+
+A person can hold several roles on the same show. Selecting Cast and Lighting
+combines their category access, and removing Lighting keeps Cast's access.
+Creating files requires a role that allows creation in the chosen category;
+a creation-enabled role does not turn another role's viewing access into creation access.
 
 Nobody waits for that. Drive needs one permission per person per file, so an
 access change — a new cast member, somebody moved between roles, a role's
@@ -120,10 +125,11 @@ Three visibility levels on every document:
 | | Who |
 |---|---|
 | **Private** | the creator, plus anyone they add by hand |
-| **Company** | the board, plus people on *that* production whose role covers this category |
+| **Company** | the board, plus eligible members of that production; no-show files use members' combined role categories |
 | **Board** | everyone with board access |
 
-Mirrored Canva designs obey the same three levels, because what is being shared
+Company users must belong to a document's show even if they created it or received
+a named share. Mirrored Canva designs obey the same three levels, because what is being shared
 is the exported copy in Drive rather than the Canva design.
 
 **Privacy.** A `PRIVATE` entry is listed only for its enabled creator and named

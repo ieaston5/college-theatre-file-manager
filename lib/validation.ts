@@ -181,13 +181,13 @@ export const memberSchema = z.object({
 
 export const addCompanyMembersSchema = z.object({
   productionId: z.string().min(1, "Pick a production."),
-  roleId: z.string().min(1, "Pick what they are doing on the show."),
+  roleIds: z.array(z.string().min(1)).min(1, "Pick at least one role on the show.").transform((ids) => [...new Set(ids)]),
   people: z.string().trim().min(3, "Paste at least one email address."),
 });
 
 export const membershipSchema = z.object({
   id: z.string().min(1),
-  roleId: z.string().min(1),
+  roleIds: z.array(z.string().min(1)).transform((ids) => [...new Set(ids)]),
   title: optionalText(120),
 });
 

@@ -51,7 +51,7 @@ export default async function AdminMembersPage({
           where: { status: "ACTIVE" },
           include: {
             production: { select: { name: true, slug: true, status: true } },
-            role: { select: { name: true } },
+            roles: { include: { role: { select: { name: true } } } },
           },
         },
       },
@@ -329,7 +329,7 @@ export default async function AdminMembersPage({
                                 className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600 hover:bg-ink-200"
                               >
                                 {membership.production.name} ·{" "}
-                                {membership.role?.name ?? "no role"}
+                                {membership.roles.map(({ role }) => role.name).join(", ") || "no role"}
                                 {membership.title ? ` · ${membership.title}` : ""}
                               </Link>
                             ))

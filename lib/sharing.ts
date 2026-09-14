@@ -27,8 +27,8 @@ import { syncSharing } from "./documents";
  *      went away mid-drain.
  *
  * None of the three needs the others, and running two at once is harmless:
- * pushing a document's sharing is idempotent, so the worst a double-drain costs
- * is a repeated Drive call.
+ * a renewable per-document lease serializes provider calls, and a generation
+ * check prevents old results from clearing newer changes.
  *
  * The hub's own access checks never consult this queue — those read the
  * database, so what somebody can see *on the hub* changes the instant Save
@@ -130,27 +130,26 @@ async function queueSharing(
   const markedAt = options?.urgent ? new Date(0) : new Date();
   const { count } = await prisma.document.updateMany({
     where: { ...SHARABLE, ...where },
-    data: { sharingDirtyAt: markedAt },
+    data: { sharingDirtyAt: markedAt, sharingVersion: { increment: 1 } },
   });
   if (count > 0) await beginPass();
   return count;
 }
 
 /**
- * Everything a production's company can see, after a membership or role change.
+ * Every potentially affected file after a membership or role change.
  *
  * Organisation-wide documents are included because active production roles
  * also grant access to eligible categories outside a particular show.
  *
- * With no production given, every company document on the hub — which is what
- * a change to a role's categories means, since a role is used by every show.
+ * Private creators and named shares also depend on membership, so visibility
+ * cannot narrow this sweep. With no production given, reconcile every file.
  */
 export function queueCompanySharing(
   options: { productionId?: string; urgent?: boolean } = {},
 ): Promise<number> {
   return queueSharing(
     {
-      visibility: "COMPANY",
       ...(options.productionId
         ? { OR: [{ productionId: options.productionId }, { productionId: null }] }
         : {}),
@@ -207,6 +206,9 @@ export async function drainSharingSlice(options?: {
       { sharingError: null },
       { sharingAttemptedAt: null },
       { sharingAttemptedAt: { lt: new Date(Date.now() - 60_000) } },
+    ] }, { OR: [
+      { sharingLockToken: null }, { sharingLockExpiresAt: null },
+      { sharingLockExpiresAt: { lt: new Date() } },
     ] }] },
     select: SHARABLE_SELECT,
     orderBy: [{ sharingAttemptedAt: { sort: "asc", nulls: "first" } }, { sharingDirtyAt: "asc" }, { id: "asc" }],
@@ -214,14 +216,18 @@ export async function drainSharingSlice(options?: {
   });
 
   let failures = 0;
+  let processed = 0;
   for (const document of batch) {
     try {
       const result = await syncSharing(document);
-      if (result.warnings.length) failures += 1;
+      if (!result.deferred) {
+        processed += 1;
+        if (result.warnings.length) failures += 1;
+      }
     } catch (error) {
       failures += 1;
       console.error("[sharing] could not push", document.id, error);
-      await prisma.document.update({ where: { id: document.id }, data: {
+      await prisma.document.updateMany({ where: { id: document.id, sharingLockToken: null }, data: {
         sharingSyncedAt: null, sharingAttemptedAt: new Date(), sharingError: "Sharing failed; retry pending.",
       } }).catch(() => {});
     }
@@ -236,7 +242,7 @@ export async function drainSharingSlice(options?: {
       .catch(() => {});
   }
 
-  return { ...progress, processed: batch.length, failures };
+  return { ...progress, processed, failures };
 }
 
 /** Slice after slice until the queue is empty or the time is up. */

@@ -254,6 +254,9 @@ model Document {
   /// The timestamp is the queue's order — oldest first — which also lets an
   /// urgent change (somebody's access being *removed*) be backdated so it
   /// drains ahead of work that was already waiting.
+  sharingVersion Int @default(0)
+  sharingLockToken String?
+  sharingLockExpiresAt DateTime?
   sharingDirtyAt    DateTime?
   sharingAttemptedAt DateTime?
   sharingError       String?
@@ -348,17 +351,19 @@ model ProductionRole {
   updatedAt   DateTime @updatedAt
 
   categories Category[]
-  members    ProductionMember[]
+  members    ProductionMemberRole[]
+  legacyMembers ProductionMember[]
 
   @@index([archived])
 }
 
-/// Somebody working on one show. Access comes from the role; `title` is just
+/// Somebody working on one show. Access combines their roles; `title` is just
 /// what they are called on the programme ("Ensemble", "Lighting Designer").
 model ProductionMember {
   id           String   @id @default(cuid())
   productionId String
   userId       String
+  /// Legacy single-role value retained for upgrade compatibility; roles is authoritative.
   roleId       String?
   title        String?
   status       String   @default("ACTIVE") // ACTIVE | REMOVED
@@ -369,12 +374,25 @@ model ProductionMember {
   production Production      @relation(fields: [productionId], references: [id], onDelete: Cascade)
   user       User            @relation("MembershipUser", fields: [userId], references: [id], onDelete: Cascade)
   role       ProductionRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  roles      ProductionMemberRole[]
   addedBy    User?           @relation("MembershipAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
 
   @@unique([productionId, userId])
   @@index([userId])
   @@index([productionId])
   @@index([status])
+}
+
+/// An additive role assignment within one person's production membership.
+model ProductionMemberRole {
+  id String @id @default(cuid())
+  memberId String
+  roleId String
+  member ProductionMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  role ProductionRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, roleId])
+  @@index([roleId])
 }
 
 // ---------------------------------------------------------------------------

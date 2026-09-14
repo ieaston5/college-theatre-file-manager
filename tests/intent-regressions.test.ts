@@ -21,6 +21,7 @@ function matches(row: any, where: any): boolean {
     if ("not" in condition) return typeof condition.not === "object" && condition.not !== null ? !matches({ value }, { value: condition.not }) : value !== condition.not;
     if ("in" in condition) return condition.in.includes(value);
     if ("lt" in condition) return value != null && value < condition.lt;
+    if ("gt" in condition) return value != null && value > condition.gt;
     if ("gte" in condition) return value != null && value >= condition.gte;
     if ("some" in condition) return value?.some((v: any) => matches(v, condition.some));
     return matches(value, condition);
@@ -45,13 +46,17 @@ for (const model of ["orgConfig", "document", "category", "production", "driveAc
         } return 0; });
       }
       if (op === "count") return found.length;
-      if (op === "findUnique" || op === "findFirst") return found[0] ?? null;
+      if (op === "findUnique" || op === "findFirst") return structuredClone(found[0] ?? null);
       if (op === "findMany") {
         const offset = args.cursor ? found.findIndex(row => row.id === args.cursor.id) + (args.skip ?? 0) : args.skip ?? 0;
-        return found.slice(offset, args.take ? offset + args.take : undefined);
+        return structuredClone(found.slice(offset, args.take ? offset + args.take : undefined));
       }
       if (op === "update" || op === "updateMany") {
-        for (const row of op === "update" ? found.slice(0, 1) : found) Object.assign(row, args.data);
+        for (const row of op === "update" ? found.slice(0, 1) : found) {
+          for (const [key, value] of Object.entries(args.data) as [string, any][]) {
+            row[key] = value && typeof value === "object" && "increment" in value ? row[key] + value.increment : value;
+          }
+        }
         return op === "update" ? found[0] : { count: found.length };
       }
       if (op === "create" || op === "createMany") {
@@ -95,7 +100,7 @@ beforeEach(() => {
   tables.category = [{ id: "scripts", name: "Scripts", slug: "scripts", scope: "BOTH", companyVisible: true, archived: false }];
   tables.production = [{ id: "show-a", name: "A", slug: "a", status: "ACTIVE", driveFolderId: "folder-a" }, { id: "show-b", name: "B", slug: "b", status: "ACTIVE", driveFolderId: "folder-b" }];
   tables.driveAccount = [{ id: "singleton", email: "hub@example.test", rootFolderId: "root", productionsFolderId: "productions", standingFolderId: "standing" }];
-  tables.document = [{ id: "doc", googleFileId: "file", creatorId: "owner", title: "Script", baseTitle: "Script", categoryId: "scripts", category: tables.category[0], productionId: "show-a", production: tables.production[0], visibility: "COMPANY", source: "CREATED", editAccess: "BOARD", docType: "DOC", status: "ACTIVE", sharingDirtyAt: null, sharingSyncedAt: null, sharingAttemptedAt: null, sharingError: null, managedDrivePermissions: null, shares: [], createdAt: new Date(), lastEditedAt: new Date() }];
+  tables.document = [{ id: "doc", googleFileId: "file", creatorId: "owner", title: "Script", baseTitle: "Script", categoryId: "scripts", category: tables.category[0], productionId: "show-a", production: tables.production[0], visibility: "COMPANY", source: "CREATED", editAccess: "BOARD", docType: "DOC", status: "ACTIVE", sharingDirtyAt: null, sharingSyncedAt: null, sharingAttemptedAt: null, sharingError: null, managedDrivePermissions: null, sharingVersion: 0, sharingLockToken: null, sharingLockExpiresAt: null, shares: [], createdAt: new Date(), lastEditedAt: new Date() }];
   const provider = google.driveProvider();
   provider.applySharing = async () => ({ granted: [], revoked: [], warnings: [], managedPermissionIds: [] });
   provider.renameFile = provider.moveFile = provider.setAppProperties = async () => {};
@@ -141,7 +146,7 @@ test("a former board creator does not keep their board document", async () => {
 
 test("closing a category to company access removes that audience", async () => {
   const companyUser = { id: "cast", email: "cast@example.test", role: "COMPANY", status: "ACTIVE" };
-  tables.productionMember = [{ productionId: "show-a", status: "ACTIVE", user: companyUser, production: tables.production[0], role: { archived: false, categories: [tables.category[0]] } }];
+  tables.productionMember = [{ productionId: "show-a", status: "ACTIVE", user: companyUser, production: tables.production[0], roles: [{ role: { archived: false, categories: [tables.category[0]] } }] }];
   let received: any;
   google.driveProvider().applySharing = async (_id, plan) => { received = plan; return { granted: [], revoked: [], warnings: [] }; };
   // Avoid returning the company fixture as the creator's own membership.
@@ -295,3 +300,154 @@ test("Canva list shortcuts render a freshness-check button rather than a direct 
   assert(html.includes("Check Canva and open copy"));
   assert(!html.includes('href="https://drive.google.com'));
 });
+
+function gate<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+const sharingOK = (ids: string[] = []) => ({ granted: [], revoked: [], warnings: [], managedPermissionIds: ids });
+
+test("parallel sharing callers never overlap provider calls or clear a newer request", async () => {
+  const entered = gate<void>(); const release = gate<void>();
+  let providerCalls = 0;
+  google.driveProvider().applySharing = async () => {
+    providerCalls += 1; entered.resolve(); await release.promise; return sharingOK();
+  };
+  const first = docs.syncSharing(tables.document[0] as any);
+  await entered.promise;
+  const second = await docs.syncSharing(tables.document[0] as any);
+  assert.equal(second.deferred, true);
+  assert.equal(providerCalls, 1);
+  release.resolve();
+  assert.equal((await first).deferred, true);
+  assert(tables.document[0].sharingDirtyAt);
+  assert.equal(tables.document[0].sharingSyncedAt, null);
+  assert.equal(tables.document[0].sharingLockToken, null);
+  google.driveProvider().applySharing = async () => sharingOK();
+  await docs.syncSharing(tables.document[0] as any);
+  assert.equal(tables.document[0].sharingDirtyAt, null);
+});
+
+test("an audience change during Drive I/O retries from fresh data and preserves new grant IDs", async () => {
+  const entered = gate<void>(); const release = gate<void>();
+  const staleCaller = structuredClone(tables.document[0]);
+  google.driveProvider().applySharing = async () => {
+    entered.resolve(); await release.promise; return sharingOK(["old-audience-grant"]);
+  };
+  const pending = docs.syncSharing(staleCaller as any);
+  await entered.promise;
+  await fake.document.update({ where: { id: "doc" }, data: { visibility: "PRIVATE" } });
+  await sharing.queueDocumentSharing("doc");
+  release.resolve();
+  assert.equal((await pending).deferred, true);
+  assert.deepEqual(JSON.parse(tables.document[0].managedDrivePermissions), ["old-audience-grant"]);
+  assert(tables.document[0].sharingDirtyAt);
+  google.driveProvider().applySharing = async (_id, plan) => {
+    assert.equal(plan.visibility, "PRIVATE");
+    assert.deepEqual(plan.managedPermissionIds, ["old-audience-grant"]);
+    return { ...sharingOK(), revoked: ["old-audience@example.test"] };
+  };
+  await docs.syncSharing(staleCaller as any);
+  assert.equal(tables.document[0].sharingDirtyAt, null);
+  assert.deepEqual(JSON.parse(tables.document[0].managedDrivePermissions), []);
+});
+
+test("a late expired lease cannot clear a replacement worker's lease or lose its grants", async () => {
+  const firstEntered = gate<void>(); const secondEntered = gate<void>();
+  const releaseFirst = gate<void>(); const releaseSecond = gate<void>();
+  let count = 0;
+  google.driveProvider().applySharing = async () => {
+    count += 1;
+    if (count === 1) { firstEntered.resolve(); await releaseFirst.promise; return sharingOK(["late-grant"]); }
+    secondEntered.resolve(); await releaseSecond.promise; return sharingOK(["new-grant"]);
+  };
+  const first = docs.syncSharing(tables.document[0] as any);
+  await firstEntered.promise;
+  tables.document[0].sharingLockExpiresAt = new Date(0);
+  const second = docs.syncSharing(tables.document[0] as any);
+  await secondEntered.promise;
+  const replacementToken = tables.document[0].sharingLockToken;
+  releaseFirst.resolve();
+  assert.equal((await first).deferred, true);
+  assert.equal(tables.document[0].sharingLockToken, replacementToken);
+  releaseSecond.resolve();
+  assert.equal((await second).deferred, true);
+  assert.deepEqual(JSON.parse(tables.document[0].managedDrivePermissions).sort(), ["late-grant", "new-grant"]);
+  assert(tables.document[0].sharingDirtyAt);
+  assert.equal(tables.document[0].sharingSyncedAt, null);
+  google.driveProvider().applySharing = async (_id, plan) => {
+    assert.deepEqual(plan.managedPermissionIds?.sort(), ["late-grant", "new-grant"]);
+    return sharingOK();
+  };
+  await docs.syncSharing(tables.document[0] as any);
+  assert.equal(tables.document[0].sharingDirtyAt, null);
+});
+
+test("a late expired worker requeues even after a newer worker finished successfully", async () => {
+  const entered = gate<void>(); const release = gate<void>();
+  let count = 0;
+  google.driveProvider().applySharing = async () => {
+    if (++count === 1) { entered.resolve(); await release.promise; return sharingOK(["late-grant"]); }
+    return sharingOK(["current-grant"]);
+  };
+  const first = docs.syncSharing(tables.document[0] as any);
+  await entered.promise;
+  tables.document[0].sharingLockExpiresAt = new Date(0);
+  await docs.syncSharing(tables.document[0] as any);
+  assert.equal(tables.document[0].sharingDirtyAt, null);
+  release.resolve();
+  assert.equal((await first).deferred, true);
+  assert(tables.document[0].sharingDirtyAt);
+  assert.deepEqual(JSON.parse(tables.document[0].managedDrivePermissions).sort(), ["current-grant", "late-grant"]);
+});
+
+test("external edit grants are preserved but reported when the hub requests read-only", async () => {
+  const provider: any = new Real();
+  provider.drive = async () => ({ permissions: {
+    list: async () => ({ data: { permissions: [{ id: "external", type: "user", role: "writer", emailAddress: "reader@example.test" }] } }),
+    create: async () => assert.fail("An existing external grant must not be claimed"),
+    update: async () => assert.fail("The owner's grant must not be changed"),
+    delete: async () => assert.fail("The owner's grant must not be removed"),
+  } });
+  const result = await provider.applySharing("file", { visibility: "COMPANY", creatorEmail: null, strategy: "additive", extra: [{ email: "reader@example.test", level: "READER" }] });
+  assert.match(result.warnings.join(" "), /existing edit access.*managed outside the hub/);
+  assert.deepEqual(result.managedPermissionIds, []);
+  assert.equal(result.granted[0].level, "WRITER");
+});
+
+test("membership changes queue private creators and named shares as well as company files", async () => {
+  const base = tables.document[0];
+  tables.document = [
+    { ...base, id: "private", visibility: "PRIVATE" },
+    { ...base, id: "board", visibility: "BOARD" },
+    { ...base, id: "org", visibility: "COMPANY", productionId: null },
+    { ...base, id: "other", productionId: "show-b" },
+  ];
+  assert.equal(await sharing.queueCompanySharing({ productionId: "show-a", urgent: true }), 3);
+  assert(tables.document.slice(0, 3).every(doc => doc.sharingDirtyAt && doc.sharingVersion === 1));
+  assert.equal(tables.document[3].sharingDirtyAt, null);
+});
+
+for (const role of ["writer", "organizer", "fileOrganizer"]) {
+  for (const strategy of ["additive", "reconcile"] as const) {
+    test(`${strategy} sharing reports inherited ${role} access honestly`, async () => {
+      const provider: any = new Real();
+      provider.drive = async () => ({ permissions: {
+        list: async () => ({ data: { permissions: [{ id: "inherited", type: "user", role, emailAddress: "reader@example.test", permissionDetails: [{ inherited: true }] }] } }),
+        create: async () => assert.fail("Inherited access already satisfies the requested grant"),
+        update: async () => assert.fail("An inherited grant cannot be narrowed here"),
+        delete: async () => assert.fail("An inherited grant cannot be removed here"),
+      } });
+      const plan = { visibility: "COMPANY", creatorEmail: null, strategy, extra: [{ email: "reader@example.test", level: "READER" }] };
+      const result = await provider.applySharing("file", plan);
+      assert.equal(result.warnings.length, 1);
+      assert.equal(result.granted[0].level, "WRITER");
+      assert.deepEqual(result.managedPermissionIds, []);
+      const writerResult = await provider.applySharing("file", { ...plan, extra: [{ email: "reader@example.test", level: "WRITER" }] });
+      assert.deepEqual(writerResult.warnings, []);
+      assert.equal(writerResult.granted[0].level, "WRITER");
+    });
+  }
+}

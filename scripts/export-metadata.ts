@@ -31,7 +31,7 @@ const outFlag = args.indexOf("--out");
 const explicitOut = outFlag >= 0 ? args[outFlag + 1] : undefined;
 
 /** The dump format version, so a future restore can migrate an old file. */
-const FORMAT = 1;
+const FORMAT = 2;
 
 async function collect() {
   // Ordered the way a restore has to insert them: parents before children.
@@ -60,8 +60,8 @@ async function collect() {
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
     prisma.production.findMany({ orderBy: { createdAt: "asc" } }),
-    prisma.productionRole.findMany({ orderBy: { sortOrder: "asc" } }),
-    prisma.productionMember.findMany(),
+    prisma.productionRole.findMany({ orderBy: { sortOrder: "asc" }, include: { categories: { select: { id: true } } } }),
+    prisma.productionMember.findMany({ include: { roles: { select: { roleId: true } } } }),
     prisma.tag.findMany(),
     prisma.template.findMany(),
     prisma.document.findMany({
@@ -101,8 +101,12 @@ async function collect() {
     users,
     categories,
     productions,
-    productionRoles,
-    productionMembers,
+    productionRoles: productionRoles.map(({ categories: roleCategories, ...rest }) => ({
+      ...rest, categoryIds: roleCategories.map(({ id }) => id),
+    })),
+    productionMembers: productionMembers.map(({ roles, ...rest }) => ({
+      ...rest, roleId: null, roleIds: roles.map(({ roleId }) => roleId),
+    })),
     tags,
     templates,
     // Tag links are flattened to ids so a restore can `connect` them.

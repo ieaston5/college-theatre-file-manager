@@ -253,6 +253,11 @@ export function CategoryForm({
   const [icon, setIcon] = useState(category?.icon ?? "folder");
   const [color, setColor] = useState(category?.color ?? "#6366f1");
   const [scope, setScope] = useState(category?.scope ?? "BOTH");
+  // Keep saved choices visible when React resets uncontrolled fields after a
+  // successful form action. The category key resets these when switching rows.
+  const [defaultVisibility, setDefaultVisibility] = useState(category?.defaultVisibility ?? "BOARD");
+  const [defaultEditAccess, setDefaultEditAccess] = useState(category?.defaultEditAccess ?? "BOARD");
+  const [defaultDocType, setDefaultDocType] = useState(category?.defaultDocType ?? "");
 
   return (
     <form action={formAction} className="space-y-5">
@@ -337,7 +342,8 @@ export function CategoryForm({
           <select
             id="defaultDocType"
             name="defaultDocType"
-            defaultValue={category?.defaultDocType ?? ""}
+            value={defaultDocType}
+            onChange={(event) => setDefaultDocType(event.target.value)}
             className={selectClass}
           >
             <option value="">No default</option>
@@ -357,7 +363,8 @@ export function CategoryForm({
           <select
             id="defaultEditAccess"
             name="defaultEditAccess"
-            defaultValue={category?.defaultEditAccess ?? "BOARD"}
+            value={defaultEditAccess}
+            onChange={(event) => setDefaultEditAccess(event.target.value)}
             className={selectClass}
           >
             {EDIT_ACCESS_LEVELS.map((level) => (
@@ -372,7 +379,8 @@ export function CategoryForm({
           <select
             id="defaultVisibility"
             name="defaultVisibility"
-            defaultValue={category?.defaultVisibility ?? "BOARD"}
+            value={defaultVisibility}
+            onChange={(event) => setDefaultVisibility(event.target.value)}
             className={selectClass}
           >
             {VISIBILITIES.map((visibility) => (

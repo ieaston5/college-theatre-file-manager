@@ -473,6 +473,7 @@ export class MockDriveProvider implements DriveProvider {
         kept.push(perm);
         if (wanted) {
           desired.delete(email);
+          if (wanted === "reader" && perm.role === "writer") warnings.push(`The file owner must remove ${email}'s existing edit access before read-only access can be enforced; that permission is managed outside the hub.`);
           if (wanted === "writer" && perm.role !== "writer") warnings.push(`The file owner must give ${email} edit access; their existing permission is managed outside the hub.`);
         }
         continue;

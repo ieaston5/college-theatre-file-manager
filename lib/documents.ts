@@ -20,7 +20,7 @@ import { canvaProvider, extractCanvaDesignId, getCanvaAccount } from "./canva";
 // Re-exported so the existing callers keep working; anything that only needs
 // the rule should import it straight from lib/canva/freshness.
 export { canvaMirrorIsStale } from "./canva/freshness";
-import { canCreateDocuments, canViewDocument, getViewerContext, type Viewer } from "./access";
+import { canCreateDocuments, canViewDocument, canAccessProduction, getViewerContext, type Viewer } from "./access";
 import { putBytesToDrive } from "./google/upload";
 import {
   applyNamingTemplate,
@@ -115,7 +115,7 @@ async function companyRecipients(doc: {
       // granting access the hub had stopped showing.
       production: { status: { not: "ARCHIVED" } },
       ...(doc.productionId ? { productionId: doc.productionId } : {}),
-      role: { archived: false, categories: { some: { id: doc.categoryId, companyVisible: true, archived: false } } },
+      roles: { some: { role: { archived: false, categories: { some: { id: doc.categoryId, companyVisible: true, archived: false } } } } },
     },
     select: { user: { select: { email: true } } },
   });
@@ -164,13 +164,13 @@ export function assertCreationAllowed(
   const orgWideAllowed =
     !input.productionId &&
     viewer.memberships.some(
-      (entry) => entry.canCreate && entry.categoryIds.includes(input.categoryId),
+      (entry) => entry.creatableCategoryIds.includes(input.categoryId),
     );
 
   if (!membership && !orgWideAllowed) {
     throw new Error("You can only file documents for a show you are working on.");
   }
-  if (membership && !membership.categoryIds.includes(input.categoryId)) {
+  if (membership && !membership.creatableCategoryIds.includes(input.categoryId)) {
     throw new Error("Your role on this show does not cover that category.");
   }
 }
@@ -218,7 +218,10 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
     doc.visibility === "PRIVATE" ? Promise.resolve([]) : boardRecipients(boardCanEdit),
   ]);
 
-  const extra = shares.map((share) => ({
+  const eligibleShares = (await Promise.all(shares.map(async (share) =>
+    canAccessProduction(await getViewerContext(share.user), doc.productionId) ? share : null
+  ))).filter((share): share is (typeof shares)[number] => share !== null);
+  const extra = eligibleShares.map((share) => ({
     email: share.user.email,
     level: (share.user.role === "MEMBER" ? "READER" : share.accessLevel) as "READER" | "WRITER",
   }));
@@ -264,55 +267,109 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   };
 }
 
-/** Push a document's visibility + share list into Drive. */
+/** Push current permissions under a renewable per-document lease.
+ * No database connection or transaction stays open during a provider request.
+ */
 export async function syncSharing(
   doc: SharableDocument & Pick<Document, "googleFileId" | "docType">,
 ): Promise<SharingResult> {
-  if (!doc.googleFileId || doc.docType === "LINK") {
-    return { granted: [], revoked: [], warnings: [] };
+  // Every request is a new generation, including direct calls outside the queue.
+  // Never trust the caller's row: it may have waited behind a different sync.
+  await queueDocumentSharing(doc.id);
+  const token = crypto.randomUUID();
+  const leaseMs = 60_000;
+  const lock = await prisma.document.updateMany({
+    where: { id: doc.id, googleFileId: { not: null }, docType: { not: "LINK" }, OR: [
+      { sharingLockToken: null }, { sharingLockExpiresAt: null },
+      { sharingLockExpiresAt: { lt: new Date() } },
+    ] },
+    data: { sharingLockToken: token, sharingLockExpiresAt: new Date(Date.now() + leaseMs) },
+  });
+  if (!lock.count) {
+    return { granted: [], revoked: [], warnings: [], deferred: true };
   }
-  const queued = await prisma.document.findUnique({ where: { id: doc.id }, select: { sharingDirtyAt: true } });
-  const attemptedAt = new Date();
-  let result: SharingResult;
+
+  let lostLease = false;
+  let renewal: Promise<void> | null = null;
+  const heartbeat = setInterval(() => {
+    if (renewal) return;
+    renewal = prisma.document.updateMany({
+      where: { id: doc.id, sharingLockToken: token, sharingLockExpiresAt: { gt: new Date() } },
+      data: { sharingLockExpiresAt: new Date(Date.now() + leaseMs) },
+    }).then(({ count }) => { if (!count) lostLease = true; })
+      .catch(() => { lostLease = true; })
+      .finally(() => { renewal = null; });
+  }, leaseMs / 3);
+  heartbeat.unref();
+
   try {
-    const plan = await sharingPlanFor(doc);
-    result = await driveProvider().applySharing(doc.googleFileId, plan);
-  } catch (error) {
-    result = { granted: [], revoked: [], warnings: [error instanceof Error ? error.message : "Drive sharing failed."] };
-  }
-  await prisma.document.update({ where: { id: doc.id }, data: {
-    sharingAttemptedAt: attemptedAt,
-    sharingSyncedAt: result.warnings.length ? null : attemptedAt,
-    sharingError: result.warnings.length ? result.warnings.join("\n") : null,
-    ...(result.managedPermissionIds ? { managedDrivePermissions: JSON.stringify(result.managedPermissionIds) } : {}),
-  } });
-  if (result.warnings.length) {
-    await prisma.document.updateMany({
-      where: { id: doc.id, sharingDirtyAt: null }, data: { sharingDirtyAt: attemptedAt },
-    });
-    await prisma.orgConfig.updateMany({
-      where: { id: "singleton", sharingSweepStartedAt: null },
-      data: { sharingSweepStartedAt: attemptedAt },
-    });
-  }
+    const current = await prisma.document.findUnique({ where: { id: doc.id } });
+    if (!current?.googleFileId || current.docType === "LINK") {
+      return { granted: [], revoked: [], warnings: [], deferred: true };
+    }
+    const attemptedAt = new Date();
+    const version = current.sharingVersion;
+    let originalManaged: string[] = [];
+    let result: SharingResult;
+    try {
+      const plan = await sharingPlanFor(current);
+      originalManaged = plan.managedPermissionIds ?? [];
+      result = await driveProvider().applySharing(current.googleFileId, plan);
+    } catch (error) {
+      result = { granted: [], revoked: [], warnings: [error instanceof Error ? error.message : "Drive sharing failed."] };
+    }
 
-  if (!result.warnings.length) {
-    await prisma.document.updateMany({
-      where: { id: doc.id, sharingDirtyAt: queued?.sharingDirtyAt ?? null },
-      data: { sharingDirtyAt: null },
+    // Token, lease and generation must all still match. A late result cannot
+    // clear a newer request or overwrite a newer worker's grant provenance.
+    const completed = lostLease ? { count: 0 } : await prisma.document.updateMany({
+      where: { id: doc.id, sharingLockToken: token, sharingVersion: version,
+        managedDrivePermissions: current.managedDrivePermissions,
+        sharingLockExpiresAt: { gt: new Date() } },
+      data: {
+        sharingAttemptedAt: attemptedAt,
+        sharingSyncedAt: result.warnings.length ? null : attemptedAt,
+        sharingError: result.warnings.length ? result.warnings.join("\n") : null,
+        ...(result.warnings.length ? {} : { sharingDirtyAt: null }),
+        ...(result.managedPermissionIds ? { managedDrivePermissions: JSON.stringify(result.managedPermissionIds) } : {}),
+      },
     });
-  }
+    if (!completed.count) {
+      // Preserve only grants this obsolete worker actually added. Union using
+      // compare-and-swap so a newer worker's IDs cannot be overwritten.
+      const added = (result.managedPermissionIds ?? []).filter(id => !originalManaged.includes(id));
+      if (added.length) {
+        let saved = false;
+        for (let attempt = 0; attempt < 8 && !saved; attempt += 1) {
+          const latest = await prisma.document.findUnique({ where: { id: doc.id }, select: { managedDrivePermissions: true } });
+          if (!latest) break;
+          const merged = [...new Set([...(JSON.parse(latest.managedDrivePermissions ?? "[]") as string[]), ...added])];
+          const written = await prisma.document.updateMany({
+            where: { id: doc.id, managedDrivePermissions: latest.managedDrivePermissions },
+            data: { managedDrivePermissions: JSON.stringify(merged), sharingDirtyAt: new Date(), sharingVersion: { increment: 1 } },
+          });
+          saved = written.count > 0;
+        }
+        if (!saved) throw new Error("Could not record a completed Drive grant; access reconciliation remains pending.");
+      }
+      await queueDocumentSharing(doc.id);
+      return { ...result, deferred: true, warnings: [...result.warnings, "Access changed while Drive was updating; the latest permissions are queued."] };
+    }
 
-  // Keep the recorded permission ids in step with Drive.
-  for (const grant of result.granted) {
-    await prisma.documentShare
-      .updateMany({
+    for (const grant of result.granted) {
+      await prisma.documentShare.updateMany({
         where: { documentId: doc.id, user: { email: grant.email } },
         data: { drivePermId: grant.permissionId },
-      })
-      .catch(() => {});
+      }).catch(() => {});
+    }
+    return result;
+  } finally {
+    clearInterval(heartbeat);
+    if (renewal) await renewal;
+    await prisma.document.updateMany({
+      where: { id: doc.id, sharingLockToken: token },
+      data: { sharingLockToken: null, sharingLockExpiresAt: null },
+    });
   }
-  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -1293,6 +1350,9 @@ export async function shareDocument(
   ]);
   if (!document) throw new Error("That document no longer exists.");
   if (!user) throw new Error("That member no longer exists.");
+  if (user.status === "DISABLED" || !canAccessProduction(await getViewerContext(user), document.productionId)) {
+    throw new Error("This person must be an enabled member of this production before you can share its files with them.");
+  }
   if (user.id === document.creatorId) {
     throw new Error("The creator already has access.");
   }

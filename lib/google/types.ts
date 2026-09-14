@@ -111,6 +111,8 @@ export type SharingPlan = {
 export type AppliedPermission = { email: string; level: AccessLevel; permissionId: string | null };
 
 export type SharingResult = {
+  /** Another worker or newer audience still needs to finish this update. */
+  deferred?: boolean;
   granted: AppliedPermission[];
   revoked: string[];
   warnings: string[];

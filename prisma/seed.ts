@@ -781,11 +781,15 @@ async function main() {
         create: {
           productionId: activeShow.id,
           userId: user.id,
-          roleId,
+          roles: { create: roleId ? [{ roleId }] : [] },
           title: person.title,
           addedById: admin.id,
         },
-        update: { roleId, title: person.title },
+        update: {
+          roleId: null,
+          title: person.title,
+          roles: { createMany: { data: roleId ? [{ roleId }] : [], skipDuplicates: true } },
+        },
       });
     }
   }

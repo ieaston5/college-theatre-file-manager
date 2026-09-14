@@ -602,13 +602,17 @@ export class GoogleDriveProvider implements DriveProvider {
       const email = perm.emailAddress?.toLowerCase();
       const isLinkShare = perm.type === "anyone" || perm.type === "domain";
       const wanted = email ? desired.get(email) : undefined;
+      const canEdit = perm.role === "writer" || perm.role === "organizer" || perm.role === "fileOrganizer";
       if (additive && !managed.has(perm.id) && email !== retiredGroup) {
         // External collaborators belong to the owner. Do not narrow their
         // access or claim their existing permission as one the hub controls.
         if (wanted && email) {
-          if (perm.role === "writer" || wanted.level === "READER") {
+          if (canEdit || wanted.level === "READER") {
             desired.delete(email);
-            granted.push({ email, level: perm.role === "writer" ? "WRITER" : "READER", permissionId: perm.id });
+            granted.push({ email, level: canEdit ? "WRITER" : "READER", permissionId: perm.id });
+            if (canEdit && wanted.level === "READER") {
+              warnings.push(`The file owner must remove ${email}'s existing edit access before read-only access can be enforced; that permission is managed outside the hub.`);
+            }
           } else {
             desired.delete(email);
             warnings.push(`The file owner must give ${email} edit access; their existing permission is managed outside the hub.`);
@@ -623,11 +627,11 @@ export class GoogleDriveProvider implements DriveProvider {
       const inherited = perm.permissionDetails?.some((detail) => detail.inherited) ?? false;
 
       if (inherited) {
-        if (wanted && email && roleMatches) {
-          // The drive already grants exactly what the plan asks for.
+        if (wanted && email && (roleMatches || (wanted.level === "WRITER" && canEdit))) {
+          // The inherited permission already supplies the requested access.
           desired.delete(email);
           granted.push({ email, level: wanted.level, permissionId: perm.id });
-        } else if (wanted && email && wanted.level === "READER" && perm.role === "writer") {
+        } else if (wanted && email && wanted.level === "READER" && canEdit) {
           // Cannot be narrowed here: the drive gave them edit access. Left in
           // place, and left out of `desired` so no pointless grant is made.
           desired.delete(email);

@@ -121,7 +121,7 @@ export default async function DocumentPage({
   // The audience, the pending requests, the share picker and the history are
   // independent of one another; awaiting them in turn cost four rounds of
   // database latency on a page that needs one.
-  const [companyAudience, pendingRequests, shareableMembers, activity] = await Promise.all([
+  const [companyMemberships, pendingRequests, shareableMembers, activity] = await Promise.all([
     // Show files use that company; organisation-wide files use eligible active roles.
     document.visibility === "COMPANY"
       ? prisma.productionMember.findMany({
@@ -130,14 +130,14 @@ export default async function DocumentPage({
             user: { status: { not: "DISABLED" } },
             ...(document.productionId ? { productionId: document.productionId } : {}),
             production: { status: { not: "ARCHIVED" } },
-            role: { archived: false, categories: { some: { id: document.categoryId, archived: false, companyVisible: true } } },
+            roles: { some: { role: { archived: false, categories: { some: { id: document.categoryId, archived: false, companyVisible: true } } } } },
           },
           include: {
             user: { select: { name: true, email: true } },
-            role: { select: { name: true } },
+            roles: { include: { role: { select: { name: true } } } },
             production: { select: { name: true, slug: true } },
           },
-          orderBy: [{ role: { sortOrder: "asc" } }, { createdAt: "asc" }],
+          orderBy: { createdAt: "asc" },
         })
       : [],
     canEdit
@@ -152,6 +152,10 @@ export default async function DocumentPage({
           where: {
             status: { not: "DISABLED" },
             id: { notIn: [document.creatorId, ...document.shares.map((share) => share.userId)] },
+            ...(document.productionId ? { OR: [
+              { role: { in: ["ADMIN", "BOARD", "MEMBER"] } },
+              { memberships: { some: { productionId: document.productionId, status: "ACTIVE", production: { status: { not: "ARCHIVED" } } } } },
+            ] } : {}),
           },
           orderBy: { name: "asc" },
           select: { id: true, name: true, email: true },
@@ -166,6 +170,17 @@ export default async function DocumentPage({
         })
       : Promise.resolve([]),
   ]);
+
+  // An organisation-wide file can reach someone through more than one show.
+  // List that person once and retain the names of their contributing roles.
+  const companyAudience = [...companyMemberships.reduce((people, membership) => {
+    const previous = people.get(membership.userId);
+    if (!previous) people.set(membership.userId, { ...membership, roles: [...membership.roles] });
+    else for (const assignment of membership.roles) {
+      if (!previous.roles.some(({ roleId }) => roleId === assignment.roleId)) previous.roles.push(assignment);
+    }
+    return people;
+  }, new Map<string, (typeof companyMemberships)[number]>()).values()];
 
   const folderPath = document.production
     ? `Productions / ${document.production.name} / ${document.category.folderName ?? document.category.name}`
@@ -469,7 +484,7 @@ export default async function DocumentPage({
                           <span className="text-ink-500"> · {member.title}</span>
                         ) : null}
                       </span>
-                      <Badge tone="green">{member.role?.name ?? "No role"}</Badge>
+                      <Badge tone="green">{member.roles.map(({ role }) => role.name).join(", ") || "No role"}</Badge>
                     </li>
                   ))}
                 </ul>

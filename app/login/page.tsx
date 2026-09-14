@@ -51,7 +51,7 @@ export default async function LoginPage({
             where: { status: "ACTIVE" },
             take: 1,
             include: {
-              role: { select: { name: true } },
+              roles: { include: { role: { select: { name: true } } } },
               production: { select: { name: true } },
             },
           },
@@ -81,13 +81,13 @@ export default async function LoginPage({
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-white/70">
             Create documents here instead of in Drive and they get named, filed and shared
-            correctly the first time. Everything stays inside the board — nothing is ever public.
+            correctly the first time. Access follows each file's visibility and production membership.
           </p>
           <ul className="mt-8 space-y-3 text-sm text-white/80">
             {[
               ["folder-open", "Documents sorted by what they are, not who made them"],
               ["theater", "Linked to the production they belong to"],
-              ["lock", "Private stays private — board work is shared with the group"],
+              ["lock", "Control who can view and edit each file"],
             ].map(([icon, text]) => (
               <li key={text} className="flex items-start gap-3">
                 <Icon name={icon} className="mt-0.5 size-4 shrink-0 text-gold-300" />
@@ -110,7 +110,7 @@ export default async function LoginPage({
 
           <h2 className="text-xl font-semibold tracking-tight">Sign in</h2>
           <p className="mt-1 text-sm text-ink-500">
-            Access is limited to board members who have been added to the hub.
+            Sign in with the account added to the hub as a board or company member.
           </p>
 
           <div className="mt-6">
@@ -212,7 +212,7 @@ export default async function LoginPage({
                                   {membership?.title ?? membership?.production.name}
                                 </span>
                               </span>
-                              <Badge tone="green">{membership?.role?.name ?? "Company"}</Badge>
+                              <Badge tone="green">{membership?.roles.map(({ role }) => role.name).join(" + ") || "Company"}</Badge>
                             </button>
                           </form>
                         </li>
