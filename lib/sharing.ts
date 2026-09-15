@@ -125,12 +125,13 @@ async function beginPass(): Promise<Date> {
  */
 async function queueSharing(
   where: Prisma.DocumentWhereInput,
-  options?: { urgent?: boolean },
+  options?: { urgent?: boolean; metadata?: boolean },
 ): Promise<number> {
   const markedAt = options?.urgent ? new Date(0) : new Date();
   const { count } = await prisma.document.updateMany({
     where: { ...SHARABLE, ...where },
-    data: { sharingDirtyAt: markedAt, sharingVersion: { increment: 1 } },
+    data: { sharingDirtyAt: markedAt, sharingVersion: { increment: 1 },
+      ...(options?.metadata ? { driveMetadataDirty: true } : {}) },
   });
   if (count > 0) await beginPass();
   return count;
@@ -168,8 +169,8 @@ export function queueAllSharing(options?: { urgent?: boolean }): Promise<number>
 }
 
 /** Queue one document after its audience changes. */
-export function queueDocumentSharing(id: string): Promise<number> {
-  return queueSharing({ id });
+export function queueDocumentSharing(id: string, options?: { metadata?: boolean }): Promise<number> {
+  return queueSharing({ id }, options);
 }
 
 /** How much of the current pass is left. */
@@ -200,6 +201,7 @@ export async function sharingProgress(): Promise<SharingProgress> {
  */
 export async function drainSharingSlice(options?: {
   chunk?: number;
+  deadline?: number;
 }): Promise<SharingDrainResult> {
   const batch = await prisma.document.findMany({
     where: { AND: [QUEUED, { OR: [
@@ -218,8 +220,9 @@ export async function drainSharingSlice(options?: {
   let failures = 0;
   let processed = 0;
   for (const document of batch) {
+    if (options?.deadline && Date.now() >= options.deadline) break;
     try {
-      const result = await syncSharing(document);
+      const result = await syncSharing(document, { queued: true });
       if (!result.deferred) {
         processed += 1;
         if (result.warnings.length) failures += 1;
@@ -257,7 +260,7 @@ export async function drainSharingQueue(options?: {
   let last: SharingDrainResult | null = null;
 
   while (Date.now() < deadline) {
-    const slice = await drainSharingSlice({ chunk: options?.chunk });
+    const slice = await drainSharingSlice({ chunk: options?.chunk, deadline });
     processed += slice.processed;
     failures += slice.failures;
     last = slice;
@@ -277,11 +280,11 @@ export async function drainSharingQueue(options?: {
  * the queue simply waits for the next nudge instead of the call throwing.
  */
 export function kickSharingQueue(options?: { budgetMs?: number }): void {
-  const deadline = Date.now() + (options?.budgetMs ?? BACKGROUND_BUDGET_MS);
   try {
     after(async () => {
       try {
-        await drainSharingQueue({ deadline });
+        await beginPass();
+        await drainSharingQueue({ deadline: Date.now() + (options?.budgetMs ?? BACKGROUND_BUDGET_MS) });
       } catch (error) {
         console.error("[sharing] background drain failed", error);
       }

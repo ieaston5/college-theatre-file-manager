@@ -7,7 +7,7 @@ import { UPLOAD_MAX_BYTES, UPLOAD_SERVER_MAX_BYTES } from "@/lib/constants";
 
 export type UploadState = {
   pct: number;
-  status: "waiting" | "uploading" | "done" | "error";
+  status: "waiting" | "uploading" | "finalizing" | "done" | "error";
   error?: string;
   documentId?: string;
 };
@@ -151,6 +151,7 @@ export function FilePicker({
                     <span className="block text-xs text-ink-500">
                       {formatBytes(file.size)}
                       {state?.status === "uploading" ? ` · ${state.pct}%` : ""}
+                      {state?.status === "finalizing" ? " · uploaded, saving to hub…" : ""}
                       {state?.status === "done" ? " · filed" : ""}
                     </span>
                   </span>

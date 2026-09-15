@@ -91,7 +91,7 @@ async function retryMetadata<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 async function performUpload(key: string, options: {
-  file: File; start: UploadStartBody; onProgress?: (pct: number) => void;
+  file: File; start: UploadStartBody; onProgress?: (pct: number) => void; onFinalizing?: () => void;
 }): Promise<UploadResult> {
   const { file, start, onProgress } = options;
   let saved = readSaved(key);
@@ -128,6 +128,7 @@ async function performUpload(key: string, options: {
       if (response.status < 200 || response.status >= 300) throw responseFailure(response);
       fileId = typeof response.body.fileId === "string" ? response.body.fileId : undefined;
     }
+    options.onFinalizing?.();
     const finished = await retryMetadata(() => postJson<UploadResult>("/api/uploads/finish", {
       uploadId: plan.uploadId, fileId,
     }));
@@ -141,7 +142,7 @@ async function performUpload(key: string, options: {
 }
 
 export async function uploadFile(options: {
-  file: File; start: UploadStartBody; onProgress?: (pct: number) => void;
+  file: File; start: UploadStartBody; onProgress?: (pct: number) => void; onFinalizing?: () => void;
 }): Promise<UploadResult> {
   const { file, start } = options;
   // Re-selecting the same file and filing choices after a reload recovers the

@@ -108,7 +108,7 @@ export async function createDocumentAction(
     const { document, warnings } = await createDocument(user, parsed.data);
     refreshEverywhere();
     return {
-      ok: `“${document.title}” is filed and ready.`,
+      ok: `“${document.title}” is filed. Drive access is updating in the background.`,
       warnings,
       documentId: document.id,
       openUrl: document.webViewLink ?? undefined,

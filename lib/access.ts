@@ -171,8 +171,7 @@ export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput
   const clauses: Prisma.DocumentWhereInput[] = [
     // Filing something does not outlast board access: somebody whose term has
     // ended still owns their private documents, but the board paperwork they
-    // wrote goes with the board. An explicit share is a decision somebody
-    // made by hand, so it stands either way.
+    // wrote goes with the board. Named shares also respect board-only visibility.
     viewer.isBoard
       ? { creatorId: viewer.id }
       : { creatorId: viewer.id, visibility: { not: "BOARD" } },
@@ -204,6 +203,7 @@ export function visibleDocumentsWhere(viewer: Viewer): Prisma.DocumentWhereInput
   }
 
   return { AND: [
+    { visibility: { not: "BOARD" } },
     { OR: [{ productionId: null }, { productionId: { in: viewer.memberships.map((m) => m.productionId) } }] },
     { OR: clauses },
   ] };
@@ -216,11 +216,10 @@ export function canAccessProduction(viewer: Viewer, productionId?: string | null
 
 export function canViewDocument(viewer: Viewer, doc: DocumentLike): boolean {
   if (!canAccessProduction(viewer, doc.productionId)) return false;
-  if (doc.shares?.some((share) => share.userId === viewer.id)) return true;
-
   // Checked before ownership: a board document belongs to the board, so
   // somebody who has come off it stops seeing even the ones they filed.
   if (doc.visibility === "BOARD") return viewer.isBoard;
+  if (doc.shares?.some((share) => share.userId === viewer.id)) return true;
 
   if (doc.creatorId === viewer.id) return true;
 

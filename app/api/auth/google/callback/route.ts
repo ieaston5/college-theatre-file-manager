@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
       avatarUrl: identity.picture ?? existing?.avatarUrl ?? null,
       googleSub: identity.sub,
       status: "ACTIVE",
-      role: isBootstrapAdmin && existing?.role !== "ADMIN" ? "ADMIN" : existing?.role,
+      // Bootstrap access applies only when creating an account. Admin edits persist.
       lastLoginAt: new Date(),
     },
   });

@@ -187,6 +187,7 @@ export const addCompanyMembersSchema = z.object({
 
 export const membershipSchema = z.object({
   id: z.string().min(1),
+  name: optionalText(120),
   roleIds: z.array(z.string().min(1)).transform((ids) => [...new Set(ids)]),
   title: optionalText(120),
 });

@@ -558,6 +558,9 @@ export class GoogleDriveProvider implements DriveProvider {
       desired.set(email, { level: extra.level });
     }
 
+    // Keep the target audience intact while tracking which grants remain.
+    const audience = new Map(desired);
+
     let existing: Array<{
       id?: string | null;
       type?: string | null;
@@ -601,7 +604,7 @@ export class GoogleDriveProvider implements DriveProvider {
       }
       const email = perm.emailAddress?.toLowerCase();
       const isLinkShare = perm.type === "anyone" || perm.type === "domain";
-      const wanted = email ? desired.get(email) : undefined;
+      const wanted = email ? audience.get(email) : undefined;
       const canEdit = perm.role === "writer" || perm.role === "organizer" || perm.role === "fileOrganizer";
       if (additive && !managed.has(perm.id) && email !== retiredGroup) {
         // External collaborators belong to the owner. Do not narrow their
@@ -697,34 +700,32 @@ export class GoogleDriveProvider implements DriveProvider {
       }
     }
 
-    // 2. Grant what is missing. A company document can mean twenty-odd
-    //    individual grants, so these go out a few at a time rather than one
-    //    after another — sequential calls would make creating a document for a
-    //    full cast feel broken.
-    const pending = [...desired.entries()];
-    const CONCURRENCY = 5;
-    for (let start = 0; start < pending.length; start += CONCURRENCY) {
-      await Promise.all(
-        pending.slice(start, start + CONCURRENCY).map(async ([email, spec]) => {
-          try {
-            const res = await drive.permissions.create({
-              fileId,
-              requestBody: {
-                type: "user",
-                role: spec.level === "WRITER" ? "writer" : "reader",
-                emailAddress: email,
-              },
-              sendNotificationEmail: false,
-              supportsAllDrives: true,
-              fields: "id",
-            });
-            granted.push({ email, level: spec.level, permissionId: res.data.id ?? null });
-            if (res.data.id) managed.add(res.data.id);
-          } catch (error) {
-            warnings.push(`Could not share with ${email}: ${(error as Error).message}`);
-          }
-        }),
-      );
+    // Drive does not support concurrent permission operations on one file.
+    // These run in the background, so serializing them does not hold up Save.
+    for (const [email, spec] of desired) {
+      try {
+        const create = (sendNotificationEmail: boolean) => drive.permissions.create({
+          fileId,
+          requestBody: {
+            type: "user", role: spec.level === "WRITER" ? "writer" : "reader", emailAddress: email,
+          },
+          sendNotificationEmail, supportsAllDrives: true, fields: "id",
+        });
+        let res;
+        try {
+          res = await create(false);
+        } catch (error) {
+          // Google requires a notification to invite a recipient without a
+          // Google account. Retry only that explicit error, never quota/auth errors.
+          const message = error instanceof Error ? error.message : "";
+          if (!/no Google account associated/i.test(message) || !/Notify people/i.test(message)) throw error;
+          res = await create(true);
+        }
+        granted.push({ email, level: spec.level, permissionId: res.data.id ?? null });
+        if (res.data.id) managed.add(res.data.id);
+      } catch (error) {
+        warnings.push(`Could not share with ${email}: ${(error as Error).message}`);
+      }
     }
 
     return { granted, revoked, warnings, managedPermissionIds: [...managed] };

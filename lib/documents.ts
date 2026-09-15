@@ -1,6 +1,6 @@
 import type { Document, User } from "@prisma/client";
 import { prisma } from "./db";
-import { queueDocumentSharing } from "./sharing";
+import { kickSharingQueue, queueDocumentSharing } from "./sharing";
 import { env } from "./env";
 import { getConfig, getDriveAccount } from "./config";
 import { recordAudit } from "./audit";
@@ -219,7 +219,7 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   ]);
 
   const eligibleShares = (await Promise.all(shares.map(async (share) =>
-    canAccessProduction(await getViewerContext(share.user), doc.productionId) ? share : null
+    canViewDocument(await getViewerContext(share.user), { ...doc, shares }) ? share : null
   ))).filter((share): share is (typeof shares)[number] => share !== null);
   const extra = eligibleShares.map((share) => ({
     email: share.user.email,
@@ -267,15 +267,40 @@ async function sharingPlanFor(doc: SharableDocument): Promise<SharingPlan> {
   };
 }
 
+/** Apply the latest hub metadata under the same lease as permission changes. */
+async function syncDriveMetadata(document: Document): Promise<string | null> {
+  if (!document.googleFileId) return document.driveFolderId;
+  const account = await getDriveAccount();
+  const hubOwnsFile = document.source === "CREATED" ||
+    Boolean(account?.email && document.driveOwnerEmail?.toLowerCase() === account.email.toLowerCase());
+  if (!hubOwnsFile) return document.driveFolderId;
+  const [category, production] = await Promise.all([
+    prisma.category.findUniqueOrThrow({ where: { id: document.categoryId } }),
+    document.productionId ? prisma.production.findUniqueOrThrow({ where: { id: document.productionId } }) : null,
+  ]);
+  const provider = driveProvider();
+  const folderId = await resolveFolder({ category, production });
+  await provider.renameFile(document.googleFileId, document.originalFileName
+    ? withExtension(document.title, document.originalFileName) : document.title);
+  if (folderId !== document.driveFolderId) await provider.moveFile(document.googleFileId, folderId);
+  await provider.updateDescription(document.googleFileId, document.description ?? "");
+  await provider.setAppProperties(document.googleFileId, {
+    hubDocumentId: document.id, hubCategory: category.slug,
+    hubProduction: production?.slug ?? "", hubVisibility: document.visibility,
+  });
+  return folderId;
+}
+
 /** Push current permissions under a renewable per-document lease.
  * No database connection or transaction stays open during a provider request.
  */
 export async function syncSharing(
   doc: SharableDocument & Pick<Document, "googleFileId" | "docType">,
+  options?: { queued?: boolean },
 ): Promise<SharingResult> {
   // Every request is a new generation, including direct calls outside the queue.
   // Never trust the caller's row: it may have waited behind a different sync.
-  await queueDocumentSharing(doc.id);
+  if (!options?.queued) await queueDocumentSharing(doc.id);
   const token = crypto.randomUUID();
   const leaseMs = 60_000;
   const lock = await prisma.document.updateMany({
@@ -319,6 +344,17 @@ export async function syncSharing(
       result = { granted: [], revoked: [], warnings: [error instanceof Error ? error.message : "Drive sharing failed."] };
     }
 
+    let metadataSynced = false;
+    let folderId = current.driveFolderId;
+    if (current.driveMetadataDirty && !lostLease) {
+      try {
+        folderId = await syncDriveMetadata(current);
+        metadataSynced = true;
+      } catch (error) {
+        result.warnings.push(`Drive file details are pending: ${error instanceof Error ? error.message : "Update failed."}`);
+      }
+    }
+
     // Token, lease and generation must all still match. A late result cannot
     // clear a newer request or overwrite a newer worker's grant provenance.
     const completed = lostLease ? { count: 0 } : await prisma.document.updateMany({
@@ -326,6 +362,7 @@ export async function syncSharing(
         managedDrivePermissions: current.managedDrivePermissions,
         sharingLockExpiresAt: { gt: new Date() } },
       data: {
+        ...(metadataSynced ? { driveMetadataDirty: false, driveFolderId: folderId } : {}),
         sharingAttemptedAt: attemptedAt,
         sharingSyncedAt: result.warnings.length ? null : attemptedAt,
         sharingError: result.warnings.length ? result.warnings.join("\n") : null,
@@ -351,7 +388,7 @@ export async function syncSharing(
         }
         if (!saved) throw new Error("Could not record a completed Drive grant; access reconciliation remains pending.");
       }
-      await queueDocumentSharing(doc.id);
+      await queueDocumentSharing(doc.id, { metadata: current.driveMetadataDirty });
       return { ...result, deferred: true, warnings: [...result.warnings, "Access changed while Drive was updating; the latest permissions are queued."] };
     }
 
@@ -484,6 +521,8 @@ export async function createDocument(
     const updated = await prisma.document.update({
       where: { id: record.id },
       data: {
+        sharingDirtyAt: new Date(),
+        sharingVersion: { increment: 1 },
         googleFileId: file.id,
         webViewLink: file.webViewLink || driveViewLink(file.id, input.docType),
         driveFolderId: folderId,
@@ -508,8 +547,7 @@ export async function createDocument(
       },
     });
 
-    const sharing = await syncSharing(updated);
-    warnings.push(...sharing.warnings);
+    kickSharingQueue();
 
     await recordAudit({
       actor,
@@ -573,7 +611,10 @@ export async function recordUploadedDocument(
   const registeredId = input.uploadId ? `upload_${input.uploadId}` : undefined;
   if (registeredId) {
     const existing = await prisma.document.findUnique({ where: { id: registeredId } });
-    if (existing) return { document: existing, warnings: existing.sharingDirtyAt ? ["File uploaded. Access updates are pending."] : [] };
+    if (existing) {
+      if (existing.sharingDirtyAt) kickSharingQueue();
+      return { document: existing, warnings: [] };
+    }
   }
   const category = await prisma.category.findUnique({ where: { id: input.categoryId } });
   if (!category) throw new Error("That category no longer exists.");
@@ -593,6 +634,7 @@ export async function recordUploadedDocument(
         id: registeredId,
         sharingDirtyAt: new Date(),
         sharingVersion: 1,
+        driveMetadataDirty: true,
         // The extension belongs on the file in Drive, not on the title.
         title: documentName(config, { baseTitle: input.title, category, production }),
         baseTitle: input.title,
@@ -627,21 +669,15 @@ export async function recordUploadedDocument(
     // also retains pending sharing work if that request stops unexpectedly.
     if (registeredId && (error as { code?: string }).code === "P2002") {
       const existing = await prisma.document.findUnique({ where: { id: registeredId } });
-      if (existing) return { document: existing, warnings: existing.sharingDirtyAt ? ["File uploaded. Access updates are pending."] : [] };
+      if (existing) {
+        if (existing.sharingDirtyAt) kickSharingQueue();
+        return { document: existing, warnings: [] };
+      }
     }
     throw error;
   }
 
-  // The upload session was opened before this row existed, so the file's
-  // labels are missing the one that matters most for a rebuild: its hub id.
-  try {
-    await driveProvider().setAppProperties(input.file.id, { hubDocumentId: document.id });
-  } catch (error) {
-    console.error("[documents] could not label the uploaded file", error);
-  }
-
-  const sharing = await syncSharing(document);
-  warnings.push(...sharing.warnings);
+  kickSharingQueue();
 
   await recordAudit({
     actor,
@@ -909,8 +945,8 @@ export async function exportCanvaMirror(
     },
   });
 
-  const sharing = await syncSharing(updated);
-  warnings.push(...sharing.warnings);
+  await queueDocumentSharing(updated.id);
+  kickSharingQueue();
 
   if (!options?.silent) {
     await recordAudit({
@@ -1040,6 +1076,8 @@ export async function registerDocument(
       productionId: production?.id ?? null,
       creatorId: actor.id,
       googleFileId: fileId,
+      sharingDirtyAt: fileId ? new Date() : null,
+      sharingVersion: fileId ? 1 : 0,
       webViewLink,
       driveFolderId,
       driveOwnerEmail,
@@ -1052,10 +1090,7 @@ export async function registerDocument(
     },
   });
 
-  if (fileId) {
-    const sharing = await syncSharing(document);
-    warnings.push(...sharing.warnings);
-  }
+  if (fileId) kickSharingQueue();
 
   await recordAudit({
     actor,
@@ -1119,9 +1154,18 @@ export async function updateDocument(
   const name = documentName(config, { baseTitle: input.title, category, production });
   const renamed = current.title !== name;
 
+  const editAccess = clampEditAccess(input.visibility, input.editAccess ?? current.editAccess);
+  const audienceChanged = movedShelf || current.visibility !== input.visibility || current.editAccess !== editAccess;
+  const metadataChanged = renamed || movedShelf || current.visibility !== input.visibility ||
+    current.description !== (input.description ?? null);
+  const needsDrive = Boolean(current.googleFileId && current.docType !== "LINK" && (audienceChanged || metadataChanged));
   const document = await prisma.document.update({
     where: { id: current.id },
     data: {
+      ...(needsDrive ? {
+        sharingDirtyAt: new Date(), sharingVersion: { increment: 1 },
+        ...(metadataChanged ? { driveMetadataDirty: true } : {}),
+      } : {}),
       title: name,
       baseTitle: input.title,
       description: input.description ?? null,
@@ -1137,66 +1181,9 @@ export async function updateDocument(
     },
   });
 
-  const audienceChanged = movedShelf || current.visibility !== document.visibility ||
-    current.editAccess !== document.editAccess;
-  if (audienceChanged) await queueDocumentSharing(document.id);
-
-  // Keep Drive in step: rename and re-file when the hub metadata changed.
-  // Files the hub owns are fair game even if they arrived by import — that is
-  // the point of transferring ownership. Files somebody else owns are left
-  // alone, since renaming them would change what they see in their own Drive.
-  const driveAccount = await getDriveAccount();
-  const hubOwnsFile =
-    document.source === "CREATED" ||
-    (Boolean(driveAccount?.email) && document.driveOwnerEmail === driveAccount?.email);
-
-  if (document.googleFileId && hubOwnsFile) {
-    const provider = driveProvider();
-    if (renamed || movedShelf) {
-      // Uploads keep their extension; a Google-native file has none.
-      const fileName = document.originalFileName
-        ? withExtension(name, document.originalFileName)
-        : name;
-      try {
-        await provider.renameFile(document.googleFileId, fileName);
-      } catch (error) {
-        warnings.push(`Could not rename the file in Drive: ${(error as Error).message}`);
-      }
-    }
-    if (movedShelf) {
-      try {
-        const folderId = await resolveFolder({ category, production });
-        await provider.moveFile(document.googleFileId, folderId);
-        await prisma.document.update({ where: { id: document.id }, data: { driveFolderId: folderId } });
-      } catch (error) {
-        warnings.push(`Could not move the file in Drive: ${(error as Error).message}`);
-      }
-    }
-  }
-
-  // The file's own labels are the fallback for scripts/rebuild-from-drive.ts,
-  // so they have to follow the hub rather than record where a document started
-  // out. Best effort: a document is not worth failing to save over a label.
-  if (
-    document.googleFileId &&
-    hubOwnsFile &&
-    (movedShelf || current.visibility !== document.visibility)
-  ) {
-    try {
-      await driveProvider().setAppProperties(document.googleFileId, {
-        hubDocumentId: document.id,
-        hubCategory: category.slug,
-        hubProduction: production?.slug ?? "",
-        hubVisibility: document.visibility,
-      });
-    } catch (error) {
-      console.error("[documents] could not update hub labels in Drive", error);
-    }
-  }
+  if (needsDrive) kickSharingQueue();
 
   if (audienceChanged) {
-    const sharing = await syncSharing(document);
-    warnings.push(...sharing.warnings);
     await recordAudit({
       actor,
       action: "document.visibility",
@@ -1371,7 +1358,11 @@ export async function shareDocument(
   ]);
   if (!document) throw new Error("That document no longer exists.");
   if (!user) throw new Error("That member no longer exists.");
-  if (user.status === "DISABLED" || !canAccessProduction(await getViewerContext(user), document.productionId)) {
+  const recipient = await getViewerContext(user);
+  if (document.visibility === "BOARD" && !recipient.isBoard) {
+    throw new Error("Board-only files can only be shared with current board members.");
+  }
+  if (user.status === "DISABLED" || !canAccessProduction(recipient, document.productionId)) {
     throw new Error("This person must be an enabled member of this production before you can share its files with them.");
   }
   if (user.id === document.creatorId) {

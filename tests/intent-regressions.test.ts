@@ -29,7 +29,7 @@ function matches(row: any, where: any): boolean {
 }
 for (const model of ["orgConfig", "document", "category", "production", "driveAccount", "user", "documentShare", "productionMember", "auditLog", "checklistItem", "checklistTemplateItem"]) {
   fake[model] = {};
-  for (const op of ["findUnique", "findFirst", "findMany", "count", "update", "updateMany", "create", "createMany", "groupBy"]) {
+  for (const op of ["findUnique", "findUniqueOrThrow", "findFirst", "findMany", "count", "update", "updateMany", "create", "createMany", "groupBy"]) {
     fake[model][op] = async (args: any = {}) => {
       calls.push({ model, op, args });
       const rows = tables[model] ?? [];
@@ -46,7 +46,7 @@ for (const model of ["orgConfig", "document", "category", "production", "driveAc
         } return 0; });
       }
       if (op === "count") return found.length;
-      if (op === "findUnique" || op === "findFirst") return structuredClone(found[0] ?? null);
+      if (op === "findUnique" || op === "findUniqueOrThrow" || op === "findFirst") return structuredClone(found[0] ?? null);
       if (op === "findMany") {
         const offset = args.cursor ? found.findIndex(row => row.id === args.cursor.id) + (args.skip ?? 0) : args.skip ?? 0;
         return structuredClone(found.slice(offset, args.take ? offset + args.take : undefined));
@@ -100,10 +100,10 @@ beforeEach(() => {
   tables.category = [{ id: "scripts", name: "Scripts", slug: "scripts", scope: "BOTH", companyVisible: true, archived: false }];
   tables.production = [{ id: "show-a", name: "A", slug: "a", status: "ACTIVE", driveFolderId: "folder-a" }, { id: "show-b", name: "B", slug: "b", status: "ACTIVE", driveFolderId: "folder-b" }];
   tables.driveAccount = [{ id: "singleton", email: "hub@example.test", rootFolderId: "root", productionsFolderId: "productions", standingFolderId: "standing" }];
-  tables.document = [{ id: "doc", googleFileId: "file", creatorId: "owner", title: "Script", baseTitle: "Script", categoryId: "scripts", category: tables.category[0], productionId: "show-a", production: tables.production[0], visibility: "COMPANY", source: "CREATED", editAccess: "BOARD", docType: "DOC", status: "ACTIVE", sharingDirtyAt: null, sharingSyncedAt: null, sharingAttemptedAt: null, sharingError: null, managedDrivePermissions: null, sharingVersion: 0, sharingLockToken: null, sharingLockExpiresAt: null, shares: [], createdAt: new Date(), lastEditedAt: new Date() }];
+  tables.document = [{ id: "doc", googleFileId: "file", creatorId: "owner", title: "Script", baseTitle: "Script", categoryId: "scripts", category: tables.category[0], productionId: "show-a", production: tables.production[0], visibility: "COMPANY", source: "CREATED", editAccess: "BOARD", docType: "DOC", status: "ACTIVE", sharingDirtyAt: null, sharingSyncedAt: null, sharingAttemptedAt: null, sharingError: null, managedDrivePermissions: null, driveMetadataDirty: false, sharingVersion: 0, sharingLockToken: null, sharingLockExpiresAt: null, shares: [], createdAt: new Date(), lastEditedAt: new Date() }];
   const provider = google.driveProvider();
   provider.applySharing = async () => ({ granted: [], revoked: [], warnings: [], managedPermissionIds: [] });
-  provider.renameFile = provider.moveFile = provider.setAppProperties = async () => {};
+  provider.renameFile = provider.moveFile = provider.setAppProperties = provider.updateDescription = async () => {};
   provider.ensureFolder = async () => "folder";
 });
 
@@ -120,9 +120,12 @@ test("re-filing a company document replaces its Drive audience", async () => {
   let received: any;
   google.driveProvider().applySharing = async (_id, plan) => { received = plan; return { granted: [], revoked: [], warnings: [] }; };
   await docs.updateDocument(actor, { id: "doc", title: "Script", categoryId: "scripts", productionId: "show-b", visibility: "COMPANY", editAccess: "BOARD" });
-  assert(received);
+  assert.equal(received, undefined, "Save must not wait for Drive");
   assert.equal(tables.document[0].productionId, "show-b");
-  assert(tables.orgConfig[0].sharingSweepStartedAt);
+  assert(tables.document[0].sharingDirtyAt);
+  await sharing.drainSharingSlice();
+  assert(received);
+  assert.equal(tables.document[0].driveMetadataDirty, false);
 });
 
 test("disabled creators and disabled named recipients receive no grants", async () => {
@@ -451,3 +454,137 @@ for (const role of ["writer", "organizer", "fileOrganizer"]) {
     });
   }
 }
+
+
+test("board removal blocks both lists and direct access even with an old named share", async () => {
+  const former = { ...viewer, role: "COMPANY", isBoard: false, memberships: [], companyCategoryIds: [] };
+  const document = { ...tables.document[0], productionId: null, visibility: "BOARD", shares: [{ userId: actor.id }] };
+  tables.document = [document];
+  assert.equal(access.canViewDocument(former, document as any), false);
+  assert.equal((await queries.queryDocuments(former, {}, { extra: { categoryId: "scripts" } })).total, 0);
+  tables.user[0].role = "COMPANY";
+  tables.documentShare = [{ documentId: "doc", userId: actor.id, accessLevel: "WRITER", user: tables.user[0] }];
+  google.driveProvider().applySharing = async (_id, plan) => {
+    assert.equal(plan.creatorEmail, null);
+    assert.deepEqual(plan.extra, []);
+    return sharingOK();
+  };
+  await docs.syncSharing(document as any);
+});
+
+test("metadata-only saves return before Drive and retry failed renames from the latest row", async () => {
+  let renameCalls = 0;
+  google.driveProvider().renameFile = async () => { renameCalls++; throw new Error("Drive unavailable"); };
+  await docs.updateDocument(actor, { id: "doc", title: "First edit", categoryId: "scripts", productionId: "show-a", visibility: "COMPANY" });
+  assert.equal(renameCalls, 0);
+  assert.equal(tables.document[0].title, "First edit");
+  await sharing.drainSharingSlice();
+  assert.equal(renameCalls, 1);
+  assert.equal(tables.document[0].driveMetadataDirty, true);
+  assert(tables.document[0].sharingDirtyAt);
+  assert.match(tables.document[0].sharingError, /Drive unavailable/);
+  await docs.updateDocument(actor, { id: "doc", title: "Latest edit", categoryId: "scripts", productionId: "show-a", visibility: "COMPANY" });
+  google.driveProvider().renameFile = async (_id, name) => { assert.equal(name, "Latest edit"); };
+  await docs.syncSharing(tables.document[0] as any);
+  assert.equal(tables.document[0].driveMetadataDirty, false);
+  assert.equal(tables.document[0].sharingDirtyAt, null);
+});
+
+test("tag and pin changes do not call Drive or enqueue sharing", async () => {
+  tables.document[0].description = null;
+  await docs.updateDocument(actor, { id: "doc", title: "Script", categoryId: "scripts", productionId: "show-a", visibility: "COMPANY", pinned: true });
+  assert.equal(tables.document[0].sharingDirtyAt, null);
+  assert.equal(tables.document[0].pinned, true);
+});
+
+test("archive saves without issuing any permission update", async () => {
+  google.driveProvider().applySharing = async () => assert.fail("Archiving does not change the audience");
+  const document = await docs.setDocumentStatus(actor, "doc", "ARCHIVED");
+  assert.equal(document.status, "ARCHIVED");
+  assert.equal(document.sharingError, null);
+});
+
+test("non-Google recipients receive the required invitation fallback only", async () => {
+  const provider: any = new Real();
+  const notifications: boolean[] = [];
+  provider.drive = async () => ({ permissions: {
+    list: async () => ({ data: { permissions: [] } }),
+    create: async (args: any) => {
+      notifications.push(args.sendNotificationEmail);
+      if (!args.sendNotificationEmail) throw new Error('Since there is no Google account associated with this email address, check the "Notify people" box');
+      return { data: { id: "visitor" } };
+    },
+  } });
+  const result = await provider.applySharing("file", { visibility: "BOARD", creatorEmail: "visitor@example.test", extra: [] });
+  assert.deepEqual(notifications, [false, true]);
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.managedPermissionIds, ["visitor"]);
+});
+
+test("ordinary Drive failures never trigger invitation emails", async () => {
+  const provider: any = new Real();
+  let attempts = 0;
+  provider.drive = async () => ({ permissions: {
+    list: async () => ({ data: { permissions: [] } }),
+    create: async (args: any) => { attempts++; assert.equal(args.sendNotificationEmail, false); throw new Error("Quota exceeded"); },
+  } });
+  const result = await provider.applySharing("file", { visibility: "BOARD", creatorEmail: actor.email, extra: [] });
+  assert.equal(attempts, 1);
+  assert.match(result.warnings[0], /Quota exceeded/);
+});
+
+test("multiple permissions for a retained recipient are never mistaken for a removed audience", async () => {
+  const provider: any = new Real();
+  provider.drive = async () => ({ permissions: {
+    list: async () => ({ data: { permissions: [
+      { id: "direct", type: "user", role: "writer", emailAddress: actor.email },
+      { id: "inherited", type: "user", role: "writer", emailAddress: actor.email, permissionDetails: [{ inherited: true }] },
+    ] } }),
+    create: async () => assert.fail("Already shared"),
+    delete: async () => assert.fail("Recipient is still authorized"),
+  } });
+  const result = await provider.applySharing("file", { visibility: "BOARD", creatorEmail: actor.email, extra: [] });
+  assert.deepEqual(result.warnings, []);
+});
+
+test("a late metadata worker cannot leave an older name after the newer save finished", async () => {
+  const entered = gate<void>(); const release = gate<void>();
+  tables.document[0].driveMetadataDirty = true;
+  google.driveProvider().renameFile = async (_id, name) => {
+    if (name === "Script") { entered.resolve(); await release.promise; }
+  };
+  const old = docs.syncSharing(tables.document[0] as any);
+  await entered.promise;
+  tables.document[0].sharingLockExpiresAt = new Date(0);
+  await docs.updateDocument(actor, { id: "doc", title: "New name", categoryId: "scripts", productionId: "show-a", visibility: "COMPANY" });
+  await docs.syncSharing(tables.document[0] as any);
+  assert.equal(tables.document[0].driveMetadataDirty, false);
+  release.resolve();
+  assert.equal((await old).deferred, true);
+  assert.equal(tables.document[0].driveMetadataDirty, true);
+  google.driveProvider().renameFile = async (_id, name) => assert.equal(name, "New name");
+  await sharing.drainSharingSlice();
+  assert.equal(tables.document[0].driveMetadataDirty, false);
+  assert.equal(tables.document[0].sharingDirtyAt, null);
+});
+
+test("native document creation persists the file and queues permissions before returning", async () => {
+  google.driveProvider().createDocument = async () => ({ id: "new-file", webViewLink: "https://example.test/new", name: "New doc", mimeType: "application/vnd.google-apps.document", modifiedTime: null });
+  google.driveProvider().applySharing = async () => assert.fail("Creation must not await audience sharing");
+  const result = await docs.createDocument(actor, { title: "New doc", docType: "DOC", categoryId: "scripts", productionId: "show-a", visibility: "BOARD" });
+  assert.equal(result.document.googleFileId, "new-file");
+  assert(result.document.sharingDirtyAt);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("new upload registration returns with durable metadata and sharing work pending", async () => {
+  google.driveProvider().setAppProperties = async () => assert.fail("Finalization must not await Drive labels");
+  google.driveProvider().applySharing = async () => assert.fail("Finalization must not await audience sharing");
+  const result = await docs.recordUploadedDocument(actor, {
+    uploadId: "fast-upload", title: "Recording", categoryId: "scripts", productionId: "show-a", visibility: "BOARD",
+    originalFileName: "recording.mp4", driveFolderId: "folder", file: { id: "uploaded", name: "Recording.mp4", mimeType: "video/mp4", webViewLink: "https://example.test/uploaded" },
+  });
+  assert.equal(result.document.id, "upload_fast-upload");
+  assert(result.document.sharingDirtyAt);
+  assert.equal(result.document.driveMetadataDirty, true);
+});
