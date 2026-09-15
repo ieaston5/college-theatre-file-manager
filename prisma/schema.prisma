@@ -260,6 +260,8 @@ model Document {
   sharingDirtyAt    DateTime?
   sharingAttemptedAt DateTime?
   sharingError       String?
+  /// Rename, move, description and labels to reconcile after a hub save.
+  driveMetadataDirty Boolean @default(false)
   managedDrivePermissions String?
 
   /// Canva mirrors: the hub keeps an exported copy of a Canva design in Drive

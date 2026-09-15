@@ -111,19 +111,8 @@ const config: NextConfig = {
   experimental: {
     // Server actions are used for every mutation in this app.
     serverActions: { bodySizeLimit: "2mb" },
-    /**
-     * How long the browser may reuse a page it has already loaded before
-     * asking the server again.
-     *
-     * Next's default for a dynamic page is zero, which means going back to the
-     * dashboard — or clicking between the sidebar's links the way people
-     * actually use the hub — re-ran the whole render every single time, even a
-     * second later. Thirty seconds makes those trips instant while keeping the
-     * data fresh enough for a shared document list; every mutation in the app
-     * calls revalidatePath, which clears this cache outright, so an edit is
-     * still visible the moment it is made.
-     */
-    staleTimes: { dynamic: 30, static: 180 },
+    // Access can change in another session. Always re-read protected pages.
+    staleTimes: { dynamic: 0, static: 0 },
   },
   images: {
     remotePatterns: [

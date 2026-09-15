@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
+import { kickSharingQueue } from "@/lib/sharing";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { driveProvider } from "@/lib/google";
@@ -50,11 +51,12 @@ export async function POST(request: NextRequest) {
     if (!canViewDocument(await getViewerContext(user), pending.document)) {
       return NextResponse.json({ error: "You no longer have access to that document." }, { status: 403 });
     }
+    if (pending.document.sharingDirtyAt) kickSharingQueue();
     return NextResponse.json({
       documentId: pending.document.id,
       title: pending.document.title,
       webViewLink: pending.document.webViewLink,
-      warnings: pending.document.sharingDirtyAt ? ["File uploaded. Access updates are pending."] : [],
+      warnings: [],
     });
   }
   if (pending.status !== "PENDING") {

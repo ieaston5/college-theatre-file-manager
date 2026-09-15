@@ -20,7 +20,7 @@ import {
 } from "@/components/document-results";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyState, PageHeader, buttonClass } from "@/components/ui";
-import { CATEGORY_SCOPE_META, DOC_TYPE_META, type CategoryScope } from "@/lib/constants";
+import { CATEGORY_SCOPE_META, DOC_TYPE_META, VISIBILITY_META, type Visibility, type CategoryScope } from "@/lib/constants";
 import { pluralize } from "@/lib/utils";
 
 export default async function CategoryPage({
@@ -56,6 +56,7 @@ export default async function CategoryPage({
   });
 
   const scope = CATEGORY_SCOPE_META[category.scope as CategoryScope];
+  const defaultVisibility = VISIBILITY_META[category.defaultVisibility as Visibility];
 
   return (
     <div>
@@ -102,8 +103,8 @@ export default async function CategoryPage({
                   Usually a {DOC_TYPE_META[category.defaultDocType as "DOC"]?.label}
                 </Badge>
               ) : null}
-              <Badge tone={category.defaultVisibility === "PRIVATE" ? "amber" : "indigo"}>
-                Defaults to {category.defaultVisibility === "PRIVATE" ? "private" : "board"}
+              <Badge tone={defaultVisibility.tone}>
+                Defaults to {defaultVisibility.label.toLowerCase()}
               </Badge>
               <span>Drive folder: {category.folderName ?? category.name}</span>
             </>

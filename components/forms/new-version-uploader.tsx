@@ -40,6 +40,7 @@ export function NewVersionUploader({
       await uploadFile({
         file,
         start: { mode: "version", documentId },
+        onFinalizing: () => setProgress({ [key]: { pct: 99, status: "finalizing" } }),
         onProgress: (pct) => setProgress({ [key]: { pct, status: "uploading" } }),
       });
       setProgress({ [key]: { pct: 100, status: "done" } });

@@ -79,3 +79,16 @@ test("duplicate clicks share one upload operation", async () => {
   assert.equal(one.documentId, two.documentId); assert.equal(sendCount, 1);
   assert.equal(requests.filter(({ url }) => url.endsWith("/start")).length, 1);
 });
+
+
+test("the UI distinguishes transferred bytes from hub finalization", async () => {
+  const stages: string[] = [];
+  responder = (url) => {
+    if (url.endsWith("/start")) return json({ uploadId: "stages", kind: "resumable", uploadUrl: "https://google.test/session" });
+    assert.deepEqual(stages, ["finalizing"]);
+    return json({ documentId: "upload_stages", title: "Recording", warnings: [] });
+  };
+  await uploadFile({ file: testFile("stages.mp4"), start: {}, onFinalizing: () => stages.push("finalizing"),
+    onProgress: pct => { if (pct === 100) stages.push("done"); } });
+  assert.deepEqual(stages, ["finalizing", "done"]);
+});

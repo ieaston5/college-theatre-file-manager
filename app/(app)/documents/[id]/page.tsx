@@ -1,3 +1,4 @@
+import { DocumentSyncWatch } from "@/components/document-sync-watch";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -267,10 +268,16 @@ export default async function DocumentPage({
           ask the owner to review other permissions before treating the file itself as private.
         </Banner>
       ) : null}
+      {document.sharingDirtyAt ? <DocumentSyncWatch id={document.id} failed={Boolean(document.sharingError)} /> : null}
+      {document.sharingDirtyAt && !document.sharingError ? (
+        <Banner tone="sky" icon="refresh" title="Saved · Drive is catching up">
+          Your changes are saved. File details and access are updating in Drive; you can leave this page.
+        </Banner>
+      ) : null}
       {document.sharingError ? (
-        <Banner tone="amber" icon="alert" title="Drive access update pending">
-          Some permissions could not be updated. Drive access may still differ from the hub.
-          The hub will retry; an admin can check progress in Sharing.
+        <Banner tone="amber" icon="alert" title={document.status === "ARCHIVED" ? "Archived · Drive update needs attention" : "Drive update needs attention"}>
+          {document.status === "ARCHIVED" ? "This document is archived on the hub. " : "Your document is saved on the hub. "}
+          A separate Drive update has not finished. The hub will retry; an admin can check Sharing for details.
         </Banner>
       ) : null}
 
@@ -449,7 +456,7 @@ export default async function DocumentPage({
             <div className="space-y-3 text-sm">
               {document.production ? (
                 <p className="text-ink-600">
-                  {viewer.isBoard ? "Everyone with hub access" : "The board"} can see this, plus{" "}
+                  The board can see this, plus{" "}
                   <span className="font-medium text-ink-800">
                     {companyAudience.length}{" "}
                     {companyAudience.length === 1 ? "person" : "people"}
@@ -506,7 +513,7 @@ export default async function DocumentPage({
           ) : document.visibility === "BOARD" ? (
             <div className="space-y-3 text-sm">
               <p className="text-ink-600">
-                Everyone with hub access can see this document listed and open it.
+                Current board members can see this document listed and open it.
               </p>
               <div className="rounded-lg bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
                 In Google Drive each of them is added by name, from the hub&rsquo;s members list

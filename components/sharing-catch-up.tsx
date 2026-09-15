@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { drainSharingAction, type SharingProgress } from "@/app/actions/sharing";
+import type { SharingProgress } from "@/lib/sharing";
 import { ProgressBar } from "./progress";
 import { Icon } from "./icons";
 import { pluralize } from "@/lib/utils";
@@ -25,7 +25,7 @@ import { pluralize } from "@/lib/utils";
  */
 
 /** Roughly how often to come back for the next slice. */
-const GAP_MS = 600;
+const GAP_MS = 2_000;
 
 export function useSharingCatchUp(initial: SharingProgress) {
   const router = useRouter();
@@ -45,28 +45,25 @@ export function useSharingCatchUp(initial: SharingProgress) {
   const [peak, setPeak] = useState(initial.total);
   // Held in a ref so a re-render cannot start a second loop.
   const running = useRef(false);
+  const mounted = useRef(true);
 
   const pump = useCallback(async () => {
     if (running.current) return;
     running.current = true;
     setStopped(false);
     try {
-      // 200 slices of twelve is far more than any club will ever queue; the
-      // guard is only here so a bug cannot spin forever.
-      for (let slice = 0; slice < 200; slice += 1) {
-        const next = await drainSharingAction();
+      // Bound polling; durable queued work continues if this page closes.
+      for (let slice = 0; slice < 200 && mounted.current; slice += 1) {
+        const response = await fetch("/api/sharing/progress", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+        if (!response.ok) throw new Error("Could not check Drive progress.");
+        const next: SharingProgress & { failures: number } = await response.json();
+        if (!mounted.current) return;
+        setFailures(next.failures);
         setProgress(next);
         setPeak((seen) => Math.max(seen, next.total, next.done + next.pending));
-        if (next.failures > 0) setFailures((total) => total + next.failures);
         if (next.pending === 0) {
           // The lists on the page may have been waiting on this.
           router.refresh();
-          return;
-        }
-        if (next.processed === 0) {
-          // Nothing came back but the queue is not empty: something else is
-          // holding the rows. Leave it to that, rather than spinning.
-          setStopped(true);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, GAP_MS));
@@ -81,6 +78,11 @@ export function useSharingCatchUp(initial: SharingProgress) {
       running.current = false;
     }
   }, [router]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!initial.running) return;

@@ -666,7 +666,8 @@ async function main() {
       role: "ADMIN",
       status: "ACTIVE",
     },
-    update: { role: "ADMIN", status: "ACTIVE" },
+    // Existing membership decisions survive setup and repeat seeds.
+    update: {},
   });
 
   const members = new Map<string, { id: string; email: string; name: string | null; role: string }>();

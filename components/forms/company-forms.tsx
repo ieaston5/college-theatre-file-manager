@@ -161,6 +161,7 @@ export function MembershipRow({
   const [editing, setEditing] = useState(false);
   const [selectedRoleIds, setSelectedRoleIds] = useState(membership.roleIds);
   const [title, setTitle] = useState(membership.title ?? "");
+  const [name, setName] = useState(membership.userName ?? "");
 
   const assignedRoles = roles.filter((role) => membership.roleIds.includes(role.id));
 
@@ -189,6 +190,7 @@ export function MembershipRow({
             onClick={() => {
               setSelectedRoleIds(membership.roleIds);
               setTitle(membership.title ?? "");
+              setName(membership.userName ?? "");
               setEditing(true);
             }}
             className={buttonClass("ghost", "px-2")}
@@ -208,11 +210,17 @@ export function MembershipRow({
         <input type="hidden" name="id" value={membership.id} />
         <FormBanner state={state} />
         <div className="flex flex-wrap items-end gap-2">
+          <Field label="Name" htmlFor={`member-name-${membership.id}`} className="min-w-40 flex-1"
+            hint="Used throughout the hub.">
+            <input id={`member-name-${membership.id}`} name="name" value={name}
+              onChange={(event) => setName(event.target.value)} maxLength={120} className={inputClass} />
+          </Field>
           <div className="min-w-40 flex-1">
-            <span className="mb-1 block text-xs font-medium text-ink-600">
-              {membership.userName ?? membership.userEmail}
-            </span>
+            <label htmlFor={`member-title-${membership.id}`} className="mb-1 block text-xs font-medium text-ink-600">
+              Part or position
+            </label>
             <input
+              id={`member-title-${membership.id}`}
               name="title"
               value={title}
               onChange={(event) => setTitle(event.target.value)}

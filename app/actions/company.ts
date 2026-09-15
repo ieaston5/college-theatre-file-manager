@@ -201,6 +201,7 @@ export async function updateMembershipAction(
       id: text(form, "id") ?? "",
       roleIds: form.getAll("roleIds").map(String),
       title: text(form, "title"),
+      name: text(form, "name"),
     });
     if (!parsed.success) return { error: firstError(parsed.error) };
 
@@ -208,10 +209,17 @@ export async function updateMembershipAction(
       where: { id: { in: parsed.data.roleIds }, archived: false },
     });
     if (roles.length !== parsed.data.roleIds.length) return { error: "One of those roles is archived or no longer exists." };
+    const previous = await prisma.productionMember.findUnique({
+      where: { id: parsed.data.id }, include: { roles: { select: { roleId: true } } },
+    });
+    if (!previous) return { error: "That membership no longer exists." };
+    const rolesChanged = previous.roles.length !== parsed.data.roleIds.length ||
+      previous.roles.some(({ roleId }) => !parsed.data.roleIds.includes(roleId));
     const membership = await prisma.productionMember.update({
       where: { id: parsed.data.id },
       data: {
-        roleId: null, title: parsed.data.title ?? null,
+        role: { disconnect: true }, title: parsed.data.title ?? null,
+        ...(form.has("name") ? { user: { update: { name: parsed.data.name ?? null } } } : {}),
         roles: { deleteMany: { roleId: { notIn: parsed.data.roleIds } },
           createMany: { data: parsed.data.roleIds.map((roleId) => ({ roleId })), skipDuplicates: true } },
       },
@@ -230,7 +238,7 @@ export async function updateMembershipAction(
      * the person sees on the hub, so the save is finished the moment it lands.
      * Drive catches up behind the response.
      */
-    const catchUp = await catchDriveUp({ productionId: membership.productionId });
+    const catchUp = rolesChanged ? await catchDriveUp({ productionId: membership.productionId }) : null;
 
     await recordAudit({
       actor,

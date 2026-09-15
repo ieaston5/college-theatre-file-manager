@@ -104,21 +104,22 @@ export function DocumentCreateForm({
 }) {
   const [state, formAction] = useActionState(createDocumentAction, emptyState);
   const formRef = useRef<HTMLFormElement>(null);
+  const initialCategory = categories.find((item) => item.id === defaultCategoryId);
 
   const [title, setTitle] = useState("");
   const [categoryId, setCategoryId] = useState(defaultCategoryId ?? "");
-  const [productionId, setProductionId] = useState(defaultProductionId ?? "none");
-  const [mode, setMode] = useState<CreationMode>("DOC");
+  const [productionId, setProductionId] = useState(initialCategory?.scope === "STANDING"
+    ? "none" : defaultProductionId ?? (initialCategory?.scope === "PRODUCTION" ? "" : "none"));
+  const [mode, setMode] = useState<CreationMode>((initialCategory?.defaultDocType as CreationMode) ?? "DOC");
   /** Whether the person picked the file type, as opposed to inheriting it. */
   const [typeChosenByHand, setTypeChosenByHand] = useState(false);
-  // A company member has no board option, and "Company" is only on the table
-  // once a category that allows it is chosen — so until then, private.
   const [visibility, setVisibility] = useState<string>(() => {
-    if (!companyCreatorOnly) return "BOARD";
-    const initial = categories.find((item) => item.id === defaultCategoryId);
-    return initial?.companyVisible ? "COMPANY" : "PRIVATE";
+    const wanted = initialCategory?.defaultVisibility ?? (companyCreatorOnly ? "PRIVATE" : "BOARD");
+    if (wanted === "COMPANY" && !initialCategory?.companyVisible) return companyCreatorOnly ? "PRIVATE" : "BOARD";
+    if (wanted === "BOARD" && companyCreatorOnly) return initialCategory?.companyVisible ? "COMPANY" : "PRIVATE";
+    return wanted;
   });
-  const [editAccess, setEditAccess] = useState<string>("BOARD");
+  const [editAccess, setEditAccess] = useState<string>(initialCategory?.defaultEditAccess ?? "BOARD");
   const [templateId, setTemplateId] = useState("blank");
   const [canvaFormat, setCanvaFormat] = useState<CanvaExportFormat>("pdf");
 
@@ -185,7 +186,7 @@ export function DocumentCreateForm({
         ? "BOARD"
         : next.defaultVisibility;
     // A company member cannot publish to the board, so fall back to Company.
-    setVisibility(companyCreatorOnly && wanted === "BOARD" ? "COMPANY" : wanted);
+    setVisibility(companyCreatorOnly && wanted === "BOARD" ? (next.companyVisible ? "COMPANY" : "PRIVATE") : wanted);
     setEditAccess(next.defaultEditAccess);
     if (next.scope === "STANDING") setProductionId("none");
     if (next.scope === "PRODUCTION" && productionId === "none") setProductionId("");
@@ -234,6 +235,7 @@ export function DocumentCreateForm({
             editAccess,
             tags,
           },
+          onFinalizing: () => setUploads((current) => ({ ...current, [key]: { pct: 99, status: "finalizing" } })),
           onProgress: (pct) =>
             setUploads((current) => ({ ...current, [key]: { pct, status: "uploading" } })),
         });
@@ -264,8 +266,8 @@ export function DocumentCreateForm({
         </span>
         <h2 className="text-base font-semibold">
           {uploadResults.length === 1
-            ? `“${uploadResults[0].title}” is filed and ready.`
-            : `${uploadResults.length} files are filed and ready.`}
+            ? `“${uploadResults[0].title}” is uploaded and filed.`
+            : `${uploadResults.length} files are uploaded and filed.`}
         </h2>
         <p className="mx-auto mt-1 max-w-md text-sm text-ink-500">
           Filed in {category?.name}
@@ -283,6 +285,7 @@ export function DocumentCreateForm({
           </div>
         ) : null}
 
+        <p className="mt-2 text-sm text-ink-500">Drive access finishes updating in the background. You can leave this page.</p>
         {uploadResults.length > 1 ? (
           <ul className="mx-auto mt-4 max-w-md divide-y divide-ink-100 rounded-xl border border-ink-200 text-left">
             {uploadResults.map((result) => (
