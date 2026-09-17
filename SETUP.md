@@ -1,6 +1,8 @@
 # Setup
 
-Three stages. Stage 1 needs this repo, Node.js and Docker (or an existing PostgreSQL database). Stage 2 connects Google.
+[Project overview](README.md) · [Demo walkthrough](docs/DEMO.md) · [Architecture](docs/ARCHITECTURE.md)
+
+Three stages. Stage 1 needs this repo, Node.js 22.10+ and Docker (or an existing PostgreSQL database). Stage 2 connects Google.
 Stage 3 is for when you want other people to reach it.
 
 ---
@@ -8,13 +10,17 @@ Stage 3 is for when you want other people to reach it.
 ## Stage 1 — run it privately (10 minutes, no Google)
 
 ```bash
-npm install
+npm ci
 docker compose up -d db
 npm run setup
 npm run dev
 ```
 
 `npm run setup` creates `.env` with local PostgreSQL defaults and random secrets when it is absent. It preserves an existing `.env`. For an existing database, set `DATABASE_URL` and `DIRECT_URL` before setup. Keep development data separate from production.
+
+On a fresh seed, the default admin email is `admin@pennplayers.example` unless `BOOTSTRAP_ADMIN_EMAILS` overrides it. All other sample people use fictional `.example` addresses.
+
+The current seed can log an `after() ... outside a request scope` warning because background drains normally run inside a web request. If the final seeded counts are printed and the command exits successfully, the sample records were created; queued provider work may still need a drain. Its generic "remote database" warning also appears for local PostgreSQL. Neither message means real Google credentials are required for the demo.
 
 Open <http://localhost:3000> and pick **Production Manager** from the local
 sign-in list. You are an admin.

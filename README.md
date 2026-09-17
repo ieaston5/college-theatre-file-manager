@@ -1,276 +1,113 @@
+<div align="center">
+
 # Penn Players Hub
 
-One dashboard for everything the board keeps. Members create documents **here**
-instead of in Google Drive; the hub names the file, files it in the right Drive
-folder, links it to a production and shares it with exactly the right people.
+**A theatre file manager built for the people behind the production.**
 
-Built for a private environment first — it runs end to end on your laptop with
-no Google account at all, using local PostgreSQL, and switches to real Google Drive when you add
-credentials.
+Create, find, and share the paperwork that keeps a student theatre company running.
+
+[Explore the app](docs/DEMO.md) · [Run locally](#run-locally) · [Architecture](docs/ARCHITECTURE.md) · [Deployment guide](SETUP.md)
+
+</div>
+
+![Penn Players Hub dashboard with pinned files, production navigation, and information categories](docs/screenshots/dashboard.png)
+
+*The existing application, running locally with fictional seeded people and sample documents. Google Drive is simulated in these screenshots.*
+
+## Why this exists
+
+A production leaves behind budgets, rehearsal reports, contact sheets, scripts, and design files. When those files live in individual accounts and scattered folders, finding the current version—and handing it to next year's board—becomes its own job.
+
+Penn Players Hub gives that information a consistent home. Each document has a category, an optional production, and explicit access settings. The Hub handles naming and filing, while Google Drive remains the place to open and edit the files. Documents created through a connected Hub belong to its dedicated Google account, preserving continuity between boards.
+
+## What you can do
+
+| Workflow | What the application provides |
+| --- | --- |
+| **File it once** | Create Docs, Sheets, Slides, and Forms; upload files; or register an existing file. Apply naming rules, category folders, production context, and optional templates. |
+| **Find the right version** | Search titles, descriptions, tags, categories, and productions. Filter by type, visibility, ownership, and archive status with shareable URLs. Pin frequently used documents. |
+| **Give people the right access** | Separate private, board, and company visibility. Assign multiple production roles whose category permissions combine, with creation rights checked separately. |
+| **Keep recordings and revisions together** | Resumable uploads for recordings up to 20 GiB, using 8 MiB chunks sent directly to Drive. Replace uploaded files while preserving their Drive ID and link. |
+| **Bring design work into the library** | Mirror Canva designs as Drive exports, check freshness, and refresh the existing copy. Canva remains the editing source. |
+| **Carry knowledge forward** | Production filing coverage, configurable categories and templates, season rollover, scheduled maintenance, and metadata backup/restore tools. |
+
+The focus is document filing, discovery, availability, and access. Production filing coverage shows where shared files exist; it does not represent task completion or approval.
+
+## A look inside
+
+### A home for each production
+
+Show-specific documents, company membership, and filing coverage stay connected to the production.
+
+![Urinetown production page showing file counts, filters, and category-grouped documents](docs/screenshots/production.png)
+
+### A view shaped by membership
+
+Company members see the productions and information categories their roles allow.
+
+![Company member dashboard with role-appropriate production files](docs/screenshots/company.png)
+
+[View the document creation screen and reproduce the walkthrough →](docs/DEMO.md)
+
+## Engineering choices
+
+- **One access policy across the Hub.** `lib/access.ts` builds viewer context and document access predicates. Board status, production membership, category eligibility, and named shares determine what a person can discover or open.
+- **Fast local saves, eventual Drive updates.** PostgreSQL stores document metadata and pending reconciliation state. Background work applies naming, filing, and permission changes to Drive; status endpoints expose outstanding work and scheduled sweeps retry it.
+- **File bytes bypass the app server.** The server authorizes resumable upload sessions and finalization; the browser transfers chunks directly to Google. Recovery uses Drive's acknowledged offset.
+- **A credential-free evaluation path.** Real and mock provider implementations share an interface. The seeded local app demonstrates navigation, filing, and access without connecting a Google or Canva account.
+
+| Layer | Stack |
+| --- | --- |
+| Application | Next.js 15 App Router, React 19, TypeScript |
+| Interface | Tailwind CSS 4, Lucide icons |
+| Data | PostgreSQL, Prisma schema and migrations |
+| Authentication | Google OAuth, signed session cookies with `jose`, local development sign-in |
+| Integrations | Google Drive, Docs, Sheets, Slides, Forms, Gmail; optional Canva Connect |
+| Operations | Scheduled `/api/cron` endpoint, Vercel deployment configuration, metadata recovery scripts |
+
+[Read the architecture and access model →](docs/ARCHITECTURE.md)
+
+## Run locally
+
+Use **Node.js 22.10+** and **Docker Compose**, or an existing dedicated PostgreSQL database. No Google account is needed for the local demo.
 
 ```bash
-npm install
-docker compose up -d db   # local PostgreSQL; requires Docker
-npm run setup     # generate the client, create the database, load sample data
-npm run dev       # http://localhost:3000
+git clone https://github.com/ieaston5/college-theatre-file-manager.git
+cd college-theatre-file-manager
+npm ci
+docker compose up -d db
+npm run setup
+npm run dev
 ```
 
-`npm run setup` creates `.env` from the local defaults with random secrets if it does not exist. Existing configuration is preserved. Use a separate database for development.
+Open [localhost:3000](http://localhost:3000) and select **Production Manager** on the local sign-in screen. The default seeded admin is `admin@pennplayers.example`; `BOOTSTRAP_ADMIN_EMAILS` can override it.
 
-Sign in with the local sign-in list on the login screen (no Google needed
-while `ALLOW_DEV_LOGIN=true`). `ieaston@upenn.edu` is seeded as the admin.
+`npm run setup` creates `.env` with local database defaults and random secrets if absent, generates Prisma Client, applies migrations, and seeds the demo. It preserves an existing `.env`, so check its database target before running setup. The seed contains 26 documents, 14 categories, 3 productions, and fictional accounts.
 
----
+For an existing PostgreSQL instance, copy `.env.example` to `.env` first and configure `DATABASE_URL`, `DIRECT_URL`, `SESSION_SECRET`, and `APP_ENCRYPTION_KEY`. Use a separate development database. [SETUP.md](SETUP.md) covers configuration, real integrations, and deployment.
 
-## What it does
+## Development
 
-**Creating.** A single form: name, type (Doc / Sheet / Slides / **Form** /
-**upload a file**), category, production, who can see it. From that the hub
-
-- names it from a rule you control, e.g. `[URINETOWN] Running budget — Budgets & finance`
-  — the same name in Drive and on the hub, so a list of twenty says which show
-  and which shelf each thing belongs to without opening anything
-- creates it in `Penn Players Hub / Productions / Urinetown / Budgets & finance`
-- optionally copies one of your templates and fills in `{{TITLE}}`, `{{PRODUCTION}}`, `{{CATEGORY}}`, `{{OWNER}}`, `{{DATE}}`
-- stamps a small header into new Docs so a file found in Drive still explains itself
-- shares it according to its visibility (see below)
-
-**Uploading.** Any file type, under exactly the same rules — a PDF script, a
-ticket-sales export from Penn Live Arts, a scan, a photo, a vocal score. Drop
-several at once and each takes its own filename as its title. The extension is
-preserved through the naming rule, so you get
-`[URINETOWN] Script — Scripts & scores.pdf`.
-
-Rehearsal video and audio recordings can be up to **20 GB per file** (20 GiB).
-The browser sends 8 MiB chunks straight to Google Drive and retries interrupted
-transfers from Drive's acknowledged position. Keep the page open during upload.
-If you leave, select the same unchanged file with the same filing choices within
-24 hours to resume. Finishing an upload can be retried without creating another
-document. Drive storage quota and file permissions still apply.
-
-Simulated Drive uploads are limited to 4 MiB; connect Google to test larger files.
-Large recordings never fall back to being sent through the app server.
-
-Uploaded files also get **new versions**: upload an updated file over the old
-one and the Drive file id, link and sharing stay the same while Drive keeps the
-previous revision. That is the end of `Script_FINAL_v3.pdf`.
-
-Bytes go straight from the browser to Google through a resumable session the
-server opens, so large files are not limited by the host's request-body cap,
-and the file's name, folder and metadata are fixed server-side where the
-browser cannot change them.
-
-**Canva.** Canva's API cannot grant a person access to a design — there is no
-design-permission endpoint, and the links it returns work only for the calling
-account and expire after 30 days. So the hub *mirrors* a design instead: paste
-the Canva link, and the hub exports the design and files the export in Drive,
-where Private / Company / Board already works. Canva stays the place it is
-edited; the hub owns the copy people read.
-
-The hub tracks the design's `updated_at`, so a mirror whose original has moved
-on is flagged "Canva newer" in lists and offers a one-click re-export — which
-replaces the same Drive file, keeping its link, its sharing and its Drive
-revision history.
-
-Canva has no "design updated" webhook, so freshness is checked three ways, in
-order of usefulness: **when somebody opens the document** (any viewer, throttled
-to one check per five minutes, skipping designs edited in the last half hour),
-on the scheduled run, and on demand from the button. The first is what makes a
-daily schedule survivable — the copy is refreshed at the moment somebody is
-about to use it, rather than whenever the host next calls.
-
-**Finding.** The dashboard is organised by *type of information* (the sidebar),
-crossed with *production*. Every category and show has its own page; there is
-one search box over titles, descriptions, tags, categories and shows; filters
-for type, visibility, "filed by me" and archived. A filter is a URL, so a
-filtered list is shareable and the back button works — and it applies the
-moment it is clicked: the control moves at once, the list streams in behind a
-skeleton, and nothing waits for a round trip before acknowledging the click.
-
-Lists are ordered and labelled by when each document was last *edited* — what
-Google says about the file, not when the hub's own record was last written, so
-"edited yesterday" means somebody typed in it yesterday. A scheduled job asks
-Drive once per run for everything that has changed since the last one, which
-keeps that honest without a Google call per row of every page.
-
-**Access.** Nobody can see the hub unless they have been added. Board roles:
-`ADMIN` (settings, members, categories, productions, Google), `BOARD` (create
-and edit), `MEMBER` (read board documents). Plus a fourth population:
-
-**Company members.** Cast and crew are added *from a production*, not from the
-board list, and get a `COMPANY` account with no board access at all. What they
-see is computed, not hardcoded:
-
-```
-production membership  →  assigned roles  →  union of their categories
+```bash
+npm run typecheck   # TypeScript checks
+npm test            # Node test runner: access, uploads, and intent regressions
+npm run build       # Prisma generation and Next.js production build
 ```
 
-Production roles (Cast, Stage management, Design & tech, Costumes & props,
-Music by default) are admin-editable, as is which categories may be offered to
-a company at all. Budgets, casting, box office, governance, grants and venue
-are board-only out of the box, so they are never even offered as "Company" and
-never appear to a company member. Adding somebody to a show backfills their
-Drive access to eligible files; removing them queues revocation. Failed updates
-stay queued for retry.
+Endpoint integration harnesses also live in [`tests/integration/`](tests/integration/); their file headers document the required environment. The existing `lint` script invokes `next lint`, but no ESLint configuration is checked in; the commands above are the reproducible checks for this snapshot.
 
-A person can hold several roles on the same show. Selecting Cast and Lighting
-combines their category access, and removing Lighting keeps Cast's access.
-Creating files requires a role that allows creation in the chosen category;
-a creation-enabled role does not turn another role's viewing access into creation access.
+| Command | Purpose |
+| --- | --- |
+| `npm run db:studio` | Inspect the configured database |
+| `npm run db:seed` | Load sample configuration and content |
+| `npm run backup` | Export Hub metadata to an ignored local backup file |
+| `npm run restore -- <file> --dry-run` | Preview a metadata restore |
+| `npm run rebuild` | Preview reconstruction from Drive metadata; `-- --apply` writes changes |
 
-Nobody waits for that. Drive needs one permission per person per file, so an
-access change — a new cast member, somebody moved between roles, a role's
-categories edited — is saved in one write and the affected documents go into a
-queue that is pushed to Drive immediately after the response. What people see
-*on the hub* changes the instant Save returns; the page says how much of Drive
-is still catching up, and the catch-up finishes whether or not anybody stays to
-look at it.
+## Integration boundaries
 
-A company document attached to a show reaches eligible members of that show.
-An organisation-wide company document reaches active members whose roles cover
-its category. Membership in one show never grants access to another show's files.
+The local demo simulates Drive and Canva; it does not demonstrate live provider permissions or large-file transfers. Mock uploads are limited to 4 MiB. Real uploads depend on Google credentials, quota, permissions, and network availability, and the page must remain open during transfer. Reselecting the same unchanged file with the same filing choices within 24 hours can resume a saved session.
 
-Three visibility levels on every document:
+Hub access and Drive permissions are separate enforcement layers. Pending Drive changes must finish before relying on a revocation. File owners and inherited folder permissions remain relevant, and registered files retain collaborators the Hub does not manage. Canva mirroring shares an exported copy, not access to the original design.
 
-| | Who |
-|---|---|
-| **Private** | the creator, plus anyone they add by hand |
-| **Company** | the board, plus eligible members of that production; no-show files use members' combined role categories |
-| **Board** | everyone with board access |
-
-Company users must belong to a document's show even if they created it or received
-a named share. Mirrored Canva designs obey the same three levels, because what is being shared
-is the exported copy in Drive rather than the Canva design.
-
-**Privacy.** A `PRIVATE` entry is listed only for its enabled creator and named
-recipients, including when an admin browses the hub. The activity log omits
-private document titles. Changing visibility updates hub-managed Drive permissions;
-failures remain pending and are retried by the sharing sweep.
-
-Hub visibility does not remove the file owner's access or permissions inherited
-from a shared folder. On registered files owned elsewhere, the hub removes only
-its tracked grants and leaves the owner's existing collaborators and public links
-alone. Grants made before tracking was introduced cannot reliably be attributed
-to the hub and need an owner review in Drive. Check Admin → Sharing for pending
-updates before relying on a revocation.
-
-**Institutional memory.** One dedicated Google account owns every document the
-hub creates, so nothing disappears when a board member graduates. Existing
-files can be registered (link + metadata) without changing their ownership.
-
-**Filing guide.** Each production can show which shared file categories contain
-documents. Private drafts do not count. This is filing coverage, not an approval
-or production-task workflow.
-
-**On its own.** One scheduled request to `/api/cron` (Vercel Cron, or anything
-else that can call a URL on a timer) finishes the re-share queue, re-exports Canva
-copies whose originals have moved on and gone quiet, and sends the weekly
-digest on the chosen day. Every job decides for itself whether there is
-anything to do, so a missed run costs nothing and a double run does nothing
-twice. `vercel.json` ships daily, because Vercel's free plan rejects anything
-more frequent; SETUP.md step 3d covers hourly. Admin → Scheduled shows what ran
-and lets you trigger it by hand.
-
-**If it all goes wrong.** `npm run backup` writes the whole index — categories,
-shows, members, documents, who may see what — to one JSON file with no
-credentials in it, and `npm run restore` puts it back. Failing that, every file
-the hub created or imported carries its category, show and visibility in its own
-Drive `appProperties`, and `npm run rebuild` reconstructs the dashboard from the
-folder tree alone.
-
----
-
-## Two modes
-
-| | `DRIVE_MODE=mock` (default with no credentials) | `DRIVE_MODE=google` |
-|---|---|---|
-| Files | Simulated, browsable at `/mock-drive/<id>` | Real Google Docs / Sheets / Slides |
-| Sharing | Recorded and shown on the mock file page | Real Drive permissions |
-| Google account needed | None | One, connected in Admin |
-
-Mock mode exists so you can click through the whole thing — including the
-sharing rules — before deciding to point it at the club's Google account.
-See [SETUP.md](SETUP.md) to switch it on for real.
-
----
-
-## Layout
-
-```
-app/
-  (app)/                  everything behind the sign-in gate
-    page.tsx              dashboard
-    documents/            list · new · register · detail · edit
-    categories/           overview · per category
-    productions/          overview · per show · per show's company
-    admin/                Google & settings · members · production roles · categories · productions · templates · activity
-  api/auth/               Google sign-in, local dev sign-in, sign-out
-  api/google/             connecting the hub's document-owning account
-  api/uploads/            start · status · finish · proxy · mock · blob (upload plumbing)
-  api/canva/              connect · callback (the hub's Canva account)
-  mock-drive/[id]/        the simulated Drive viewer
-  actions/                server actions (every mutation)
-lib/
-  access.ts               who can see and edit a document — the one place
-  auth.ts                 session cookie, role gates
-  documents.ts            create / upload / register / update / share, DB + Drive together
-  upload-client.ts        browser side of the upload flow
-  google/                 oauth.ts · real.ts (Drive API) · mock.ts · upload.ts · index.ts
-  canva/                  oauth.ts (PKCE) · real.ts (Connect API) · mock.ts · index.ts
-  constants.ts            roles, doc types, visibilities — the enum vocabulary
-  cron.ts                 the scheduled jobs; each one decides if it has work
-  rate-limit.ts           database-backed fixed-window limits
-  db-portability.ts       case-insensitive PostgreSQL search
-prisma/
-  schema.prisma           PostgreSQL schema
-  seed.ts                 sample categories, shows, members and documents
-scripts/
-  export-metadata.ts      npm run backup
-  restore-metadata.ts     npm run restore
-  rebuild-from-drive.ts   npm run rebuild — the no-backup disaster path
-  use-database.mjs        npm run use-db
-```
-
-## Scripts
-
-| | |
-|---|---|
-| `npm run dev` | development server |
-| `npm run setup` | create local config if absent + generate client + migrate + seed |
-| `npm run db:reset` | reset the configured database with Prisma confirmation |
-| `npm run db:studio` | browse the database |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run build` | production build |
-| `npm run backup` | dump the index to `backups/hub-<timestamp>.json` |
-| `npm run restore -- <file> [--dry-run]` | put a dump back, row by row |
-| `npm run rebuild -- [--apply]` | reconstruct documents from Drive's own labels |
-| `npm run use-db -- postgres` | show PostgreSQL setup guidance |
-
-## Notes for whoever picks this up
-
-- Sample content is tagged `"sample": true` in `Document.metadata`. Admin →
-  Settings has a one-click **Remove sample data**. The seed also creates a
-  sample company for the active show so the access layer is visible; sign in as
-  one of them from the login screen.
-- Board access uses individual member permissions. The optional board group
-  address is retained for email and to remove legacy group permissions during
-  a sharing sweep; it is not the access list.
-- Text search goes through `containsInsensitive` in `lib/db-portability.ts` and
-  always uses PostgreSQL's case-insensitive matching.
-- Rate limits live in `lib/rate-limit.ts`, counted in the database rather than
-  in memory because a serverless host may answer each request from a different
-  process. Response headers, including the CSP, are in `next.config.ts`.
-- Local sign-in must be switched off (`ALLOW_DEV_LOGIN=false`) before this goes
-  anywhere public. It is disabled automatically in production builds.
-- **Restart `npm run dev` after any schema change.** Changing
-  `prisma/schema.prisma` means `prisma db push && prisma generate`, and a
-  running dev server keeps the old generated client in memory — the symptom is
-  `Cannot read properties of undefined (reading 'findMany')` on the new model.
-# college-theatre-file-manager
-# college-theatre-file-manager
-# college-theatre-file-manager
-# college-theatre-file-manager
-# college-theatre-file-manager
-# college-theatre-file-manager
-# college-theatre-file-manager
-# college-theatre-file-manager
+Before deployment, configure real sign-in and provider accounts, disable local development sign-in, and follow the [deployment and operations guide](SETUP.md). Local sign-in is also disabled by the application in production mode.
