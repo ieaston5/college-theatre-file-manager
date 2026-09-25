@@ -22,7 +22,7 @@ const FILE_FIELDS =
   // the children belong to the target. Following it is the fix.
   // capabilities.canListChildren: whether this account may enumerate the
   // folder at all — the difference between "empty" and "not allowed to look".
-  "shortcutDetails(targetId,targetMimeType),capabilities(canListChildren,canAddChildren,canEdit)," +
+  "shortcutDetails(targetId,targetMimeType),capabilities(canListChildren,canAddChildren,canEdit,canCopy)," +
   // ownedByMe / sharedWithMeTime answer the question that matters when a
   // folder reads as empty: is Drive treating it as *shared with this account*
   // at all? A folder reachable only by link can be fetched by id but is not in
@@ -48,6 +48,7 @@ function toInfo(file: {
     canListChildren?: boolean | null;
     canAddChildren?: boolean | null;
     canEdit?: boolean | null;
+    canCopy?: boolean | null;
   } | null;
   ownedByMe?: boolean | null;
   sharedWithMeTime?: string | null;
@@ -67,6 +68,7 @@ function toInfo(file: {
     appProperties: file.appProperties ?? null,
     shortcutTargetId: file.shortcutDetails?.targetId ?? null,
     canListChildren: file.capabilities?.canListChildren ?? null,
+    canCopy: file.capabilities?.canCopy ?? null,
     ownedByMe: file.ownedByMe ?? null,
     sharedWithMeTime: file.sharedWithMeTime ?? null,
     driveId: file.driveId ?? null,

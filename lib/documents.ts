@@ -5,6 +5,7 @@ import { env } from "./env";
 import { getConfig, getDriveAccount } from "./config";
 import { recordAudit } from "./audit";
 import { driveProvider, resolveFolder } from "./google";
+import { resolveTemplateFile } from "./templates";
 import type { DocHeader, SharingPlan, SharingResult } from "./google/types";
 import {
   CANVA_FORMAT_META,
@@ -448,6 +449,18 @@ export async function createDocument(
   if (input.productionId && !production) throw new Error("That production no longer exists.");
   assertVisibilityAllowed(category, input.visibility);
 
+  if (input.templateId && (!template || template.archived)) {
+    throw new Error("That template is no longer available. Reload the page and choose another template.");
+  }
+  if (template && (template.docType !== input.docType || (template.categoryId && template.categoryId !== category.id))) {
+    throw new Error("That template does not match the selected file type or category. Choose another template.");
+  }
+  // Recheck existing templates: sharing, trash status, and copy restrictions
+  // may have changed since an admin saved them. Do this before any writes.
+  const templateFile = template
+    ? await resolveTemplateFile(driveProvider(), template.googleFileId, input.docType)
+    : null;
+
   const warnings: string[] = [];
 
   // The same string names the file in Drive and the document on the hub.
@@ -502,7 +515,7 @@ export async function createDocument(
       name,
       docType: input.docType,
       parentFolderId: folderId,
-      templateFileId: template?.googleFileId ?? null,
+      templateFileId: templateFile?.id ?? null,
       description: [
         input.description,
         `${config.orgName} Hub · ${category.name}${production ? ` · ${production.name}` : ""}`,

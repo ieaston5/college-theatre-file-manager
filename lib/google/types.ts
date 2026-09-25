@@ -27,6 +27,8 @@ export type DriveFileInfo = {
   driveId?: string | null;
   /** Whether this account may enumerate the folder. null when unknown. */
   canListChildren?: boolean | null;
+  /** Whether the connected account can copy this file. null when unknown. */
+  canCopy?: boolean | null;
   /** Whether the hub's own account owns this. null when unknown. */
   ownedByMe?: boolean | null;
   /**

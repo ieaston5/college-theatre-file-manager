@@ -18,6 +18,7 @@ import {
 import { isSimulatedDriveId } from "@/lib/google/oauth";
 import { extractDriveFileId, pluralize, slugify } from "@/lib/utils";
 import { env } from "@/lib/env";
+import { resolveTemplateFile } from "@/lib/templates";
 import { ROLE_META } from "@/lib/constants";
 import { boardWelcome, sendEmail } from "@/lib/email";
 import { kickSharingQueue, queueAllSharing, queueCompanySharing } from "@/lib/sharing";
@@ -245,22 +246,15 @@ export async function saveTemplateAction(_prev: ActionState, form: FormData): Pr
       };
     }
 
-    // Make sure the hub's account can actually read the template.
+    // Reading a file does not guarantee it can be copied as this type.
     const warnings: string[] = [];
-    const file = await driveProvider().getFile(fileId);
-    if (!file) {
-      const account = await prisma.driveAccount.findUnique({ where: { id: "singleton" } });
-      return {
-        error: `The hub's Google account (${account?.email ?? "not connected"}) cannot open that template.`,
-        hint: "Share the template file with that address, at least as a viewer, then save again.",
-      };
-    }
+    const file = await resolveTemplateFile(driveProvider(), fileId, parsed.data.docType);
 
     const common = {
       name: parsed.data.name,
       description: parsed.data.description ?? null,
       docType: parsed.data.docType,
-      googleFileId: fileId,
+      googleFileId: file.id,
       categoryId: parsed.data.categoryId ?? null,
     };
     const template = parsed.data.id

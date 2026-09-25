@@ -27,7 +27,7 @@ function matches(row: any, where: any): boolean {
     return matches(value, condition);
   });
 }
-for (const model of ["orgConfig", "document", "category", "production", "driveAccount", "user", "documentShare", "productionMember", "auditLog", "checklistItem", "checklistTemplateItem"]) {
+for (const model of ["orgConfig", "document", "template", "category", "production", "driveAccount", "user", "documentShare", "productionMember", "auditLog", "checklistItem", "checklistTemplateItem"]) {
   fake[model] = {};
   for (const op of ["findUnique", "findUniqueOrThrow", "findFirst", "findMany", "count", "update", "updateMany", "create", "createMany", "groupBy"]) {
     fake[model][op] = async (args: any = {}) => {
@@ -587,4 +587,70 @@ test("new upload registration returns with durable metadata and sharing work pen
   assert.equal(result.document.id, "upload_fast-upload");
   assert(result.document.sharingDirtyAt);
   assert.equal(result.document.driveMetadataDirty, true);
+});
+
+test("template creation rejects stale or mismatched selections before reserving a document", async () => {
+  const input = { title: "Report", docType: "DOC", categoryId: "scripts", visibility: "BOARD", templateId: "template" } as const;
+  for (const row of [null,
+    { id: "template", docType: "DOC", archived: true },
+    { id: "template", docType: "SHEET", archived: false },
+    { id: "template", docType: "DOC", archived: false, categoryId: "other" },
+  ]) {
+    tables.template = row ? [row] : [];
+    await assert.rejects(docs.createDocument(actor, input), /template.*(no longer available|does not match)/);
+    assert.equal(calls.some(c => c.model === "document" && c.op === "create"), false);
+  }
+});
+
+test("template creation checks copy access before any document or folder writes", async () => {
+  tables.template = [{ id: "template", docType: "DOC", archived: false, googleFileId: "source" }];
+  const provider = google.driveProvider();
+  const original = provider.getFile;
+  provider.getFile = async () => ({ id: "source", name: "Report", mimeType: "application/vnd.google-apps.document", webViewLink: "", canCopy: false });
+  try {
+    await assert.rejects(docs.createDocument(actor, {
+      title: "Report", docType: "DOC", categoryId: "scripts", visibility: "BOARD", templateId: "template",
+    }), /not allowed.*copy/);
+    assert.equal(calls.some(c => ["create", "update", "createMany", "updateMany"].includes(c.op)), false);
+  } finally { provider.getFile = original; }
+});
+
+test("real Drive metadata includes the connected account's copy capability", async () => {
+  const provider: any = new Real();
+  provider.drive = async () => ({ files: { get: async (args: any) => {
+    assert.match(args.fields, /canCopy/);
+    return { data: { id: "source", capabilities: { canCopy: false } } };
+  } } });
+  assert.equal((await provider.getFile("source")).canCopy, false);
+});
+
+test("creating from a saved shortcut copies its original file and records the resulting document", async () => {
+  tables.template = [{ id: "template", docType: "DOC", archived: false, googleFileId: "shortcut" }];
+  const provider = google.driveProvider();
+  const getFile = provider.getFile;
+  const createFile = provider.createDocument;
+  const createRecord = fake.document.create;
+  let copiedId: string | null | undefined;
+  fake.document.create = async (args: any) => createRecord({ ...args, data: { id: "new-document", ...args.data } });
+  provider.getFile = async (id) => ({
+    id, name: "Report", webViewLink: "", canCopy: true,
+    mimeType: id === "shortcut" ? "application/vnd.google-apps.shortcut" : "application/vnd.google-apps.document",
+    shortcutTargetId: id === "shortcut" ? "original" : null,
+  });
+  provider.createDocument = async (input) => {
+    copiedId = input.templateFileId;
+    return { id: "copy", name: input.name, mimeType: "application/vnd.google-apps.document", webViewLink: "https://docs.google.com/document/d/copy/edit" };
+  };
+  try {
+    const result = await docs.createDocument(actor, {
+      title: "Report", docType: "DOC", categoryId: "scripts", visibility: "BOARD", templateId: "template",
+    });
+    assert.equal(copiedId, "original");
+    assert.equal(result.document.googleFileId, "copy");
+    assert.equal(JSON.parse(result.document.metadata!).templateId, "template");
+  } finally {
+    provider.getFile = getFile;
+    provider.createDocument = createFile;
+    fake.document.create = createRecord;
+  }
 });
